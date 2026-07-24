@@ -166,7 +166,7 @@ Barlow 高效编码假说#cite(<barlow1961possible>)：感觉系统应以最小�
 
 - *Gabor 小波变换作为默认前端*：V1 简单细胞的感受野可精确建模为不同方向、空间频率、相位的 Gabor 滤波器#cite(<jones1987evaluation>)。稀疏编码理论证明，在自然图像统计下学习最优基函数会自发收敛为 Gabor 型滤波器#cite(<olshausen1996emergence>)——Gabor 分解本身即是自然图像先验的内化：$1/f$ 功率谱、尺度不变性与边缘共圆性统计被编码于滤波器的参数选择中。工程实现上，Freeman & Adelson#cite(<freeman1991design>)的可操纵滤波器理论为高效多方向 Gabor 滤波提供了计算基础。Kovesi#cite(<kovesi1999image>)的相位一致性理论进一步表明：边缘不依赖于局部幅度响应，而体现为不同尺度傅里叶分量的相位对齐——Gabor 滤波器组输出的相位信息为此类特征检测提供了天然适配。
 - *色度与亮度通道分离*：视网膜与 LGN 将信号分解为亮度与色度拮抗通路#cite(<livingstone1984anatomy>)。采用色相-饱和度复数表示 $Z = S dot e^(i H)$，使色度独立于亮度，为颜色恒常性、反射率恒常性（@光学先验）与半透明解耦（@半透明与分层先验）提供特征基底。该复数编码在数学上承袭 Felsberg & Sommer#cite(<felsberg2001monogenic>)的单演信号（monogenic signal）思路——将多维视觉信号分解为局部幅度、相位与方向的统一表征。
-- *@光学先验 的特征层级实现*：Retinex 中心-环绕对比归一化（Land & McCann 1971）、白平衡校正及光源上方先验的方向性增益调制，均在特征层而非像素层实施。非经典感受野的环绕抑制#cite(<grigorescu2003contour>)为此类局部归一化提供了直接的神经对应，与 divisive normalization 的规范计算理论#cite(<heeger1992normalization>)；#cite(<carandini2012normalization>)一致。
+- *@光学先验 的特征层级实现*：Retinex 中心-环绕对比归一化（Land & McCann 1971）、白平衡校正及光源上方先验的方向性增益调制，均在特征层而非像素层实施。非经典感受野的环绕抑制#cite(<grigorescu2003contour>)为此类局部归一化提供了直接的神经对应，与 divisive normalization 的规范计算理论#cite(<heeger1992normalization>)#cite(<carandini2012normalization>)一致。
 
 == 知觉组织层
 
