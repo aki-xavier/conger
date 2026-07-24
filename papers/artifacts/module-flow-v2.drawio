@@ -1,0 +1,94 @@
+<mxfile>
+  <diagram id="autolayout" name="Page-1">
+    <mxGraphModel dx="800" dy="600" grid="1" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="1" pageScale="1" pageWidth="850" pageHeight="1100" math="0" shadow="0">
+      <root>
+        <mxCell id="0"/>
+        <mxCell id="1" parent="0"/>
+        <mxCell id="group_0" value="depth" style="rounded=0;whiteSpace=wrap;html=1;fillColor=none;strokeColor=#d79b00;fontColor=#d79b00;verticalAlign=top;fontStyle=2;dashed=1;" vertex="1" parent="1">
+          <mxGeometry x="12" y="212" width="466" height="151" as="geometry"/>
+        </mxCell>
+        <mxCell id="group_1" value="早期处理" style="rounded=0;whiteSpace=wrap;html=1;fillColor=none;strokeColor=#6c8ebf;fontColor=#6c8ebf;verticalAlign=top;fontStyle=2;dashed=1;" vertex="1" parent="1">
+          <mxGeometry x="36" y="6" width="198" height="193" as="geometry"/>
+        </mxCell>
+        <mxCell id="group_2" value="2.5D 草图" style="rounded=0;whiteSpace=wrap;html=1;fillColor=none;strokeColor=#9673a6;fontColor=#9673a6;verticalAlign=top;fontStyle=2;dashed=1;" vertex="1" parent="1">
+          <mxGeometry x="266" y="366" width="198" height="103" as="geometry"/>
+        </mxCell>
+        <mxCell id="group_3" value="输出" style="rounded=0;whiteSpace=wrap;html=1;fillColor=none;strokeColor=#d6b656;fontColor=#d6b656;verticalAlign=top;fontStyle=2;dashed=1;" vertex="1" parent="1">
+          <mxGeometry x="486" y="236" width="198" height="233" as="geometry"/>
+        </mxCell>
+        <mxCell id="group_4" value="perception" style="rounded=0;whiteSpace=wrap;html=1;fillColor=none;strokeColor=#82b366;fontColor=#82b366;verticalAlign=top;fontStyle=2;dashed=1;" vertex="1" parent="1">
+          <mxGeometry x="266" y="476" width="198" height="103" as="geometry"/>
+        </mxCell>
+        <mxCell id="group_5" value="单目通路&#xa;(始终可用)" style="rounded=0;whiteSpace=wrap;html=1;fillColor=none;strokeColor=#d79b00;fontColor=#d79b00;verticalAlign=top;fontStyle=2;dashed=1;" vertex="1" parent="group_0">
+          <mxGeometry x="24" y="24" width="198" height="103" as="geometry"/>
+        </mxCell>
+        <mxCell id="group_6" value="双目通路&#xa;(增强精度)" style="rounded=0;whiteSpace=wrap;html=1;fillColor=none;strokeColor=#d79b00;fontColor=#d79b00;verticalAlign=top;fontStyle=2;dashed=1;" vertex="1" parent="group_0">
+          <mxGeometry x="244" y="24" width="198" height="103" as="geometry"/>
+        </mxCell>
+        <mxCell id="feat" value="单眼特征层&#xa;(Monocular Feature)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#dae8fc;strokeColor=#6c8ebf;" vertex="1" parent="group_1">
+          <mxGeometry x="24" y="24" width="150" height="55" as="geometry"/>
+        </mxCell>
+        <mxCell id="grouping" value="知觉组织层&#xa;(Perceptual Grouping)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#dae8fc;strokeColor=#6c8ebf;" vertex="1" parent="group_1">
+          <mxGeometry x="24" y="114" width="150" height="55" as="geometry"/>
+        </mxCell>
+        <mxCell id="seg" value="场景分割层&#xa;(Scene Segmentation)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#e1d5e7;strokeColor=#9673a6;" vertex="1" parent="group_4">
+          <mxGeometry x="24" y="24" width="150" height="55" as="geometry"/>
+        </mxCell>
+        <mxCell id="mono" value="单目深度线索&#xa;(Monocular Cues)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#d5e8d4;strokeColor=#82b366;" vertex="1" parent="group_5">
+          <mxGeometry x="24" y="24" width="150" height="55" as="geometry"/>
+        </mxCell>
+        <mxCell id="stereo" value="双眼视差估计&#xa;(Stereo Disparity)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffe6cc;strokeColor=#d79b00;" vertex="1" parent="group_6">
+          <mxGeometry x="24" y="24" width="150" height="55" as="geometry"/>
+        </mxCell>
+        <mxCell id="fusion" value="深度融合层&#xa;(Depth Fusion)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f8cecc;strokeColor=#b85450;" vertex="1" parent="group_2">
+          <mxGeometry x="24" y="24" width="150" height="55" as="geometry"/>
+        </mxCell>
+        <mxCell id="temporal" value="时空累积层&#xa;(Temporal Fusion)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#dae8fc;strokeColor=#6c8ebf;" vertex="1" parent="group_3">
+          <mxGeometry x="24" y="24" width="150" height="55" as="geometry"/>
+        </mxCell>
+        <mxCell id="recon" value="三维重建层&#xa;(3D Reconstruction)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f8cecc;strokeColor=#b85450;" vertex="1" parent="group_3">
+          <mxGeometry x="24" y="154" width="150" height="55" as="geometry"/>
+        </mxCell>
+        <mxCell id="e0" value="" style="endArrow=classic;html=1;rounded=0;" edge="1" parent="1" source="feat" target="grouping">
+          <mxGeometry relative="1" as="geometry"><Array as="points"><mxPoint x="130" y="90"/><mxPoint x="130" y="110"/></Array></mxGeometry>
+        </mxCell>
+        <mxCell id="e1" value="" style="endArrow=classic;html=1;rounded=0;" edge="1" parent="1" source="grouping" target="seg">
+          <mxGeometry relative="1" as="geometry"><Array as="points"><mxPoint x="230" y="140"/><mxPoint x="240" y="140"/><mxPoint x="240" y="140"/><mxPoint x="240" y="140"/><mxPoint x="240" y="530"/><mxPoint x="240" y="530"/><mxPoint x="240" y="530"/><mxPoint x="280" y="530"/></Array></mxGeometry>
+        </mxCell>
+        <mxCell id="e2" value="" style="endArrow=classic;html=1;rounded=0;" edge="1" parent="1" source="grouping" target="mono">
+          <mxGeometry relative="1" as="geometry"><Array as="points"><mxPoint x="130" y="180"/><mxPoint x="130" y="250"/></Array></mxGeometry>
+        </mxCell>
+        <mxCell id="e3" value="" style="endArrow=classic;html=1;rounded=0;" edge="1" parent="1" source="grouping" target="stereo">
+          <mxGeometry relative="1" as="geometry"><Array as="points"><mxPoint x="270" y="160"/><mxPoint x="350" y="160"/><mxPoint x="350" y="160"/><mxPoint x="350" y="160"/><mxPoint x="350" y="250"/></Array></mxGeometry>
+        </mxCell>
+        <mxCell id="e4" value="" style="endArrow=classic;html=1;rounded=0;" edge="1" parent="1" source="mono" target="fusion">
+          <mxGeometry relative="1" as="geometry"><Array as="points"><mxPoint x="130" y="350"/><mxPoint x="130" y="420"/><mxPoint x="130" y="420"/><mxPoint x="130" y="420"/><mxPoint x="280" y="420"/></Array></mxGeometry>
+        </mxCell>
+        <mxCell id="e5" value="" style="endArrow=classic;html=1;rounded=0;" edge="1" parent="1" source="stereo" target="fusion">
+          <mxGeometry relative="1" as="geometry"><Array as="points"><mxPoint x="360" y="310"/><mxPoint x="360" y="380"/></Array></mxGeometry>
+        </mxCell>
+        <mxCell id="e6" value="语义先验" style="endArrow=classic;html=1;rounded=0;" edge="1" parent="1" source="seg" target="fusion">
+          <mxGeometry relative="1" as="geometry"><Array as="points"><mxPoint x="390" y="500"/><mxPoint x="390" y="460"/></Array></mxGeometry>
+        </mxCell>
+        <mxCell id="e7" value="深度反馈" style="dashed=1;strokeColor=#999999;endArrow=classic;html=1;" edge="1" parent="1" source="fusion" target="seg">
+          <mxGeometry relative="1" as="geometry"><Array as="points"><mxPoint x="340" y="450"/><mxPoint x="340" y="490"/></Array></mxGeometry>
+        </mxCell>
+        <mxCell id="e8" value="" style="endArrow=classic;html=1;rounded=0;" edge="1" parent="1" source="fusion" target="temporal">
+          <mxGeometry relative="1" as="geometry"><Array as="points"><mxPoint x="430" y="350"/><mxPoint x="430" y="280"/><mxPoint x="430" y="280"/><mxPoint x="430" y="280"/><mxPoint x="500" y="280"/></Array></mxGeometry>
+        </mxCell>
+        <mxCell id="e9" value="运动视差" style="dashed=1;strokeColor=#999999;endArrow=classic;html=1;" edge="1" parent="1" source="temporal" target="fusion">
+          <mxGeometry relative="1" as="geometry"><Array as="points"><mxPoint x="470" y="300"/><mxPoint x="440" y="300"/><mxPoint x="440" y="300"/><mxPoint x="440" y="300"/><mxPoint x="440" y="380"/></Array></mxGeometry>
+        </mxCell>
+        <mxCell id="e10" value="" style="endArrow=classic;html=1;rounded=0;" edge="1" parent="1" source="temporal" target="recon">
+          <mxGeometry relative="1" as="geometry"><Array as="points"><mxPoint x="580" y="310"/><mxPoint x="580" y="380"/></Array></mxGeometry>
+        </mxCell>
+        <mxCell id="e11" value="预测编码" style="dashed=1;strokeColor=#999999;endArrow=classic;html=1;" edge="1" parent="1" source="recon" target="fusion">
+          <mxGeometry relative="1" as="geometry"><Array as="points"><mxPoint x="510" y="420"/><mxPoint x="450" y="420"/></Array></mxGeometry>
+        </mxCell>
+        <mxCell id="e12" value="预测编码" style="dashed=1;strokeColor=#999999;endArrow=classic;html=1;" edge="1" parent="1" source="recon" target="seg">
+          <mxGeometry relative="1" as="geometry"><Array as="points"><mxPoint x="580" y="480"/><mxPoint x="580" y="530"/><mxPoint x="580" y="530"/><mxPoint x="580" y="530"/><mxPoint x="450" y="530"/></Array></mxGeometry>
+        </mxCell>
+      </root>
+    </mxGraphModel>
+  </diagram>
+</mxfile>
