@@ -101,7 +101,7 @@ $ Ŝ = "argmax"_S P(S|I) = "argmax"_S P(I|S)·P(S) $
   空心面具错觉（Ramachandran 1988）是最强证据——凹面具因与上方
   光照一致而被强制感知为凸脸。
 - *单一光源先验*：尽管真实场景多光源，大脑倾向假设单一主光源，
-  大幅简化 shape-from-shading（#cite(<horn1970shape>)）。
+  大幅简化 shape-from-shading#cite(<horn1970shape>)。
 - *白平衡/光源颜色恒常性*：假设光源接近中性色，整体色相偏移会
   被自动校正（Land & McCann 1971 Retinex）。
 - *反射率恒常性（Albedo constancy）*：亮度变化优先解释为形状转折
@@ -115,7 +115,7 @@ $ Ŝ = "argmax"_S P(S|I) = "argmax"_S P(I|S)·P(S) $
 - *重力感*：物体受重力约束，大脑自动寻找支撑关系；底部无支撑的物体触发"挂在哪里/正在掉落"的推断。
 - *视平线与高度*：地平面上的物体越接近视平线越远。
 - *大气透视*：远处物体对比度低、偏蓝、边缘模糊。
-- *立体视差与运动视差*：双眼视差（#cite(<cumming1997neural>)）与头动产生的相对运动是最直接的度量深度线索。
+- *立体视差与运动视差*：双眼视差#cite(<cumming1997neural>)与头动产生的相对运动是最直接的度量深度线索。
 - *遮挡逻辑*：轮廓 T 结——A 的轮廓切断 B，则 A 在前。这是最稳固的深度顺序判据，也是 Pb 边界图的语义基础。
 
 === 运动与时间先验 <运动与时间先验>
@@ -133,17 +133,17 @@ $ Ŝ = "argmax"_S P(S|I) = "argmax"_S P(I|S)·P(S) $
 
 先验在视觉层级#cite(<felleman1991distributed>)不同水平上实现：
 
-- *早期视觉（V1, V2）*：局部方向与空间频率滤波（#cite(<hubel1962receptive>)；Gabor 感受野模型 #cite(<jones1987evaluation>)）；横向连接实现局部连续性约束，关联场（association field, #cite(<field1993contour>)）促进共圆边缘整合成长轮廓；非经典感受野抑制纹理背景、凸显轮廓（#cite(<grigorescu2003contour>)）。
+- *早期视觉（V1, V2）*：局部方向与空间频率滤波#cite(<hubel1962receptive>)；Gabor 感受野模型 #cite(<jones1987evaluation>)；横向连接实现局部连续性约束，关联场（association field, #cite(<field1993contour>)）促进共圆边缘整合成长轮廓；非经典感受野抑制纹理背景、凸显轮廓#cite(<grigorescu2003contour>)。
 - *中层视觉（V3, V4, MT）*：形状、运动、深度整合；更大空间范围的约束传播；表面表征形成。
-- *高层视觉（IT, PPA, FFA）*：物体识别、语义先验整合、记忆与预期调制。背侧通路（where/how）处理空间与运动，腹侧通路（what）处理识别（#cite(<ungerleider1982two>)；#cite(<goodale1992separate>) 进一步提出"感知"与"行动"的功能二分）。Serre et al.#cite(<serre2007feedforward>)证明纯前馈层级架构足以解释快速视觉分类，为层级处理的计算充分性提供了关键证据。
+- *高层视觉（IT, PPA, FFA）*：物体识别、语义先验整合、记忆与预期调制。背侧通路（where/how）处理空间与运动，腹侧通路（what）处理识别#cite(<ungerleider1982two>)；#cite(<goodale1992separate>) 进一步提出"感知"与"行动"的功能二分。Serre et al.#cite(<serre2007feedforward>)证明纯前馈层级架构足以解释快速视觉分类，为层级处理的计算充分性提供了关键证据。
 
 == 自上而下反馈与预测编码 <自上而下反馈与预测编码>
 
-先验通过反馈连接实现。预测编码框架（#cite(<rao1999predictive>)）：高层生成对低层信号的预测，预测误差向上传播，先验体现为生成模型的参数。证据：反馈连接病变损害形状知觉；注意与预期调制早期视觉响应；模糊刺激下高层区域 fMRI 活动增强。
+先验通过反馈连接实现。预测编码框架#cite(<rao1999predictive>)：高层生成对低层信号的预测，预测误差向上传播，先验体现为生成模型的参数。证据：反馈连接病变损害形状知觉；注意与预期调制早期视觉响应；模糊刺激下高层区域 fMRI 活动增强。
 
 == 稀疏编码与自然图像统计
 
-Barlow 高效编码假说（#cite(<barlow1961possible>)）：感觉系统应以最小冗余表征输入。Olshausen & Field#cite(<olshausen1996emergence>)证明在自然图像统计下学习稀疏码，基函数自发收敛为类 V1 简单细胞的局部化、带方向、带空间频率的 Gabor 型滤波器——即 V1 的"硬件架构"本身就是自然图像先验的物化。自然图像的 1/f 功率谱、尺度不变性、边缘共圆性统计构成可被内化的先验分布（Simoncelli & Olshausen 2001 综述）。
+Barlow 高效编码假说#cite(<barlow1961possible>)：感觉系统应以最小冗余表征输入。Olshausen & Field#cite(<olshausen1996emergence>)证明在自然图像统计下学习稀疏码，基函数自发收敛为类 V1 简单细胞的局部化、带方向、带空间频率的 Gabor 型滤波器——即 V1 的"硬件架构"本身就是自然图像先验的物化。自然图像的 1/f 功率谱、尺度不变性、边缘共圆性统计构成可被内化的先验分布（Simoncelli & Olshausen 2001 综述）。
 
 == 可塑性与个体差异
 
@@ -164,9 +164,9 @@ Barlow 高效编码假说（#cite(<barlow1961possible>)）：感觉系统应以�
 
 单眼特征层对应早期视觉皮层（V1/V2）的局部滤波功能，对左右眼图像分别独立处理，提取多尺度、多方向的低级特征表征。它是整条管线的计算基底，同时服务于两条深度通路。
 
-- *Gabor 小波变换作为默认前端*：V1 简单细胞的感受野可精确建模为不同方向、空间频率、相位的 Gabor 滤波器（#cite(<jones1987evaluation>)）。稀疏编码理论证明，在自然图像统计下学习最优基函数会自发收敛为 Gabor 型滤波器（#cite(<olshausen1996emergence>)）——Gabor 分解本身即是自然图像先验的内化：$1/f$ 功率谱、尺度不变性与边缘共圆性统计被编码于滤波器的参数选择中。工程实现上，Freeman & Adelson#cite(<freeman1991design>)的可操纵滤波器理论为高效多方向 Gabor 滤波提供了计算基础。Kovesi#cite(<kovesi1999image>)的相位一致性理论进一步表明：边缘不依赖于局部幅度响应，而体现为不同尺度傅里叶分量的相位对齐——Gabor 滤波器组输出的相位信息为此类特征检测提供了天然适配。
-- *色度与亮度通道分离*：视网膜与 LGN 将信号分解为亮度与色度拮抗通路（#cite(<livingstone1984anatomy>)）。采用色相-饱和度复数表示 $Z = S dot e^(i H)$，使色度独立于亮度，为颜色恒常性、反射率恒常性（@光学先验）与半透明解耦（@半透明与分层先验）提供特征基底。该复数编码在数学上承袭 Felsberg & Sommer#cite(<felsberg2001monogenic>)的单演信号（monogenic signal）思路——将多维视觉信号分解为局部幅度、相位与方向的统一表征。
-- *@光学先验 的特征层级实现*：Retinex 中心-环绕对比归一化（Land & McCann 1971）、白平衡校正及光源上方先验的方向性增益调制，均在特征层而非像素层实施。非经典感受野的环绕抑制#cite(<grigorescu2003contour>)为此类局部归一化提供了直接的神经对应，与 divisive normalization 的规范计算理论（#cite(<heeger1992normalization>)；#cite(<carandini2012normalization>)）一致。
+- *Gabor 小波变换作为默认前端*：V1 简单细胞的感受野可精确建模为不同方向、空间频率、相位的 Gabor 滤波器#cite(<jones1987evaluation>)。稀疏编码理论证明，在自然图像统计下学习最优基函数会自发收敛为 Gabor 型滤波器#cite(<olshausen1996emergence>)——Gabor 分解本身即是自然图像先验的内化：$1/f$ 功率谱、尺度不变性与边缘共圆性统计被编码于滤波器的参数选择中。工程实现上，Freeman & Adelson#cite(<freeman1991design>)的可操纵滤波器理论为高效多方向 Gabor 滤波提供了计算基础。Kovesi#cite(<kovesi1999image>)的相位一致性理论进一步表明：边缘不依赖于局部幅度响应，而体现为不同尺度傅里叶分量的相位对齐——Gabor 滤波器组输出的相位信息为此类特征检测提供了天然适配。
+- *色度与亮度通道分离*：视网膜与 LGN 将信号分解为亮度与色度拮抗通路#cite(<livingstone1984anatomy>)。采用色相-饱和度复数表示 $Z = S dot e^(i H)$，使色度独立于亮度，为颜色恒常性、反射率恒常性（@光学先验）与半透明解耦（@半透明与分层先验）提供特征基底。该复数编码在数学上承袭 Felsberg & Sommer#cite(<felsberg2001monogenic>)的单演信号（monogenic signal）思路——将多维视觉信号分解为局部幅度、相位与方向的统一表征。
+- *@光学先验 的特征层级实现*：Retinex 中心-环绕对比归一化（Land & McCann 1971）、白平衡校正及光源上方先验的方向性增益调制，均在特征层而非像素层实施。非经典感受野的环绕抑制#cite(<grigorescu2003contour>)为此类局部归一化提供了直接的神经对应，与 divisive normalization 的规范计算理论#cite(<heeger1992normalization>)；#cite(<carandini2012normalization>)一致。
 
 == 知觉组织层
 
@@ -201,7 +201,7 @@ Barlow 高效编码假说（#cite(<barlow1961possible>)）：感觉系统应以�
 
 双眼视差估计是并行架构中的双目深度通路。它将旧架构中的"双眼特征对应"与"双眼汇聚层"合并为一个端到端模块。该通路仅在双目输入可用时激活，其输出是高质量的视差图；在单目场景下该通路自然旁路，不影响系统运行。
 
-- *稀疏到稠密的匹配策略*：先在高置信度的角点、边缘端点与 T 结上建立稀疏对应（利用知觉组织层输出的稳定基元），再以此为锚点扩散至全图稠密匹配。V1 中双眼细胞的视差调谐特性（#cite(<ohzawa1990stereoscopic>)；#cite(<cumming1997neural>)）是该策略的神经对应。
+- *稀疏到稠密的匹配策略*：先在高置信度的角点、边缘端点与 T 结上建立稀疏对应（利用知觉组织层输出的稳定基元），再以此为锚点扩散至全图稠密匹配。V1 中双眼细胞的视差调谐特性#cite(<ohzawa1990stereoscopic>)；#cite(<cumming1997neural>)是该策略的神经对应。
 - *极线约束与唯一性先验*：对极几何将二维搜索降为一维。唯一性先验（每个左眼特征至多匹配一个右眼特征）施加稀疏正则化。@几何与结构先验 中的紧凑性与平滑性先验（$E = E_"data" + lambda E_"smooth"$）使无纹理区域可解。
 - *多尺度粗到精策略*：与 Gabor 小波组的多尺度特性自然衔接——粗尺度确定大范围视差，细尺度逐级精化。
 - *通路独立性*：本通路接受知觉组织层的通用基元作为输入，输出为视差图。其停用（单目输入）不影响单目深度通路的正常运行——下游深度融合层会自然地将双目线索的可靠性权重降为零。
