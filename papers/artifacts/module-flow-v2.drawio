@@ -7,16 +7,16 @@
         <mxCell id="group_0" value="depth" style="rounded=0;whiteSpace=wrap;html=1;fillColor=none;strokeColor=#d79b00;fontColor=#d79b00;verticalAlign=top;fontStyle=2;dashed=1;" vertex="1" parent="1">
           <mxGeometry x="302" y="212" width="466" height="151" as="geometry"/>
         </mxCell>
-        <mxCell id="group_1" value="早期处理" style="rounded=0;whiteSpace=wrap;html=1;fillColor=none;strokeColor=#6c8ebf;fontColor=#6c8ebf;verticalAlign=top;fontStyle=2;dashed=1;" vertex="1" parent="1">
+        <mxCell id="group_1" value="早期处理&#xa;光学·几何·物理先验" style="rounded=0;whiteSpace=wrap;html=1;fillColor=none;strokeColor=#6c8ebf;fontColor=#6c8ebf;verticalAlign=top;fontStyle=2;dashed=1;" vertex="1" parent="1">
           <mxGeometry x="276" y="6" width="198" height="193" as="geometry"/>
         </mxCell>
         <mxCell id="group_2" value="2.5D 草图" style="rounded=0;whiteSpace=wrap;html=1;fillColor=none;strokeColor=#9673a6;fontColor=#9673a6;verticalAlign=top;fontStyle=2;dashed=1;" vertex="1" parent="1">
           <mxGeometry x="6" y="366" width="198" height="103" as="geometry"/>
         </mxCell>
-        <mxCell id="group_3" value="输出" style="rounded=0;whiteSpace=wrap;html=1;fillColor=none;strokeColor=#d6b656;fontColor=#d6b656;verticalAlign=top;fontStyle=2;dashed=1;" vertex="1" parent="1">
+        <mxCell id="group_3" value="运动·时间先验" style="rounded=0;whiteSpace=wrap;html=1;fillColor=none;strokeColor=#d6b656;fontColor=#d6b656;verticalAlign=top;fontStyle=2;dashed=1;" vertex="1" parent="1">
           <mxGeometry x="6" y="6" width="218" height="193" as="geometry"/>
         </mxCell>
-        <mxCell id="group_4" value="perception" style="rounded=0;whiteSpace=wrap;html=1;fillColor=none;strokeColor=#82b366;fontColor=#82b366;verticalAlign=top;fontStyle=2;dashed=1;" vertex="1" parent="1">
+        <mxCell id="group_4" value="语义·分层先验" style="rounded=0;whiteSpace=wrap;html=1;fillColor=none;strokeColor=#82b366;fontColor=#82b366;verticalAlign=top;fontStyle=2;dashed=1;" vertex="1" parent="1">
           <mxGeometry x="96" y="236" width="198" height="103" as="geometry"/>
         </mxCell>
         <mxCell id="group_5" value="单目通路&#xa;(始终可用)" style="rounded=0;whiteSpace=wrap;html=1;fillColor=none;strokeColor=#d79b00;fontColor=#d79b00;verticalAlign=top;fontStyle=2;dashed=1;" vertex="1" parent="group_0">
@@ -55,13 +55,13 @@
         <mxCell id="e1" value="" style="endArrow=classic;html=1;rounded=0;" edge="1" parent="1" source="grouping" target="seg">
           <mxGeometry relative="1" as="geometry"><Array as="points"><mxPoint x="330" y="220"/><mxPoint x="330" y="280"/><mxPoint x="330" y="280"/><mxPoint x="330" y="280"/><mxPoint x="280" y="280"/></Array></mxGeometry>
         </mxCell>
-        <mxCell id="e2" value="" style="endArrow=classic;html=1;rounded=0;" edge="1" parent="1" source="grouping" target="mono">
+        <mxCell id="e2" value="物理先验&#xa;(遮挡·大气透视)" style="endArrow=classic;html=1;rounded=0;" edge="1" parent="1" source="grouping" target="mono">
           <mxGeometry relative="1" as="geometry"><Array as="points"><mxPoint x="400" y="180"/><mxPoint x="400" y="250"/></Array></mxGeometry>
         </mxCell>
-        <mxCell id="e3" value="左右眼特征" style="endArrow=classic;html=1;rounded=0;" edge="1" parent="1" source="grouping" target="stereo">
+        <mxCell id="e3" value="几何先验&#xa;(平滑性·唯一性)" style="endArrow=classic;html=1;rounded=0;" edge="1" parent="1" source="grouping" target="stereo">
           <mxGeometry relative="1" as="geometry"><Array as="points"><mxPoint x="530" y="150"/><mxPoint x="650" y="150"/><mxPoint x="650" y="150"/><mxPoint x="650" y="150"/><mxPoint x="650" y="250"/></Array></mxGeometry>
         </mxCell>
-        <mxCell id="e4" value="语义先验" style="endArrow=classic;html=1;rounded=0;" edge="1" parent="1" source="seg" target="mono">
+        <mxCell id="e4" value="语义先验&#xa;(熟悉大小)" style="endArrow=classic;html=1;rounded=0;" edge="1" parent="1" source="seg" target="mono">
           <mxGeometry relative="1" as="geometry"><Array as="points"><mxPoint x="270" y="300"/><mxPoint x="340" y="300"/></Array></mxGeometry>
         </mxCell>
         <mxCell id="e5" value="" style="endArrow=classic;html=1;rounded=0;" edge="1" parent="1" source="mono" target="fusion">
@@ -70,7 +70,7 @@
         <mxCell id="e6" value="" style="endArrow=classic;html=1;rounded=0;" edge="1" parent="1" source="stereo" target="fusion">
           <mxGeometry relative="1" as="geometry"><Array as="points"><mxPoint x="650" y="360"/><mxPoint x="650" y="430"/><mxPoint x="650" y="430"/><mxPoint x="650" y="430"/><mxPoint x="190" y="430"/></Array></mxGeometry>
         </mxCell>
-        <mxCell id="e7" value="语义先验" style="endArrow=classic;html=1;rounded=0;" edge="1" parent="1" source="seg" target="fusion">
+        <mxCell id="e7" value="语义·分层先验&#xa;(类别模板·软分配)" style="endArrow=classic;html=1;rounded=0;" edge="1" parent="1" source="seg" target="fusion">
           <mxGeometry relative="1" as="geometry"><Array as="points"><mxPoint x="140" y="310"/><mxPoint x="140" y="380"/></Array></mxGeometry>
         </mxCell>
         <mxCell id="e8" value="深度反馈" style="dashed=1;strokeColor=#999999;endArrow=classic;html=1;" edge="1" parent="1" source="fusion" target="seg">
@@ -79,13 +79,13 @@
         <mxCell id="e9" value="" style="endArrow=classic;html=1;rounded=0;" edge="1" parent="1" source="fusion" target="temporal">
           <mxGeometry relative="1" as="geometry"><Array as="points"><mxPoint x="40" y="390"/><mxPoint x="40" y="100"/></Array></mxGeometry>
         </mxCell>
-        <mxCell id="e10" value="运动视差" style="dashed=1;strokeColor=#999999;endArrow=classic;html=1;" edge="1" parent="1" source="temporal" target="fusion">
+        <mxCell id="e10" value="运动先验&#xa;(视差)" style="dashed=1;strokeColor=#999999;endArrow=classic;html=1;" edge="1" parent="1" source="temporal" target="fusion">
           <mxGeometry relative="1" as="geometry"><Array as="points"><mxPoint x="40" y="90"/><mxPoint x="40" y="380"/></Array></mxGeometry>
         </mxCell>
         <mxCell id="e11" value="" style="endArrow=classic;html=1;rounded=0;" edge="1" parent="1" source="temporal" target="recon">
           <mxGeometry relative="1" as="geometry"><Array as="points"><mxPoint x="120" y="90"/><mxPoint x="120" y="110"/></Array></mxGeometry>
         </mxCell>
-        <mxCell id="e12" value="跨帧先验" style="dashed=1;strokeColor=#999999;endArrow=classic;html=1;" edge="1" parent="1" source="temporal" target="temporal">
+        <mxCell id="e12" value="时间先验&#xa;(一致性)" style="dashed=1;strokeColor=#999999;endArrow=classic;html=1;" edge="1" parent="1" source="temporal" target="temporal">
           <mxGeometry relative="1" as="geometry"><Array as="points"><mxPoint x="110" y="20"/><mxPoint x="110" y="10"/><mxPoint x="110" y="10"/><mxPoint x="110" y="10"/><mxPoint x="10" y="10"/><mxPoint x="10" y="10"/><mxPoint x="10" y="10"/><mxPoint x="10" y="110"/><mxPoint x="10" y="110"/><mxPoint x="10" y="110"/><mxPoint x="50" y="110"/><mxPoint x="50" y="110"/><mxPoint x="50" y="110"/><mxPoint x="50" y="100"/></Array></mxGeometry>
         </mxCell>
         <mxCell id="e13" value="预测编码" style="dashed=1;strokeColor=#999999;endArrow=classic;html=1;" edge="1" parent="1" source="recon" target="fusion">
