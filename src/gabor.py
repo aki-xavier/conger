@@ -49,14 +49,6 @@ class GaborOrientation:
             float(self.amplitude_at(s)[y, x].item()) for s in range(self.scale_size)
         ]
 
-    def orientation_spectrum(self, x: int, y: int) -> tuple[list[float], list[float]]:
-        """Frequency and amplitude at (x, y) across all scales."""
-        freqs = [1.0 / self.wavelengths[s] for s in range(self.scale_size)]
-        amps = [
-            float(self.amplitude_at(s)[y, x].item()) for s in range(self.scale_size)
-        ]
-        return freqs, amps
-
 
 class GaborWavelet:
     """2D Gabor wavelet filter bank via frequency-domain convolution.
