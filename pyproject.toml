@@ -9,3 +9,15 @@ dependencies = [
     "mlx>=0.32.0",
     "numpy>=2.5.1",
 ]
+
+# ═══════════════════════════════════════════════════════════════════════
+# pyright — static type checker (used by VS Code Pylance)
+# ═══════════════════════════════════════════════════════════════════════
+[tool.pyright]
+typeCheckingMode = "strict"
+pythonVersion = "3.14"
+reportMissingTypeStubs = false
+reportUnknownMemberType = false
+reportUnknownArgumentType = false
+reportUnknownVariableType = false
+reportUnknownParameterType = false

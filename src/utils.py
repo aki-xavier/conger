@@ -1,30 +1,28 @@
 import math
-from itertools import permutations
 from pathlib import Path
 
 import mlx.core as mx
 
+# def label_coherence(labels, Ny, Nx):
+#     """4-neighbour agreement rate (0..2) of a label map."""
+#     lab = labels.reshape(Ny, Nx)
+#     dh = (lab[:, 1:] == lab[:, :-1]).astype(mx.float32).mean()
+#     dv = (lab[1:, :] == lab[:-1, :]).astype(mx.float32).mean()
+#     return float(dh + dv)
 
-def label_coherence(labels, Ny, Nx):
-    """4-neighbour agreement rate (0..2) of a label map."""
-    lab = labels.reshape(Ny, Nx)
-    dh = (lab[:, 1:] == lab[:, :-1]).astype(mx.float32).mean()
-    dv = (lab[1:, :] == lab[:-1, :]).astype(mx.float32).mean()
-    return float(dh + dv)
 
-
-def remap_accuracy(labels_pred, gt):
-    """Best-match accuracy over all K! label permutations."""
-    lab = mx.array(labels_pred, dtype=mx.int32)
-    g = mx.array(gt, dtype=mx.int32)
-    best = 0.0
-    best_perm = None
-    for perm in permutations(range(int(mx.max(lab).item()) + 1)):
-        lut = mx.array(perm, dtype=mx.int32)
-        acc = float(mx.equal(lut[lab], g).astype(mx.float32).mean().item())
-        if acc > best:
-            best, best_perm = acc, perm
-    return best, best_perm
+# def remap_accuracy(labels_pred, gt):
+#     """Best-match accuracy over all K! label permutations."""
+#     lab = mx.array(labels_pred, dtype=mx.int32)
+#     g = mx.array(gt, dtype=mx.int32)
+#     best = 0.0
+#     best_perm = None
+#     for perm in permutations(range(int(mx.max(lab).item()) + 1)):
+#         lut = mx.array(perm, dtype=mx.int32)
+#         acc = float(mx.equal(lut[lab], g).astype(mx.float32).mean().item())
+#         if acc > best:
+#             best, best_perm = acc, perm
+#     return best, best_perm
 
 
 class Utils:
@@ -37,7 +35,7 @@ class Utils:
         return 2 * k / n
 
     @staticmethod
-    def freqgrid(shape: tuple[int, ...]) -> mx.array:
+    def freqgrid(shape: tuple[int, ...]) -> list[mx.array]:
         """Generate normalized frequency grids for a given height and width."""
         height, width = shape
         x = Utils.fftfreq(width)
@@ -96,7 +94,7 @@ class Utils:
         return mx.concatenate([black, ramp_2d, white], axis=1)
 
     @staticmethod
-    def make_grating(shape, wavelength, angle_rad, phase=0.0) -> mx.array:
+    def make_grating(shape, wavelength, angle_rad, phase=0.0) -> mx.array:  # type: ignore
         """Sinusoidal grating at given wavelength (px) and angle (rad)."""
         H, W = shape
         y = mx.arange(H, dtype=mx.float32)
@@ -106,7 +104,7 @@ class Utils:
         return mx.sin(2 * math.pi * xr / wavelength + phase).astype(mx.float32)
 
     @staticmethod
-    def make_texture_composite(size=128):
+    def make_texture_composite(size: int = 128):
         """4-quadrant composite for Gabor clustering test.
         TL: λ=8, 0° | TR: λ=24, 45° | BL: uniform noise | BR: flat 0.5.
         """
@@ -289,16 +287,16 @@ class Utils:
 
         # ── lightness map ──
         if l_case == "edge":
-            L = mx.where(mx.arange(W).reshape(1, -1) < W // 2, 0.3, 0.8)
-            L = mx.broadcast_to(L, (H, W)).astype(mx.float32)
+            l = mx.where(mx.arange(W).reshape(1, -1) < W // 2, 0.3, 0.8)
+            l = mx.broadcast_to(l, (H, W)).astype(mx.float32)
         elif l_case == "texture":
             lam = 16.0
-            X_ = mx.arange(W, dtype=mx.float32).reshape(1, -1)
-            L = 0.55 + 0.25 * mx.sin(2 * math.pi * (X_ - W / 2) / lam)
-            L = mx.broadcast_to(L, (H, W)).astype(mx.float32)
+            x = mx.arange(W, dtype=mx.float32).reshape(1, -1)
+            l = 0.55 + 0.25 * mx.sin(2 * math.pi * (x - W / 2) / lam)
+            l = mx.broadcast_to(l, (H, W)).astype(mx.float32)
         elif l_case == "smooth":
             rng = mx.random.key(17)
-            L = (
+            l = (
                 mx.full((H, W), 0.6, dtype=mx.float32)
                 + mx.random.normal(shape=(H, W), key=rng).astype(mx.float32) * 1e-4
             )
@@ -313,8 +311,8 @@ class Utils:
             sat = mx.full((H, W), 1.0, dtype=mx.float32)
         elif hs_case == "texture":
             lam = 16.0
-            X_ = mx.arange(W, dtype=mx.float32).reshape(1, -1)
-            hue_norm = 0.5 + 0.25 * mx.sin(2 * math.pi * (X_ - W / 2) / lam)
+            x = mx.arange(W, dtype=mx.float32).reshape(1, -1)
+            hue_norm = 0.5 + 0.25 * mx.sin(2 * math.pi * (x - W / 2) / lam)
             hue_norm = mx.broadcast_to(hue_norm, (H, W)).astype(mx.float32)
             sat = mx.full((H, W), 1.0, dtype=mx.float32)
         elif hs_case == "smooth":
@@ -328,12 +326,12 @@ class Utils:
         else:
             raise ValueError(f"unknown hs_case: {hs_case}")
 
-        hsl = mx.stack([hue_norm, sat, L], axis=-1).astype(mx.float32)
+        hsl = mx.stack([hue_norm, sat, l], axis=-1).astype(mx.float32)
         from color import Color  # lazy — avoids circular import
 
         rgb = Color.hsl_to_rgb(mx.array(hsl))
         hsl_round = Color.rgb_to_hsl(rgb)
-        return Color.hsl_to_complex(hsl_round), rgb, L
+        return Color.hsl_to_complex(hsl_round), rgb, l
 
     @staticmethod
     def corrcoef(a: mx.array, b: mx.array) -> float:
@@ -386,9 +384,9 @@ class Utils:
     def make_luminance_edge(shape: tuple[int, int]) -> mx.array:
         """Luminance-only step edge: left half 0.3, right half 0.7."""
         H, W = shape
-        L = mx.where(mx.arange(W).reshape(1, -1) < W // 2, 0.3, 0.7)
-        L = mx.broadcast_to(L, (H, W)).astype(mx.float32)
-        rgb = mx.stack([L, L, L], axis=-1).astype(mx.float32)
+        l = mx.where(mx.arange(W).reshape(1, -1) < W // 2, 0.3, 0.7)
+        l = mx.broadcast_to(l, (H, W)).astype(mx.float32)
+        rgb = mx.stack([l, l, l], axis=-1).astype(mx.float32)
         from color import Color  # lazy — avoids circular import
 
         hsl = Color.rgb_to_hsl(mx.array(rgb))

@@ -53,13 +53,13 @@ class GaussianMixture:
 
     # ── public API ──────────────────────────────────────────────────────
 
-    def fit(self, X: mx.array) -> GaussianMixture:
-        X = mx.array(X, dtype=mx.float32)
+    def fit(self, x: mx.array) -> GaussianMixture:
+        x = mx.array(x, dtype=mx.float32)
         key = mx.random.key(0 if self.random_state is None else self.random_state)
         best_ll = -math.inf
         for _i in range(self.n_init):
             key, sub = mx.random.split(key)
-            w, mu, cov, ll = self._em_run(X, sub)
+            w, mu, cov, ll = self._em_run(x, sub)
             if ll > best_ll:
                 best_ll = ll
                 self.weights_, self.means_, self.covariances_ = w, mu, cov
@@ -67,18 +67,18 @@ class GaussianMixture:
         mx.eval(self.weights_, self.means_, self.covariances_)
         return self
 
-    def _estimate_log_prob(self, X: mx.array) -> mx.array:
+    def estimate_log_prob(self, x: mx.array) -> mx.array:
         """log N(x; mu_k, Sigma_k) per component → (N, K)."""
         assert self.means_ is not None and self.covariances_ is not None
-        X = mx.array(X, dtype=mx.float32)
+        x = mx.array(x, dtype=mx.float32)
         return _log_gaussian_full(
-            X, self.means_, self.covariances_, self.n_components, X.shape[1]
+            x, self.means_, self.covariances_, self.n_components, x.shape[1]
         )
 
     def predict_proba(self, X: mx.array) -> mx.array:
         """Posterior responsibilities → (N, K)."""
         assert self.weights_ is not None
-        log_resp = self._estimate_log_prob(X) + mx.log(self.weights_ + 1e-12)
+        log_resp = self.estimate_log_prob(X) + mx.log(self.weights_ + 1e-12)
         return mx.softmax(log_resp, axis=1)
 
     # ── internals ───────────────────────────────────────────────────────
@@ -184,18 +184,18 @@ def _unary_from_gmm(gmm: GaussianMixture, feats: mx.array) -> tuple[mx.array, fl
     """Unary potentials from a (pre-fit) GMM: -log p(x|k) - log pi_k,
     row-shifted for numerical safety."""
     assert gmm.weights_ is not None, "GMM must be fitted before calling _unary_from_gmm"
-    log_prob = gmm._estimate_log_prob(feats)
+    log_prob = gmm.estimate_log_prob(feats)
     log_resp = log_prob + mx.log(gmm.weights_ + 1e-12)
     ll = float(mx.logsumexp(log_resp, axis=1).mean().item())
     return -(log_resp - mx.max(log_resp, axis=1, keepdims=True)), ll
 
 
-def _gmm_unary(
+def gmm_unary(
     feats: mx.array, K: int, max_samples: int = 16384
 ) -> tuple[GaussianMixture, mx.array, float]:
     """Fit a full-covariance GMM and return (gmm, unary potentials)."""
     N = feats.shape[0]
-    if N > max_samples:
+    if max_samples < N:
         idx = mx.argsort(mx.random.uniform(shape=(N,), key=mx.random.key(0)))[
             :max_samples
         ]
