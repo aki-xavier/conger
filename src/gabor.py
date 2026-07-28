@@ -1,34 +1,131 @@
 import math
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 import mlx.core as mx
 
 from utils import Utils
 
+#    除此之外，常用的频谱特征还包括：
+
+#    • 谱通量 (spectral flux) — 相邻帧之间的频谱变化量
+#    • 谱不规则度 (spectral irregularity) — 相邻频带能量变化的平滑度
+
 
 @dataclass(slots=True)
-class GaborOrientation:
-    """All Gabor scales for a single orientation.
+class GaborOri:
+    resps: list[mx.array]
+    es: list[mx.array] = field(default_factory=list)  # energies
+    sum_e: mx.array | None = None  # total energy
+    safe_e: mx.array | None = None
+    centroid: mx.array | None = None  # 质心: 高质心 = 细纹理，低质心 = 粗纹理
+    variance: mx.array | None = None  # 方差：频谱宽度——窄带（纯光栅）vs 宽带（噪声）
+    sigma: mx.array | None = None
+    skewness: mx.array | None = None
+    kurtosis: mx.array | None = None
+    flatness: mx.array | None = None
+    rolloff: mx.array | None = None
 
-    Owns its responses, wavelengths, and orientation metadata directly.
-    Callers no longer need a parent wavelet to use an orientation.
+    def __post_init__(self):
+        for s in self.resps:
+            self.es.append(mx.abs(s) ** 2)
 
-    Args:
-        index: Orientation index.
-        theta: Orientation angle in radians.
-        wavelengths: Centre wavelength for each scale.
-        responses: Complex Gabor response at each scale for this orientation.
-    """
+        self.sum_e = self.es[0]
+        for e in self.es[1:]:
+            self.sum_e += e
 
-    theta: float
-    scales: list[mx.array]
+        self.safe_e = mx.maximum(self.sum_e, 1e-12)
+
+    def calc_spectral_features(self, freqs: list[float]):
+        self.calc_centroid(freqs)
+        self.calc_variance(freqs)
+        self.sigma = mx.sqrt(mx.maximum(self.variance, 1e-12))
+        self.calc_skewness(freqs)
+        self.calc_kurtosis(freqs)
+        self.calc_rolloff(freqs)
+        self.calc_flatness()
+
+    def calc_centroid(self, freqs: list[float]):
+        centroid = mx.zeros_like(self.sum_e)
+        for fi, e_s in zip(freqs, self.es, strict=True):
+            centroid = centroid + fi * e_s / self.safe_e
+        self.centroid = centroid
+
+    def calc_variance(self, freqs: list[float]):
+        assert self.centroid
+        variance = mx.zeros_like(self.sum_e)
+        for fi, e_s in zip(freqs, self.es, strict=True):
+            p = e_s / self.safe_e
+            diff = fi - self.centroid
+            variance = variance + diff * diff * p
+        self.variance = variance
+
+    def calc_skewness(self, freqs: list[float]):
+        assert self.centroid
+        assert self.sigma
+        skewness = mx.zeros_like(self.sum_e)
+        for fi, e_s in zip(freqs, self.es, strict=True):
+            p = e_s / self.safe_e
+            diff = fi - self.centroid
+            skewness = skewness + diff * diff * diff * p
+        skewness = skewness / mx.maximum(self.sigma**3, 1e-12)
+        self.skewness = skewness
+
+    def calc_kurtosis(self, freqs: list[float]):
+        assert self.centroid
+        assert self.sigma
+        kurtosis = mx.zeros_like(self.sum_e)
+        for fi, e_s in zip(freqs, self.es, strict=True):
+            p = e_s / self.safe_e
+            diff = fi - self.centroid
+            kurtosis = kurtosis + diff * diff * diff * diff * p
+        kurtosis = kurtosis / mx.maximum(self.sigma**4, 1e-12)
+        self.kurtosis = kurtosis
+
+    def calc_rolloff(self, freqs: list[float]):
+        assert self.sum_e
+        cum = mx.zeros_like(self.sum_e)
+        rolloff = mx.zeros_like(self.sum_e)
+
+        remaining = mx.ones(self.sum_e.shape, dtype=mx.bool_)
+        for s in range(len(self.resps) - 1, -1, -1):
+            p = self.es[s] / self.safe_e
+            cum = cum + p
+            reached = (cum >= 0.85) & remaining
+            rolloff = mx.where(reached, freqs[s], rolloff)
+            remaining = remaining & (~reached)
+        self.rolloff = remaining
+
+    def calc_flatness(self):
+        """Per-pixel spectral flatness across scales.
+
+        flatness = geometric_mean(E) / arithmetic_mean(E)
+
+        Ranges [0, 1]: 0 = pure sinusoid (all energy in one scale),
+        1 = white noise (equal energy across all scales).
+
+        Computed in log space for numerical stability:
+        log_flatness = mean(log(E + eps)) - log(mean(E)).
+
+        Args:
+            eps: floor added to each scale energy before log, to avoid -inf
+                 on flat (zero-energy) pixels.
+
+        Returns:
+            (H, W) float32 array in [0, 1].
+        """
+
+        # geometric mean via log space: exp((1/S) Σ log(E_s))
+        log_sum = mx.log(self.es[0])
+        for e in self.es[1:]:
+            log_sum = log_sum + mx.log(e)
+        geom = mx.exp(log_sum / len(self.resps))
+
+        assert self.sum_e
+        self.flatness = geom / mx.maximum(self.sum_e / len(self.resps), 1e-12)
 
 
 @dataclass(slots=True)
 class GaborWavelet:
-    thetas: list[float]  # orientation angle in rad
-    lams: list[float]  # wavelength
-    oris: list[GaborOrientation]
     img: mx.array
     lam_min: float = 3.0  # min wavelength
     height: int = 0
@@ -43,6 +140,9 @@ class GaborWavelet:
     xgrid: mx.array | None = None
     ygrid: mx.array | None = None
     dc: mx.array | None = None
+    thetas: list[float] = field(default_factory=list)  # orientation angle in rad
+    lams: list[float] = field(default_factory=list)  # wavelength
+    oris: list[GaborOri] = field(default_factory=list)
 
     def __post_init__(self):
         if self.img.ndim != 2:
@@ -128,9 +228,14 @@ class GaborWavelet:
         self.dc = dc
 
     def calc_oris(self):
-        for _o, theta in enumerate(self.thetas):
-            scales: list[mx.array] = []
+        freqs: list[float] = []
+        for lam in self.lams:
+            freqs.append(1 / lam)
+
+        for theta in self.thetas:
+            resps: list[mx.array] = []
             for lam in self.lams:
+                freqs.append(1 / lam)
                 kernel = self.gabor_kernel(lam, theta)
                 resp_f = self.fft * kernel
                 resp = mx.fft.ifft2(resp_f)
@@ -139,15 +244,11 @@ class GaborWavelet:
                         self.pad : self.pad + self.height,
                         self.pad : self.pad + self.width,
                     ]
-                scales.append(resp)
-            go = GaborOrientation(
-                theta=theta,
-                scales=scales,
-            )
-            self.oris.append(go)
+                resps.append(resp)
 
-    def resp_at(self, scale_idx: int, ori_idx: int) -> mx.array:
-        return self.oris[ori_idx].scales[scale_idx]
+            go = GaborOri(resps=resps)
+            go.calc_spectral_features(freqs)
+            self.oris.append(go)
 
     def gabor_kernel(self, lam: float, theta: float) -> mx.array:
         f0 = 2.0 / lam
