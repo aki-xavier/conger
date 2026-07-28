@@ -51,7 +51,7 @@ class GaborOri:
         self.centroid = centroid
 
     def calc_variance(self, freqs: list[float]):
-        assert self.centroid
+        assert self.centroid is not None
         variance = mx.zeros_like(self.sum_e)
         for fi, e_s in zip(freqs, self.es, strict=True):
             p = e_s / self.safe_e
@@ -60,8 +60,8 @@ class GaborOri:
         self.variance = variance
 
     def calc_skewness(self, freqs: list[float]):
-        assert self.centroid
-        assert self.sigma
+        assert self.centroid is not None
+        assert self.sigma is not None
         skewness = mx.zeros_like(self.sum_e)
         for fi, e_s in zip(freqs, self.es, strict=True):
             p = e_s / self.safe_e
@@ -71,8 +71,8 @@ class GaborOri:
         self.skewness = skewness
 
     def calc_kurtosis(self, freqs: list[float]):
-        assert self.centroid
-        assert self.sigma
+        assert self.centroid is not None
+        assert self.sigma is not None
         kurtosis = mx.zeros_like(self.sum_e)
         for fi, e_s in zip(freqs, self.es, strict=True):
             p = e_s / self.safe_e
@@ -82,7 +82,7 @@ class GaborOri:
         self.kurtosis = kurtosis
 
     def calc_rolloff(self, freqs: list[float]):
-        assert self.sum_e
+        assert self.sum_e is not None
         cum = mx.zeros_like(self.sum_e)
         rolloff = mx.zeros_like(self.sum_e)
 
@@ -96,31 +96,13 @@ class GaborOri:
         self.rolloff = remaining
 
     def calc_flatness(self):
-        """Per-pixel spectral flatness across scales.
-
-        flatness = geometric_mean(E) / arithmetic_mean(E)
-
-        Ranges [0, 1]: 0 = pure sinusoid (all energy in one scale),
-        1 = white noise (equal energy across all scales).
-
-        Computed in log space for numerical stability:
-        log_flatness = mean(log(E + eps)) - log(mean(E)).
-
-        Args:
-            eps: floor added to each scale energy before log, to avoid -inf
-                 on flat (zero-energy) pixels.
-
-        Returns:
-            (H, W) float32 array in [0, 1].
-        """
-
         # geometric mean via log space: exp((1/S) Σ log(E_s))
         log_sum = mx.log(self.es[0])
         for e in self.es[1:]:
             log_sum = log_sum + mx.log(e)
         geom = mx.exp(log_sum / len(self.resps))
 
-        assert self.sum_e
+        assert self.sum_e is not None
         self.flatness = geom / mx.maximum(self.sum_e / len(self.resps), 1e-12)
 
 
@@ -235,7 +217,6 @@ class GaborWavelet:
         for theta in self.thetas:
             resps: list[mx.array] = []
             for lam in self.lams:
-                freqs.append(1 / lam)
                 kernel = self.gabor_kernel(lam, theta)
                 resp_f = self.fft * kernel
                 resp = mx.fft.ifft2(resp_f)
@@ -268,3 +249,9 @@ class GaborWavelet:
         v = -self.xgrid * math.sin(theta) + self.ygrid * math.cos(theta)
         du = u - f0
         return mx.exp(-0.5 * (du**2 / sigma_f**2 + v**2 / (sigma_f / self.gamma) ** 2))
+
+
+if __name__ == "__main__":
+    image = Utils.synthesize_signal01()
+    gw = GaborWavelet(image)
+    print("success")
