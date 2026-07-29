@@ -4,6 +4,7 @@ from pathlib import Path
 
 import mlx.core as mx
 
+from color import Color
 from utils import Utils
 
 #    除此之外，常用的频谱特征还包括：
@@ -30,9 +31,12 @@ class GaborOri:
         for s in self.resps:
             self.es.append(mx.abs(s) ** 2)
 
-        self.sum_e = self.es[0]
+        # NOTE: rebind instead of `+=` — MLX `+=` mutates in place and
+        # would corrupt self.es[0] through the shared reference.
+        total = self.es[0]
         for e in self.es[1:]:
-            self.sum_e += e
+            total = total + e
+        self.sum_e = total
 
         self.safe_e = mx.maximum(self.sum_e, 1e-12)
 
@@ -85,8 +89,12 @@ class GaborOri:
     def calc_rolloff(self, freqs: list[float]):
         assert self.sum_e is not None
         cum = mx.zeros_like(self.sum_e)
-        rolloff = mx.zeros_like(self.sum_e)
+        # default to the highest band frequency for pixels that never
+        # reach 85% cumulative energy (e.g. near-zero energy)
+        rolloff = mx.full(self.sum_e.shape, freqs[0], dtype=mx.float32)
 
+        # freqs are ordered high→low (freqs = 1/lam, lams ascending), so
+        # walking from the last band down to 0 accumulates low→high freq.
         remaining = mx.ones(self.sum_e.shape, dtype=mx.bool_)
         for s in range(len(self.resps) - 1, -1, -1):
             p = self.es[s] / self.safe_e
@@ -94,7 +102,7 @@ class GaborOri:
             reached = (cum >= 0.85) & remaining
             rolloff = mx.where(reached, freqs[s], rolloff)
             remaining = remaining & (~reached)
-        self.rolloff = remaining
+        self.rolloff = rolloff
 
     def calc_flatness(self):
         # geometric mean via log space: exp((1/S) Σ log(E_s))
@@ -166,9 +174,11 @@ class GaborWavelet:
                 mode="edge",
             )
             self.fft = mx.fft.fft2(padded)
+            self.fft[0, 0] = 0  # type: ignore
             self.xgrid, self.ygrid = Utils.freqgrid((H_pad, W_pad))
         else:
             self.fft = mx.fft.fft2(self.img)
+            self.fft[0, 0] = 0  # type: ignore
             self.xgrid, self.ygrid = Utils.freqgrid((self.height, self.width))
 
     def calc_lams(self):
@@ -193,7 +203,7 @@ class GaborWavelet:
         # σ scales with the coarsest wavelength so the cutoff sits below the
         # Gabor bank's lowest band for any image size.
         sigma_spatial = self.lam_max() / 8.0
-        sigma_f = 1.0 / (2.0 * math.pi * sigma_spatial)
+        sigma_f = 3.0 / (2.0 * math.pi * sigma_spatial)
 
         assert self.xgrid is not None
         assert self.ygrid is not None
@@ -276,11 +286,11 @@ class GaborWavelet:
 
         plots = [
             ("original", "gray", self.img),
-            ("fft", "gray", mx.log1p(mx.abs(mx.fft.fftshift(self.fft)))),
+            ("fft", "magma", mx.log1p(mx.abs(mx.fft.fftshift(self.fft)))),
             ("dc", "gray", self.dc),
             ("centroid", "viridis", ori.centroid),
             ("variance", "viridis", ori.variance),
-            ("skewness", "viridis", ori.skewness),
+            ("skewness", "RdBu_r", ori.skewness),
             ("kurtosis", "viridis", ori.kurtosis),
             ("flatness", "viridis", ori.flatness),
             ("rolloff", "viridis", ori.rolloff),
@@ -291,6 +301,29 @@ class GaborWavelet:
 
 
 if __name__ == "__main__":
-    image = Utils.synthesize_signal01()
-    gw = GaborWavelet(image)
-    gw.visualize(theta=0, out_path="./signal01.png")
+    from PIL import Image
+
+    tasks = [
+        ("signal01", Utils.synthesize_signal01()),
+        ("signal02", Utils.synthesize_signal02()),
+        ("signal03", Utils.synthesize_signal03()),
+        ("signal04", Utils.synthesize_signal04()),
+        ("signal05", Utils.synthesize_signal05()),
+        ("signal06", Utils.synthesize_signal06()),
+        ("signal07", Utils.synthesize_signal07()),
+        ("signal08", Utils.synthesize_signal08()),
+        ("signal09", Utils.synthesize_signal09()),
+    ]
+    for task in tasks:
+        name, img = task
+        gw = GaborWavelet(img)
+        path = Utils.out_dir() / "artifacts" / (name + ".png")
+        print(path)
+        gw.visualize(theta=0, out_path=path)
+
+    img = Image.open(Utils.out_dir() / "images/12.png")
+    img = img.convert("L")
+    gw = GaborWavelet(Color.image_to_mlx(img))
+    path = Utils.out_dir() / "artifacts/signal12.png"
+    print(path)
+    gw.visualize(theta=0, out_path=path)

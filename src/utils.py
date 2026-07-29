@@ -1,4 +1,5 @@
 import math
+from pathlib import Path
 
 import matplotlib
 import mlx.core as mx
@@ -8,6 +9,11 @@ import matplotlib.pyplot as plt
 
 
 class Utils:
+    @staticmethod
+    def out_dir() -> Path:
+        d = Path(__file__).resolve().parent.parent
+        return d
+
     @staticmethod
     def fftfreq(n: int) -> mx.array:
         """MLX version of fftfreq(n), normalized to cycles/sample."""
@@ -92,13 +98,14 @@ class Utils:
 
     @staticmethod
     def make_grating(shape, wavelength, angle_rad, phase=0.0) -> mx.array:  # type: ignore
-        """Sinusoidal grating at given wavelength (px) and angle (rad)."""
+        """Sinusoidal grating at given wavelength (px) and angle (rad), in [0, 1]."""
         H, W = shape
         y = mx.arange(H, dtype=mx.float32)
         x = mx.arange(W, dtype=mx.float32)
         yy, xx = mx.meshgrid(y, x, indexing="ij")
         xr = xx * math.cos(angle_rad) + yy * math.sin(angle_rad)
-        return mx.sin(2 * math.pi * xr / wavelength + phase).astype(mx.float32)
+        s = mx.sin(2 * math.pi * xr / wavelength + phase).astype(mx.float32)
+        return (s + 1.0) * 0.5
 
     @staticmethod
     def make_texture_composite(size: int = 128):
