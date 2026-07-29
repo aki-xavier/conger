@@ -221,9 +221,11 @@ class GaborWavelet:
         self.dc = dc
 
     def calc_oris(self):
+        # band center frequencies in fftfreq grid units (Nyquist = 1),
+        # matching gabor_kernel's f0 = 2/lam
         freqs: list[float] = []
         for lam in self.lams:
-            freqs.append(1 / lam)
+            freqs.append(2.0 / lam)
 
         for theta in self.thetas:
             resps: list[mx.array] = []
@@ -243,10 +245,9 @@ class GaborWavelet:
             self.oris.append(go)
 
     def gabor_kernel(self, lam: float, theta: float) -> mx.array:
+        # grid units (Nyquist = 1); a wavelength-lam sinusoid sits at 2/lam
+        # regardless of padding — padding only makes the grid denser.
         f0 = 2.0 / lam
-        if self.pad > 0:
-            # frequency grid is denser with padding — scale f0 down
-            f0 *= self.width / (self.width + 2 * self.pad)
         bw = self.bandwidth
         sigma_f_rel = (2.0**bw - 1.0) / (
             (2.0**bw + 1.0) * math.sqrt(2.0 * math.log(2.0))
