@@ -68,7 +68,8 @@ class GaborWavelet:
     scale_size: int = 0
     ori_size: int = 8
     bandwidth: float = 1.0  # used to create gabor kernel
-    gamma: float = 0.5  # used to create gabor kernel
+    gamma: float = 1.0  # used to create gabor kernel; 1.0 gives enough
+    # angular selectivity for the second orientation harmonic (r2) to survive
     adaptive_pad: bool = False
     pad: int = 0
     fft: mx.array | None = None

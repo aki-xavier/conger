@@ -22,9 +22,8 @@ class GaborScale:
     sum_e: mx.array | None = None  # total energy over orientations
     safe_e: mx.array | None = None
     mean_dir: mx.array | None = None  # 圆均值方向, rad in [0, π)
-    resultant: mx.array | None = None  # R ∈ [0,1]: 1=单一方向, 0=各向同性
-    skewness: mx.array | None = None  # Batschelet 圆偏度
-    kurtosis: mx.array | None = None  # Batschelet 圆峰度（有符号）
+    resultant: mx.array | None = None  # R = |m₁| ∈ [0,1]: 1=单一方向, 0=各向同性
+    r2: mx.array | None = None  # |m₂| ∈ [0,1]: 第二谐波——角点/十字（正交方向对）强度
     flatness: mx.array | None = None  # 方向能量的几何/算术均值比
 
     def __post_init__(self):
@@ -37,32 +36,23 @@ class GaborScale:
         self.calc_circular_features()
 
     def calc_circular_features(self):
-        # ── first trigonometric moment on doubled angles ψ = 2θ ─────
+        # 方向分布的傅里叶展开（ψ = 2θ 的圆上）：m₁ = Σ p·e^{iψ},
+        # m₂ = Σ p·e^{i2ψ}。(R, r2) 平面：R≈1 单方向(边缘)；
+        # R≈0 且 r2≈1 正交方向对(角点/十字)；两者≈0 各向同性。
         c1 = mx.zeros_like(self.sum_e)
         s1 = mx.zeros_like(self.sum_e)
-        for theta, e in zip(self.thetas, self.es, strict=True):
-            p = e / self.safe_e
-            c1 = c1 + p * math.cos(2 * theta)
-            s1 = s1 + p * math.sin(2 * theta)
-
-        r = mx.sqrt(c1 * c1 + s1 * s1)
-        psi_bar = mx.arctan2(s1, c1)
-
-        self.resultant = r
-        self.mean_dir = mx.remainder(0.5 * psi_bar, math.pi)
-
-        # ── second centered trigonometric moment → skew / kurt ──────
-        # m2 = Σ p · exp(i·2(ψ−ψ̄)); Batschelet definitions.
         c2 = mx.zeros_like(self.sum_e)
         s2 = mx.zeros_like(self.sum_e)
         for theta, e in zip(self.thetas, self.es, strict=True):
             p = e / self.safe_e
-            d = 4 * theta - 2 * psi_bar  # 2(ψ − ψ̄), ψ = 2θ
-            c2 = c2 + p * mx.cos(d)
-            s2 = s2 + p * mx.sin(d)
+            c1 = c1 + p * math.cos(2 * theta)
+            s1 = s1 + p * math.sin(2 * theta)
+            c2 = c2 + p * math.cos(4 * theta)
+            s2 = s2 + p * math.sin(4 * theta)
 
-        self.skewness = s2 / mx.maximum((1.0 - r) ** 1.5, 1e-12)
-        self.kurtosis = c2 / mx.maximum((1.0 - r) ** 2, 1e-12)
+        self.resultant = mx.sqrt(c1 * c1 + s1 * s1)
+        self.mean_dir = mx.remainder(0.5 * mx.arctan2(s1, c1), math.pi)
+        self.r2 = mx.sqrt(c2 * c2 + s2 * s2)
 
         # ── flatness over orientation energies ──────────────────────
         # geometric mean via log space: exp((1/K) Σ log(E_k))
@@ -104,8 +94,7 @@ class GaborRotation:
             ("original", "gray", self.gw.img),
             ("mean_dir", "twilight", sc.mean_dir),  # circular colormap
             ("resultant", "viridis", sc.resultant),
-            ("skewness", "RdBu_r", sc.skewness),  # signed → diverging
-            ("kurtosis", "RdBu_r", sc.kurtosis),  # signed → diverging
+            ("r2", "viridis", sc.r2),
             ("flatness", "viridis", sc.flatness),
         ]
         fig = Utils.visualize(plots)
@@ -113,18 +102,15 @@ class GaborRotation:
 
 
 if __name__ == "__main__":
-    tasks = [
-        ("signal03", Utils.synthesize_signal03()),  # vertical grating θ=0
-        ("signal04", Utils.synthesize_signal04()),  # isotropic noise
-        ("signal05", Utils.synthesize_signal05()),  # grating | smooth boundary
-    ]
-    for name, img in tasks:
-        gw = GaborWavelet(img)
-        gr = GaborRotation(gw)
-        r_means = [f"{float(mx.mean(sc.resultant).item()):.3f}" for sc in gr.scales]
-        print(f"{name}: lams={[round(lam, 1) for lam in gw.lams]}")
-        print(f"  mean resultant R per scale: {r_means}")
+    # natural images (downloaded from picsum.photos)
+    from PIL import Image
 
-        path = Utils.out_dir() / "artifacts" / (name + "_rotation.png")
-        print(f"  {path}")
-        gr.visualize(scale=0, out_path=path)
+    from color import Color
+
+    for img_id in [10, 1015, 1016, 1018, 1035]:
+        img = Image.open(Utils.out_dir() / f"images/nat{img_id}.jpg")
+        arr = Color.image_to_mlx(img.convert("L"))
+        gr = GaborRotation(GaborWavelet(arr))
+        path = Utils.out_dir() / "artifacts" / f"nat{img_id}_rotation.png"
+        print(path)
+        gr.visualize(scale=2, out_path=path)
