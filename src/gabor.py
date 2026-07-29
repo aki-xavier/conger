@@ -131,6 +131,7 @@ class GaborWavelet:
     xgrid: mx.array | None = None
     ygrid: mx.array | None = None
     dc: mx.array | None = None
+    h_dc: mx.array | None = None  # Gaussian lowpass kernel of the dc channel
     thetas: list[float] = field(default_factory=list)  # orientation angle in rad
     lams: list[float] = field(default_factory=list)  # wavelength
     oris: list[GaborOri] = field(default_factory=list)
@@ -174,11 +175,9 @@ class GaborWavelet:
                 mode="edge",
             )
             self.fft = mx.fft.fft2(padded)
-            self.fft[0, 0] = 0  # type: ignore
             self.xgrid, self.ygrid = Utils.freqgrid((H_pad, W_pad))
         else:
             self.fft = mx.fft.fft2(self.img)
-            self.fft[0, 0] = 0  # type: ignore
             self.xgrid, self.ygrid = Utils.freqgrid((self.height, self.width))
 
     def calc_lams(self):
@@ -199,11 +198,11 @@ class GaborWavelet:
             self.thetas.append(theta)
 
     def calc_dc(self):
-        # DC / lowpass channel: narrow Gaussian captures local mean intensity.
-        # σ scales with the coarsest wavelength so the cutoff sits below the
-        # Gabor bank's lowest band for any image size.
-        sigma_spatial = self.lam_max() / 8.0
-        sigma_f = 3.0 / (2.0 * math.pi * sigma_spatial)
+        # DC / lowpass channel: Gaussian lowpass captures local mean intensity.
+        # sigma_f sits one octave below the coarsest Gabor band center
+        # (f0 = 1/lam_max), so the filter passes DC fully and rolls off
+        # before the bank's lowest band (gain ≈ 0.14 at that band's center).
+        sigma_f = 0.5 / self.lam_max()
 
         assert self.xgrid is not None
         assert self.ygrid is not None
@@ -218,14 +217,23 @@ class GaborWavelet:
                 self.pad : self.pad + self.width,
             ]
 
+        self.h_dc = h_dc
         self.dc = dc
 
     def calc_oris(self):
-        # band center frequencies in fftfreq grid units (Nyquist = 1),
-        # matching gabor_kernel's f0 = 2/lam
+        # band center frequencies in cycles/sample (Nyquist = 0.5),
+        # matching gabor_kernel's f0 = 1/lam
         freqs: list[float] = []
         for lam in self.lams:
-            freqs.append(2.0 / lam)
+            freqs.append(1.0 / lam)
+
+        # Gabor channels must not see the DC component: apply the
+        # complementary Gaussian highpass (1 - h_dc) of the dc channel.
+        # Done here rather than in calc_pad so calc_dc (which runs
+        # earlier) keeps the mean.
+        assert self.fft is not None
+        assert self.h_dc is not None
+        self.fft = self.fft * (1.0 - self.h_dc)
 
         for theta in self.thetas:
             resps: list[mx.array] = []
@@ -245,9 +253,9 @@ class GaborWavelet:
             self.oris.append(go)
 
     def gabor_kernel(self, lam: float, theta: float) -> mx.array:
-        # grid units (Nyquist = 1); a wavelength-lam sinusoid sits at 2/lam
-        # regardless of padding — padding only makes the grid denser.
-        f0 = 2.0 / lam
+        # cycles/sample (Nyquist = 0.5); a wavelength-lam sinusoid sits at
+        # 1/lam regardless of padding — padding only makes the grid denser.
+        f0 = 1.0 / lam
         bw = self.bandwidth
         sigma_f_rel = (2.0**bw - 1.0) / (
             (2.0**bw + 1.0) * math.sqrt(2.0 * math.log(2.0))
@@ -324,7 +332,8 @@ if __name__ == "__main__":
 
     img = Image.open(Utils.out_dir() / "images/12.png")
     img = img.convert("L")
-    gw = GaborWavelet(Color.image_to_mlx(img))
+    arr = Color.image_to_mlx(img)
+    gw = GaborWavelet(arr)
     path = Utils.out_dir() / "artifacts/signal12.png"
     print(path)
     gw.visualize(theta=0, out_path=path)

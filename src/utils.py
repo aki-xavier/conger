@@ -16,11 +16,11 @@ class Utils:
 
     @staticmethod
     def fftfreq(n: int) -> mx.array:
-        """MLX version of fftfreq(n), normalized to cycles/sample."""
+        """MLX version of np.fft.fftfreq(n), in cycles/sample (Nyquist = 0.5)."""
         k = mx.arange(n, dtype=mx.float32)
         half = (n + 1) // 2
         k = mx.where(k < half, k, k - n)
-        return 2 * k / n
+        return k / n
 
     @staticmethod
     def freqgrid(shape: tuple[int, ...]) -> list[mx.array]:
