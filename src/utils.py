@@ -44,14 +44,14 @@ class Utils:
     def grid_shape(n: int) -> tuple[int, int]:
         if n <= 0:
             return (0, 0)
-        # 从 sqrt(n) 向下找第一个能整除 n 的数
-        for rows in range(int(math.sqrt(n)), 0, -1):
+        # 从 sqrt(n) 向下找第一个能整除 n 的数（不含 1，否则质数会退化成单行）
+        for rows in range(int(math.sqrt(n)), 1, -1):
             if n % rows == 0:
                 cols = n // rows
                 return (rows, cols)
-        # n 是质数等无法整除的情况：向上取整
-        rows = math.ceil(math.sqrt(n))
-        cols = math.ceil(n / rows)
+        # n 是质数等无法整除的情况：向上取整，倾向 rows < cols（横向布局）
+        cols = math.ceil(math.sqrt(n))
+        rows = math.ceil(n / cols)
         return (rows, cols)
 
     @staticmethod
@@ -64,6 +64,9 @@ class Utils:
                 ax = axes[row][col]
                 ax.set_xticks([])
                 ax.set_yticks([])
+                if idx >= len(plots):  # grid has more slots than plots
+                    ax.axis("off")
+                    continue
                 title, cmap, data = plots[idx]
                 im = ax.imshow(data, cmap=cmap)
                 ax.set_title(title, fontsize=9)
@@ -174,7 +177,7 @@ class Utils:
         """Smooth on the left, grating on the right — Type B: smooth→texture.
 
         Left half: uniform gray. Right half: grating. At the boundary,
-        all six spectral metrics jump simultaneously as energy shifts
+        all spectral metrics jump simultaneously as energy shifts
         from a single coarse scale to a specific matching scale.
 
         Args:
@@ -201,8 +204,8 @@ class Utils:
         """Grating frequency change — Type D: texture→texture (different scale).
 
         Left half: grating at wavelength1. Right half: grating at
-        wavelength2. Only centroid and rolloff jump; variance and
-        entropy remain similar (both are single-scale).
+        wavelength2. Slope and res_scale jump; the fit residual stays
+        similar (both halves are single-scale).
 
         Args:
             size: Image side length (square).
@@ -228,7 +231,7 @@ class Utils:
     ) -> mx.array:
         """Bright→dark smooth — Type E: illumination change only.
 
-        Left half: uniform bright. Right half: uniform dark. All six
+        Left half: uniform bright. Right half: uniform dark. All
         spectral shape metrics remain constant (same coarse-scale
         energy). Only absolute pixel intensity changes.
 
@@ -255,8 +258,8 @@ class Utils:
         """Noise on the left, grating on the right — Type C: noise→texture.
 
         Noise has edge-like spectral properties (energy spread across
-        all scales → high variance and entropy). Grating has energy at
-        a single matching scale. All six metrics jump at the boundary.
+        all scales → poor power-law fit). Grating has energy at
+        a single matching scale. All metrics jump at the boundary.
 
         Args:
             size: Image side length (square).

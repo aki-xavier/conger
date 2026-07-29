@@ -7,32 +7,21 @@ import mlx.core as mx
 from color import Color
 from utils import Utils
 
-#    除此之外，常用的频谱特征还包括：
-
-#    • 谱通量 (spectral flux) — 相邻帧之间的频谱变化量
-#    • 谱不规则度 (spectral irregularity) — 相邻频带能量变化的平滑度
-
 
 @dataclass(slots=True)
 class GaborOri:
     resps: list[mx.array]
     es: list[mx.array] = field(default_factory=list)  # energies
-    sum_e: mx.array | None = None  # total energy
+    sum_e: mx.array | None = None
     safe_e: mx.array | None = None
-    centroid: mx.array | None = None  # 质心: 高质心 = 细纹理，低质心 = 粗纹理
-    variance: mx.array | None = None  # 方差：频谱宽度——窄带（纯光栅）vs 宽带（噪声）
-    sigma: mx.array | None = None
-    skewness: mx.array | None = None
-    kurtosis: mx.array | None = None
-    rolloff: mx.array | None = None
-    flatness: mx.array | None = None
+    slope: mx.array | None = None  # 幂律谱斜率 α: log e ≈ a − α·log f
+    residual: mx.array | None = None  # 幂律拟合残差范数（非 1/f 程度）
+    res_scale: mx.array | None = None  # 残差峰所在频率（纹理特征尺度）
 
     def __post_init__(self):
         for s in self.resps:
             self.es.append(mx.abs(s) ** 2)
 
-        # NOTE: rebind instead of `+=` — MLX `+=` mutates in place and
-        # would corrupt self.es[0] through the shared reference.
         total = self.es[0]
         for e in self.es[1:]:
             total = total + e
@@ -40,79 +29,34 @@ class GaborOri:
 
         self.safe_e = mx.maximum(self.sum_e, 1e-12)
 
-    def calc_spectral_features(self, freqs: list[float]):
-        self.calc_centroid(freqs)
-        self.calc_variance(freqs)
-        self.calc_skewness(freqs)
-        self.calc_kurtosis(freqs)
-        self.calc_rolloff(freqs)
-        self.calc_flatness()
+    def calc_powerlaw(self, freqs: list[float]):
+        """Per-pixel power-law fit of the band spectrum: log p ≈ a − α·log f.
 
-    def calc_centroid(self, freqs: list[float]):
-        centroid = mx.zeros_like(self.sum_e)
-        for fi, e_s in zip(freqs, self.es, strict=True):
-            centroid = centroid + fi * e_s / self.safe_e
-        self.centroid = centroid
+        Produces three roughly-orthogonal features:
+        slope     — spectral slope α (replaces centroid/variance/rolloff),
+        residual  — RMSE of the fit in log space (non-1/f-ness),
+        res_scale — frequency of the largest positive residual (texture
+                    scale); meaningful only where residual is significant.
+        """
+        # normalized band energies, floored so log is finite (floored bands
+        # count as strong negative deviations from a power law)
+        p = [mx.maximum(e / self.safe_e, 1e-6) for e in self.es]
+        y = mx.log(mx.stack(p))  # (S, H, W)
+        x = mx.log(mx.array(freqs, dtype=mx.float32))  # (S,)
 
-    def calc_variance(self, freqs: list[float]):
-        assert self.centroid is not None
-        variance = mx.zeros_like(self.sum_e)
-        for fi, e_s in zip(freqs, self.es, strict=True):
-            p = e_s / self.safe_e
-            diff = fi - self.centroid
-            variance = variance + diff * diff * p
-        self.variance = variance
-        self.sigma = mx.sqrt(mx.maximum(self.variance, 1e-12))
+        x_c = x - x.mean()
+        y_mean = y.mean(axis=0)
+        denom = (x_c * x_c).sum()
+        slope = (x_c.reshape(-1, 1, 1) * (y - y_mean)).sum(axis=0) / denom
+        intercept = y_mean - slope * x.mean()
 
-    def calc_skewness(self, freqs: list[float]):
-        assert self.centroid is not None
-        assert self.sigma is not None
-        skewness = mx.zeros_like(self.sum_e)
-        for fi, e_s in zip(freqs, self.es, strict=True):
-            p = e_s / self.safe_e
-            diff = fi - self.centroid
-            skewness = skewness + diff * diff * diff * p
-        skewness = skewness / mx.maximum(self.sigma**3, 1e-12)
-        self.skewness = skewness
-
-    def calc_kurtosis(self, freqs: list[float]):
-        assert self.centroid is not None
-        assert self.sigma is not None
-        kurtosis = mx.zeros_like(self.sum_e)
-        for fi, e_s in zip(freqs, self.es, strict=True):
-            p = e_s / self.safe_e
-            diff = fi - self.centroid
-            kurtosis = kurtosis + diff * diff * diff * diff * p
-        kurtosis = kurtosis / mx.maximum(self.sigma**4, 1e-12)
-        self.kurtosis = kurtosis
-
-    def calc_rolloff(self, freqs: list[float]):
-        assert self.sum_e is not None
-        cum = mx.zeros_like(self.sum_e)
-        # default to the highest band frequency for pixels that never
-        # reach 85% cumulative energy (e.g. near-zero energy)
-        rolloff = mx.full(self.sum_e.shape, freqs[0], dtype=mx.float32)
-
-        # freqs are ordered high→low (freqs = 1/lam, lams ascending), so
-        # walking from the last band down to 0 accumulates low→high freq.
-        remaining = mx.ones(self.sum_e.shape, dtype=mx.bool_)
-        for s in range(len(self.resps) - 1, -1, -1):
-            p = self.es[s] / self.safe_e
-            cum = cum + p
-            reached = (cum >= 0.85) & remaining
-            rolloff = mx.where(reached, freqs[s], rolloff)
-            remaining = remaining & (~reached)
-        self.rolloff = rolloff
-
-    def calc_flatness(self):
-        # geometric mean via log space: exp((1/S) Σ log(E_s))
-        log_sum = mx.log(self.es[0])
-        for e in self.es[1:]:
-            log_sum = log_sum + mx.log(e)
-        geom = mx.exp(log_sum / len(self.resps))
-
-        assert self.sum_e is not None
-        self.flatness = geom / mx.maximum(self.sum_e / len(self.resps), 1e-12)
+        fit = intercept + slope * x.reshape(-1, 1, 1)
+        resid = y - fit
+        self.slope = slope
+        self.residual = mx.sqrt((resid * resid).mean(axis=0))
+        idx = mx.argmax(resid, axis=0)
+        f_arr = mx.array(freqs, dtype=mx.float32)
+        self.res_scale = f_arr[idx]
 
 
 @dataclass(slots=True)
@@ -132,7 +76,7 @@ class GaborWavelet:
     ygrid: mx.array | None = None
     dc: mx.array | None = None
     h_dc: mx.array | None = None  # Gaussian lowpass kernel of the dc channel
-    thetas: list[float] = field(default_factory=list)  # orientation angle in rad
+    thetas: list[float] = field(default_factory=list)  # orientation angle in [0, pi]
     lams: list[float] = field(default_factory=list)  # wavelength
     oris: list[GaborOri] = field(default_factory=list)
 
@@ -249,7 +193,7 @@ class GaborWavelet:
                 resps.append(resp)
 
             go = GaborOri(resps=resps)
-            go.calc_spectral_features(freqs)
+            go.calc_powerlaw(freqs)
             self.oris.append(go)
 
     def gabor_kernel(self, lam: float, theta: float) -> mx.array:
@@ -297,12 +241,9 @@ class GaborWavelet:
             ("original", "gray", self.img),
             ("fft", "magma", mx.log1p(mx.abs(mx.fft.fftshift(self.fft)))),
             ("dc", "gray", self.dc),
-            ("centroid", "viridis", ori.centroid),
-            ("variance", "viridis", ori.variance),
-            ("skewness", "RdBu_r", ori.skewness),
-            ("kurtosis", "viridis", ori.kurtosis),
-            ("flatness", "viridis", ori.flatness),
-            ("rolloff", "viridis", ori.rolloff),
+            ("slope", "viridis", ori.slope),
+            ("residual", "viridis", ori.residual),
+            ("res_scale", "viridis", ori.res_scale),
         ]
 
         fig = Utils.visualize(plots)
@@ -337,3 +278,13 @@ if __name__ == "__main__":
     path = Utils.out_dir() / "artifacts/signal12.png"
     print(path)
     gw.visualize(theta=0, out_path=path)
+
+    # natural images (downloaded from picsum.photos)
+    for img_id in [10, 1015, 1016, 1018, 1035]:
+        img = Image.open(Utils.out_dir() / f"images/nat{img_id}.jpg")
+        img = img.convert("L")
+        arr = Color.image_to_mlx(img)
+        gw = GaborWavelet(arr)
+        path = Utils.out_dir() / "artifacts" / f"nat{img_id}.png"
+        print(path)
+        gw.visualize(theta=0, out_path=path)
