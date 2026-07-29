@@ -1,5 +1,6 @@
 import math
 from dataclasses import dataclass, field
+from pathlib import Path
 
 import mlx.core as mx
 
@@ -22,8 +23,8 @@ class GaborOri:
     sigma: mx.array | None = None
     skewness: mx.array | None = None
     kurtosis: mx.array | None = None
-    flatness: mx.array | None = None
     rolloff: mx.array | None = None
+    flatness: mx.array | None = None
 
     def __post_init__(self):
         for s in self.resps:
@@ -38,7 +39,6 @@ class GaborOri:
     def calc_spectral_features(self, freqs: list[float]):
         self.calc_centroid(freqs)
         self.calc_variance(freqs)
-        self.sigma = mx.sqrt(mx.maximum(self.variance, 1e-12))
         self.calc_skewness(freqs)
         self.calc_kurtosis(freqs)
         self.calc_rolloff(freqs)
@@ -58,6 +58,7 @@ class GaborOri:
             diff = fi - self.centroid
             variance = variance + diff * diff * p
         self.variance = variance
+        self.sigma = mx.sqrt(mx.maximum(self.variance, 1e-12))
 
     def calc_skewness(self, freqs: list[float]):
         assert self.centroid is not None
@@ -250,8 +251,46 @@ class GaborWavelet:
         du = u - f0
         return mx.exp(-0.5 * (du**2 / sigma_f**2 + v**2 / (sigma_f / self.gamma) ** 2))
 
+    def get_ori_at(self, theta: float = 0) -> GaborOri:
+        idx = self.thetas.index(theta)
+        return self.oris[idx]
+
+    def visualize(
+        self,
+        theta: float,
+        out_path: str | Path,
+        dpi: int = 150,
+    ):
+        """Render this orientation's spectral feature maps to an image.
+        Args:
+            out_path: save the figure here (e.g. ``"ori.png"``).
+            title: Optional figure title (e.g. the orientation angle).
+            cmap: Matplotlib colormap applied to every panel.
+            dpi: Save resolution.
+
+        Returns:
+            The matplotlib ``Figure`` (caller may ``plt.show()`` it).
+        """
+
+        ori = self.get_ori_at(theta=theta)
+
+        plots = [
+            ("original", "gray", self.img),
+            ("fft", "gray", mx.log1p(mx.abs(mx.fft.fftshift(self.fft)))),
+            ("dc", "gray", self.dc),
+            ("centroid", "viridis", ori.centroid),
+            ("variance", "viridis", ori.variance),
+            ("skewness", "viridis", ori.skewness),
+            ("kurtosis", "viridis", ori.kurtosis),
+            ("flatness", "viridis", ori.flatness),
+            ("rolloff", "viridis", ori.rolloff),
+        ]
+
+        fig = Utils.visualize(plots)
+        fig.savefig(out_path, dpi=dpi)
+
 
 if __name__ == "__main__":
     image = Utils.synthesize_signal01()
     gw = GaborWavelet(image)
-    print("success")
+    gw.visualize(theta=0, out_path="./signal01.png")

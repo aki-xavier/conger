@@ -1,28 +1,10 @@
 import math
-from pathlib import Path
 
+import matplotlib
 import mlx.core as mx
 
-# def label_coherence(labels, Ny, Nx):
-#     """4-neighbour agreement rate (0..2) of a label map."""
-#     lab = labels.reshape(Ny, Nx)
-#     dh = (lab[:, 1:] == lab[:, :-1]).astype(mx.float32).mean()
-#     dv = (lab[1:, :] == lab[:-1, :]).astype(mx.float32).mean()
-#     return float(dh + dv)
-
-
-# def remap_accuracy(labels_pred, gt):
-#     """Best-match accuracy over all K! label permutations."""
-#     lab = mx.array(labels_pred, dtype=mx.int32)
-#     g = mx.array(gt, dtype=mx.int32)
-#     best = 0.0
-#     best_perm = None
-#     for perm in permutations(range(int(mx.max(lab).item()) + 1)):
-#         lut = mx.array(perm, dtype=mx.int32)
-#         acc = float(mx.equal(lut[lab], g).astype(mx.float32).mean().item())
-#         if acc > best:
-#             best, best_perm = acc, perm
-#     return best, best_perm
+matplotlib.use("Agg")
+import matplotlib.pyplot as plt
 
 
 class Utils:
@@ -53,14 +35,35 @@ class Utils:
         return mx.array(ret)
 
     @staticmethod
-    def remove_dc(spectrum: mx.array) -> mx.array:
-        """Return a copy of the frequency-domain array with the DC component zeroed.
+    def grid_shape(n: int) -> tuple[int, int]:
+        if n <= 0:
+            return (0, 0)
+        # 从 sqrt(n) 向下找第一个能整除 n 的数
+        for rows in range(int(math.sqrt(n)), 0, -1):
+            if n % rows == 0:
+                cols = n // rows
+                return (rows, cols)
+        # n 是质数等无法整除的情况：向上取整
+        rows = math.ceil(math.sqrt(n))
+        cols = math.ceil(n / rows)
+        return (rows, cols)
 
-        The original array is not modified (MLX arrays are immutable).
-        """
-        result = mx.array(spectrum)
-        result[0, 0] = 0
-        return result
+    @staticmethod
+    def visualize(plots: list[tuple[str, str, mx.array]]):
+        rows, cols = Utils.grid_shape(len(plots))
+        fig, axes = plt.subplots(rows, cols, squeeze=False)
+        for row in range(rows):
+            for col in range(cols):
+                idx = row * cols + col
+                ax = axes[row][col]
+                ax.set_xticks([])
+                ax.set_yticks([])
+                title, cmap, data = plots[idx]
+                im = ax.imshow(data, cmap=cmap)
+                ax.set_title(title, fontsize=9)
+                fig.colorbar(im, ax=ax, fraction=0.046, pad=0.04)
+
+        return fig
 
     @staticmethod
     def normalize(arr: mx.array) -> mx.array:
@@ -71,12 +74,6 @@ class Utils:
     @staticmethod
     def invert(mlx_arr: mx.array) -> mx.array:
         return 1.0 - mlx_arr
-
-    @staticmethod
-    def out_dir(folder: str) -> Path:
-        d = Path(__file__).resolve().parent.parent / folder
-        d.mkdir(parents=True, exist_ok=True)
-        return d
 
     @staticmethod
     def synthesize_signal01(size: int = 300) -> mx.array:
@@ -270,70 +267,6 @@ class Utils:
         return noise * mask + grating * (1.0 - mask)
 
     @staticmethod
-    def make_pattern_complex(
-        shape: tuple[int, int], l_case: str, hs_case: str
-    ) -> tuple[mx.array, mx.array, mx.array]:
-        """Build an HSL image and return (hs_complex, rgb, L).
-
-        Args:
-            shape: (H, W) of the output.
-            l_case: Lightness case — ``"edge"``, ``"texture"``, or ``"smooth"``.
-            hs_case: Hue–saturation case — ``"edge"``, ``"texture"``, or ``"smooth"``.
-
-        Returns:
-            (hs_complex, rgb, L) — all mlx arrays.
-        """
-        H, W = shape
-
-        # ── lightness map ──
-        if l_case == "edge":
-            l = mx.where(mx.arange(W).reshape(1, -1) < W // 2, 0.3, 0.8)
-            l = mx.broadcast_to(l, (H, W)).astype(mx.float32)
-        elif l_case == "texture":
-            lam = 16.0
-            x = mx.arange(W, dtype=mx.float32).reshape(1, -1)
-            l = 0.55 + 0.25 * mx.sin(2 * math.pi * (x - W / 2) / lam)
-            l = mx.broadcast_to(l, (H, W)).astype(mx.float32)
-        elif l_case == "smooth":
-            rng = mx.random.key(17)
-            l = (
-                mx.full((H, W), 0.6, dtype=mx.float32)
-                + mx.random.normal(shape=(H, W), key=rng).astype(mx.float32) * 1e-4
-            )
-        else:
-            raise ValueError(f"unknown l_case: {l_case}")
-
-        # ── hue map ──
-        if hs_case == "edge":
-            hue_rad = mx.where(mx.arange(W).reshape(1, -1) < W // 2, 0.0, math.pi)
-            hue_rad = mx.broadcast_to(hue_rad, (H, W)).astype(mx.float32)
-            hue_norm = hue_rad / (2 * math.pi)
-            sat = mx.full((H, W), 1.0, dtype=mx.float32)
-        elif hs_case == "texture":
-            lam = 16.0
-            x = mx.arange(W, dtype=mx.float32).reshape(1, -1)
-            hue_norm = 0.5 + 0.25 * mx.sin(2 * math.pi * (x - W / 2) / lam)
-            hue_norm = mx.broadcast_to(hue_norm, (H, W)).astype(mx.float32)
-            sat = mx.full((H, W), 1.0, dtype=mx.float32)
-        elif hs_case == "smooth":
-            hue_rad = mx.full((H, W), math.radians(60), dtype=mx.float32)
-            hue_norm = hue_rad / (2 * math.pi)
-            rng = mx.random.key(31)
-            sat = (
-                mx.full((H, W), 0.5, dtype=mx.float32)
-                + mx.random.normal(shape=(H, W), key=rng).astype(mx.float32) * 1e-4
-            )
-        else:
-            raise ValueError(f"unknown hs_case: {hs_case}")
-
-        hsl = mx.stack([hue_norm, sat, l], axis=-1).astype(mx.float32)
-        from color import Color  # lazy — avoids circular import
-
-        rgb = Color.hsl_to_rgb(mx.array(hsl))
-        hsl_round = Color.rgb_to_hsl(rgb)
-        return Color.hsl_to_complex(hsl_round), rgb, l
-
-    @staticmethod
     def corrcoef(a: mx.array, b: mx.array) -> float:
         """Pearson correlation coefficient between two 1-D arrays."""
         a_c = a - a.mean()
@@ -384,9 +317,9 @@ class Utils:
     def make_luminance_edge(shape: tuple[int, int]) -> mx.array:
         """Luminance-only step edge: left half 0.3, right half 0.7."""
         H, W = shape
-        l = mx.where(mx.arange(W).reshape(1, -1) < W // 2, 0.3, 0.7)
-        l = mx.broadcast_to(l, (H, W)).astype(mx.float32)
-        rgb = mx.stack([l, l, l], axis=-1).astype(mx.float32)
+        lum = mx.where(mx.arange(W).reshape(1, -1) < W // 2, 0.3, 0.7)
+        lum = mx.broadcast_to(lum, (H, W)).astype(mx.float32)
+        rgb = mx.stack([lum, lum, lum], axis=-1).astype(mx.float32)
         from color import Color  # lazy — avoids circular import
 
         hsl = Color.rgb_to_hsl(mx.array(rgb))

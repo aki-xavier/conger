@@ -2,17 +2,8 @@ import mlx.core as mx
 import numpy as np
 from PIL import Image
 
-from utils import Utils
-
 
 class Color:
-    @staticmethod
-    def import_image(filename: str, mode: str | None = None) -> Image.Image:
-        img = Image.open(Utils.out_dir("images") / filename)
-        if mode is not None:
-            img = img.convert(mode)
-        return img
-
     @staticmethod
     def image_to_mlx(image: Image.Image) -> mx.array:
         # Normalize to [0, 1]; numpy bridge required because mx.array
@@ -92,7 +83,8 @@ class Color:
         Converts an sRGB image to CIELAB (L*a*b*) color space using Apple MLX.
 
         Args:
-            rgb_image: An mx.array of shape (..., 3) with RGB values in the range [0, 1].
+            rgb_image: An mx.array of shape (..., 3) with RGB values in the
+                range [0, 1].
 
         Returns:
             An mx.array of shape (..., 3) containing the L*a*b* values.
@@ -155,10 +147,12 @@ class Color:
         Converts an sRGB image to HSL color space using Apple MLX.
 
         Args:
-            rgb_image: An mx.array of shape (..., 3) with RGB values in the range [0, 1].
+            rgb_image: An mx.array of shape (..., 3) with RGB values in the
+                range [0, 1].
 
         Returns:
-            An mx.array of shape (..., 3) containing H in [0, 1), S in [0, 1], L in [0, 1].
+            An mx.array of shape (..., 3) containing H in [0, 1), S in [0, 1],
+            L in [0, 1].
         """
         if rgb_image.ndim not in (2, 3):
             raise ValueError(f"rgb_image must be 2-D or 3-D, got ndim={rgb_image.ndim}")
@@ -200,7 +194,8 @@ class Color:
         Converts an HSL image to sRGB color space using Apple MLX.
 
         Args:
-            hsl_image: An mx.array of shape (..., 3) with H in [0, 1), S in [0, 1], L in [0, 1].
+            hsl_image: An mx.array of shape (..., 3) with H in [0, 1),
+                S in [0, 1], L in [0, 1].
 
         Returns:
             An mx.array of shape (..., 3) with RGB values clipped to the range [0, 1].
@@ -251,7 +246,8 @@ class Color:
         Converts an HSL image to a complex-valued representation using Apple MLX.
 
         Args:
-            hsl_image: An mx.array of shape (..., 3) with H in [0, 1), S in [0, 1], L in [0, 1].
+            hsl_image: An mx.array of shape (..., 3) with H in [0, 1),
+                S in [0, 1], L in [0, 1].
 
         Returns:
             A complex-valued mx.array of the same leading shape, computed as
