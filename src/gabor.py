@@ -238,10 +238,18 @@ class GaborWavelet:
 
         ori = self.get_ori_at(theta=theta)
 
+        gabor = mx.real(mx.fft.ifft2(self.fft))
+
+        if self.pad > 0:
+            gabor = gabor[
+                self.pad : self.pad + self.height,
+                self.pad : self.pad + self.width,
+            ]
+
         plots = [
             ("original", "gray", self.img),
-            ("fft", "magma", mx.log1p(mx.abs(mx.fft.fftshift(self.fft)))),
             ("dc", "gray", self.dc),
+            ("gabor", "coolwarm", gabor),
             ("slope", "viridis", ori.slope),
             ("residual", "viridis", ori.residual),
             ("res_scale", "viridis", ori.res_scale),
