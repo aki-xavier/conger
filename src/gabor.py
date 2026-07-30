@@ -17,6 +17,8 @@ class GaborOri:
     slope: mx.array | None = None  # 幂律谱斜率 α: log e ≈ a − α·log f
     residual: mx.array | None = None  # 幂律拟合残差范数（非 1/f 程度）
     res_scale: mx.array | None = None  # 残差峰所在频率（纹理特征尺度）
+    pc: mx.array | None = None  # 跨尺度相位一致性 |Σresp| / Σ|resp|
+    odd_frac: mx.array | None = None  # 奇对称占比: 1=阶跃, 0=细线
 
     def __post_init__(self):
         for s in self.resps:
@@ -58,6 +60,23 @@ class GaborOri:
         f_arr = mx.array(freqs, dtype=mx.float32)
         self.res_scale = f_arr[idx]
 
+    def calc_phase(self):
+        """跨尺度相位特征: pc = 一致性, odd_frac = 奇偶类型(阶跃/细线)。
+
+        单边频域核使空间响应为解析信号: 实部=偶对称(细线)通道,
+        虚部=奇对称(阶跃)通道。边缘/细线处各尺度响应同相 → pc≈1;
+        噪声相位随机 → pc 低。
+        """
+        s_sum = self.resps[0]
+        a_sum = mx.abs(self.resps[0])
+        for resp in self.resps[1:]:
+            s_sum = s_sum + resp
+            a_sum = a_sum + mx.abs(resp)
+        mag = mx.abs(s_sum)
+        # 三角不等式保证 pc≤1, minimum 仅作数值安全
+        self.pc = mx.minimum(mag / mx.maximum(a_sum, 1e-12), 1.0)
+        self.odd_frac = mx.abs(mx.imag(s_sum)) / mx.maximum(mag, 1e-12)
+
 
 @dataclass(slots=True)
 class GaborWavelet:
@@ -70,7 +89,7 @@ class GaborWavelet:
     bandwidth: float = 1.0  # used to create gabor kernel
     gamma: float = 1.0  # used to create gabor kernel; 1.0 gives enough
     # angular selectivity for the second orientation harmonic (r2) to survive
-    adaptive_pad: bool = False
+    adaptive_pad: bool = True
     pad: int = 0
     fft: mx.array | None = None
     xgrid: mx.array | None = None
@@ -195,6 +214,7 @@ class GaborWavelet:
 
             go = GaborOri(resps=resps)
             go.calc_powerlaw(freqs)
+            go.calc_phase()
             self.oris.append(go)
 
     def gabor_kernel(self, lam: float, theta: float) -> mx.array:
@@ -253,6 +273,7 @@ class GaborWavelet:
             ("slope", "viridis", ori.slope),
             ("residual", "viridis", ori.residual),
             ("res_scale", "viridis", ori.res_scale),
+            ("pc", "viridis", ori.pc),
         ]
 
         fig = Utils.visualize(plots)

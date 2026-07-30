@@ -222,3 +222,4 @@ __marimo__/
 *.bkp
 
 .DS_Store
+artifacts/*.png
