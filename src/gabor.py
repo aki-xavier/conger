@@ -282,6 +282,7 @@ class GaborWavelet:
             ("residual", "viridis", ori.residual),
             ("bump_freq", "viridis", ori.bump_freq),
             ("pc", "viridis", ori.pc),
+            ("odd_frac", "viridis", ori.odd_frac),
         ]
 
         fig = Utils.visualize(plots)
