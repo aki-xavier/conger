@@ -204,7 +204,7 @@ class Utils:
         """Grating frequency change — Type D: texture→texture (different scale).
 
         Left half: grating at wavelength1. Right half: grating at
-        wavelength2. Slope and res_scale jump; the fit residual stays
+        wavelength2. Slope and bump_freq jump; the fit residual stays
         similar (both halves are single-scale).
 
         Args:

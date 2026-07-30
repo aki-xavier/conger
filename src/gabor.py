@@ -16,7 +16,8 @@ class GaborOri:
     safe_e: mx.array | None = None
     slope: mx.array | None = None  # 幂律谱斜率 α: log e ≈ a − α·log f
     residual: mx.array | None = None  # 幂律拟合残差范数（非 1/f 程度）
-    res_scale: mx.array | None = None  # 残差峰所在频率（纹理特征尺度）
+    bump_freq: mx.array | None = None  # 谱鼓包频率 cycles/sample (连续,
+    # Nyquist=0.5 为固定上界便于归一化; 残差显著时有意义)
     pc: mx.array | None = None  # 跨尺度相位一致性 |Σresp| / Σ|resp|
     odd_frac: mx.array | None = None  # 奇对称占比: 1=阶跃, 0=细线
 
@@ -35,10 +36,13 @@ class GaborOri:
         """Per-pixel power-law fit of the band spectrum: log p ≈ a − α·log f.
 
         Produces three roughly-orthogonal features:
-        slope     — spectral slope α (replaces centroid/variance/rolloff),
-        residual  — RMSE of the fit in log space (non-1/f-ness),
-        res_scale — frequency of the largest positive residual (texture
-                    scale); meaningful only where residual is significant.
+        slope      — spectral slope α (replaces centroid/variance/rolloff),
+        residual   — RMSE of the fit in log space (non-1/f-ness),
+        bump_freq  — frequency of the spectral bump: centroid of the
+                     positive linear-domain excess p − p_fit over log f,
+                     in cycles/sample (Nyquist = 0.5). Continuous
+                     (sub-band precision); meaningful only where
+                     residual is significant.
         """
         # normalized band energies, floored so log is finite (floored bands
         # count as strong negative deviations from a power law)
@@ -56,9 +60,13 @@ class GaborOri:
         resid = y - fit
         self.slope = slope
         self.residual = mx.sqrt((resid * resid).mean(axis=0))
-        idx = mx.argmax(resid, axis=0)
-        f_arr = mx.array(freqs, dtype=mx.float32)
-        self.res_scale = f_arr[idx]
+
+        # bump centroid 在线性 p 域计算: 对数域地板值会让拟合线跌穿地板,
+        # 把 argmax/质心错误地甩到粗端
+        w = mx.maximum(mx.stack(p) - mx.exp(fit), 0.0)  # 鼓包(线性域)
+        wsum = w.sum(axis=0)
+        bc = (w * x.reshape(-1, 1, 1)).sum(axis=0) / mx.maximum(wsum, 1e-12)
+        self.bump_freq = mx.exp(bc)  # log f 质心 → 频率
 
     def calc_phase(self):
         """跨尺度相位特征: pc = 一致性, odd_frac = 奇偶类型(阶跃/细线)。
@@ -272,7 +280,7 @@ class GaborWavelet:
             ("gabor", "coolwarm", gabor),
             ("slope", "viridis", ori.slope),
             ("residual", "viridis", ori.residual),
-            ("res_scale", "viridis", ori.res_scale),
+            ("bump_freq", "viridis", ori.bump_freq),
             ("pc", "viridis", ori.pc),
         ]
 
@@ -293,6 +301,11 @@ if __name__ == "__main__":
         ("signal07", Utils.synthesize_signal07()),
         ("signal08", Utils.synthesize_signal08()),
         ("signal09", Utils.synthesize_signal09()),
+        # 补充类别覆盖: 纯色 / 粗纹理
+        # (细纹理=signal03+04, 强边缘=signal01, 弱边缘=signal08——
+        #  形状特征对比度不变, 单一阶跃对比度样本即可)
+        ("flat", Utils.make_smooth_patch((300, 300))),
+        ("coarse_tex", Utils.make_grating((300, 300), 64.0, 0.0)),
     ]
     for task in tasks:
         name, img = task
