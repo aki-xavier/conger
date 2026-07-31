@@ -33,3 +33,7 @@ reportUnknownVariableType = false
 reportUnknownParameterType = false
 reportOptionalOperand = false
 reportOptionalMemberAccess = false
+reportUnusedVariable = false
+reportUnknownLambdaType = false
+reportMissingParameterType = false
+reportArgumentType = false

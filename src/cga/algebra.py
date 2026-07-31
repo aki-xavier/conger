@@ -6,11 +6,12 @@ reverse, dual, norm, and constructors for CGA primitives.
 All operations use precomputed product tables for GPU-accelerated
 computation via MLX.
 
-表示约定 (统一): 所有原语构造器返回**直接形式** (join 表示)——
-  point (grade 1) / point_pair (grade 2) / line, circle (grade 3) /
-  plane, sphere (grade 4)
-关联判据统一为 `op(up(p), X) = 0` (点 p 在原语 X 上)。
-距离函数接受直接形式, 内部自行取对偶; meet 用于求交。
+表示约定 (与 simu.cga 一致):
+  - 点/点对/线为**直接 (join) 形式**: point (grade 1) / point_pair
+    (grade 2) / line (grade 3 = p1∧p2∧e∞); 关联判据 op(p, X) = 0。
+  - 平面/球/圆为**对偶形式**: plane, sphere (grade 1 向量) / circle
+    (grade 2); 关联判据 ip(p, X) = 0。
+  距离函数直接读取对偶形式的系数 (float64); meet 接受直接形式输入。
 """
 
 import math
@@ -24,8 +25,23 @@ from cga.multivector import (
     GRADE_INDICES,
     GRADE_MASKS,
     NUM_COMPONENTS,
+    NUM_GRADES,
     Multivector,
 )
+
+
+def _grade_signs(sign_of_grade) -> mx.array:
+    """Build a per-component ±1 mask from a per-grade sign function."""
+    vals = [1.0] * NUM_COMPONENTS
+    for g in range(NUM_GRADES):
+        for idx in GRADE_INDICES[g]:
+            vals[idx] = float(sign_of_grade(g))
+    return mx.array(vals, dtype=mx.float32)
+
+
+# Sign masks for the involutions, precomputed once at module load.
+_REVERSE_MASK = _grade_signs(lambda g: (-1) ** (g * (g - 1) // 2))
+_INVOLUTION_MASK = _grade_signs(lambda g: -1 if g % 2 else 1)
 
 
 def gp(a: Multivector, b: Multivector) -> Multivector:
@@ -52,33 +68,43 @@ def gp(a: Multivector, b: Multivector) -> Multivector:
 def ip(a: Multivector, b: Multivector) -> Multivector:
     """Left contraction (inner product) a ⌋ b.
 
-    For blades: grade_k ⌋ grade_m = <grade_k * grade_m>_{|m-k|} if m >= k, else 0.
+    Linear extension of the blade rule over all grade pairs:
+        a ⌋ b = Σ_{r<=s} < <a>_r * <b>_s >_{s-r}
+    Correct for general mixed-grade multivectors.
     """
-    full_gp = gp(a, b)
-    a_grade = _dominant_grade(a)
-    b_grade = _dominant_grade(b)
-    target_grade = abs(b_grade - a_grade) if b_grade >= a_grade else -1
-
-    if target_grade < 0:
-        return Multivector.zeros()
-
-    return Multivector(full_gp.values * GRADE_MASKS[target_grade])
+    result = mx.zeros(NUM_COMPONENTS, dtype=mx.float32)
+    for ga in range(NUM_GRADES):
+        a_g = a.values * GRADE_MASKS[ga]
+        if not bool(mx.any(a_g != 0).item()):
+            continue
+        for gb in range(ga, NUM_GRADES):
+            b_g = b.values * GRADE_MASKS[gb]
+            if not bool(mx.any(b_g != 0).item()):
+                continue
+            prod = gp(Multivector(a_g), Multivector(b_g))
+            result = result + prod.values * GRADE_MASKS[gb - ga]
+    return Multivector(result)
 
 
 def op(a: Multivector, b: Multivector) -> Multivector:
     """Outer product a ∧ b.
 
-    For blades: grade_k ∧ grade_m = <grade_k * grade_m>_{k+m}.
+    Linear extension of the blade rule over all grade pairs:
+        a ∧ b = Σ_{r,s} < <a>_r * <b>_s >_{r+s}
+    Correct for general mixed-grade multivectors.
     """
-    full_gp = gp(a, b)
-    a_grade = _dominant_grade(a)
-    b_grade = _dominant_grade(b)
-    target_grade = a_grade + b_grade
-
-    if target_grade >= 6:
-        return Multivector.zeros()
-
-    return Multivector(full_gp.values * GRADE_MASKS[target_grade])
+    result = mx.zeros(NUM_COMPONENTS, dtype=mx.float32)
+    for ga in range(NUM_GRADES):
+        a_g = a.values * GRADE_MASKS[ga]
+        if not bool(mx.any(a_g != 0).item()):
+            continue
+        for gb in range(NUM_GRADES - ga):
+            b_g = b.values * GRADE_MASKS[gb]
+            if not bool(mx.any(b_g != 0).item()):
+                continue
+            prod = gp(Multivector(a_g), Multivector(b_g))
+            result = result + prod.values * GRADE_MASKS[ga + gb]
+    return Multivector(result)
 
 
 def reverse(a: Multivector) -> Multivector:
@@ -86,22 +112,12 @@ def reverse(a: Multivector) -> Multivector:
 
     For a grade-k blade: rev(A_k) = (-1)^{k(k-1)/2} A_k.
     """
-    vals = mx.array(a.values)  # copy
-    for g in range(6):
-        sign = (-1) ** (g * (g - 1) // 2)
-        if sign == -1:
-            for idx in GRADE_INDICES[g]:
-                vals[idx] = -vals[idx]
-    return Multivector(vals)
+    return Multivector(a.values * _REVERSE_MASK)
 
 
 def grade_involution(a: Multivector) -> Multivector:
     """Grade involution: negates odd-grade components."""
-    vals = mx.array(a.values)
-    for g in [1, 3, 5]:
-        for idx in GRADE_INDICES[g]:
-            vals[idx] = -vals[idx]
-    return Multivector(vals)
+    return Multivector(a.values * _INVOLUTION_MASK)
 
 
 def conjugate(a: Multivector) -> Multivector:
@@ -110,21 +126,24 @@ def conjugate(a: Multivector) -> Multivector:
 
 
 def dual(a: Multivector) -> Multivector:
-    """Hodge dual: multiply by the inverse pseudoscalar I^{-1}.
+    """Hodge dual: multiply by the inverse pseudoscalar I⁻¹.
 
-    In CGA, I = e1230∞, and I^2 = -1, so I^{-1} = -I.
-    dual(A) = A * I^{-1} = -A * I.
+    Orientation convention (与 simu.cga 一致): I = e123 ∧ e∞ ∧ e0,
+    matching the `clifford` library's conformal pseudoscalar e12345
+    (since e∞ ∧ e0 = +e45 in its e4/e5 basis). With this orientation
+    I² = -1, so I⁻¹ = -I and dual(A) = A · I⁻¹.
     """
-    I_vals = mx.zeros(NUM_COMPONENTS, dtype=mx.float32)
-    I_vals[31] = 1.0
-    I_inv = Multivector(-I_vals)
-    return gp(a, I_inv)
+    # I = e123∧e∞∧e0 = -(canonical blade 31);  I⁻¹ = -I = +blade31.
+    I_inv_vals = mx.zeros(NUM_COMPONENTS, dtype=mx.float32)
+    I_inv_vals[31] = 1.0
+    return gp(a, Multivector(I_inv_vals))
 
 
 def meet(a: Multivector, b: Multivector) -> Multivector:
     """Intersection of two direct-form primitives: A ∨ B = (A* ∧ B*)*.
 
-    例: meet(plane, plane) = line; meet(line, sphere) = point_pair.
+    输入需为直接形式; 对偶形式的原语 (plane/sphere/circle) 先过
+    dual() 再传入。例: meet(dual(π1), dual(π2)) = 交线 (直接形式)。
     """
     return dual(op(dual(a), dual(b)))
 
@@ -167,18 +186,6 @@ def weight(a: Multivector) -> Multivector:
     return a - bulk(a)
 
 
-def _dominant_grade(a: Multivector) -> int:
-    """Find the grade with the largest component magnitude."""
-    max_mag = 0.0
-    best_grade = 0
-    for g in range(6):
-        mag = float(mx.sum(mx.abs(a.values[GRADE_INDICES[g]])).item())
-        if mag > max_mag:
-            max_mag = mag
-            best_grade = g
-    return best_grade
-
-
 # ── Basis vectors ──────────────────────────────────────────────────────────
 
 E1 = Multivector.vector(1, 0, 0, 0, 0)
@@ -188,7 +195,9 @@ E0 = Multivector.vector(0, 0, 0, 1, 0)
 EINF = Multivector.vector(0, 0, 0, 0, 1)
 
 
-# ── CGA Object Constructors (统一返回直接/join 形式) ───────────────────────
+# ── CGA Object Constructors (与 simu.cga 约定一致) ─────────────────────────
+#
+# 点/点对/线: 直接 (join) 形式; 平面/球/圆: 对偶形式。
 
 
 def point(x: float, y: float, z: float) -> Multivector:
@@ -204,13 +213,13 @@ def point(x: float, y: float, z: float) -> Multivector:
 def point_pair(p1: Multivector, p2: Multivector) -> Multivector:
     """Create a point pair (0-sphere) from two conformal points (grade 2).
 
-    Pp = p1 ∧ p2
+    Pp = p1 ∧ p2  (直接形式)
     """
     return op(p1, p2)
 
 
 def line(p1: Multivector, p2: Multivector) -> Multivector:
-    """Create a line from two conformal points (grade 3).
+    """Create a line from two conformal points (grade 3, 直接形式).
 
     L = p1 ∧ p2 ∧ e∞
     """
@@ -218,27 +227,29 @@ def line(p1: Multivector, p2: Multivector) -> Multivector:
 
 
 def plane(normal_vec: tuple[float, float, float], distance: float) -> Multivector:
-    """Create a plane from a normal vector and distance from origin (grade 4).
+    """Create a plane from a normal vector and distance from origin
+    (grade 1, 对偶形式).
 
-    直接形式 = dual(n + d*e∞), n 为单位法向量。
+    π = n + d*e∞  where n = nx*e1 + ny*e2 + nz*e3, 单位法向量。
     """
     nx, ny, nz = normal_vec
     nl = math.sqrt(nx * nx + ny * ny + nz * nz)
-    if nl > 1e-12:
-        nx, ny, nz = nx / nl, ny / nl, nz / nl
-    return dual(Multivector.vector(nx, ny, nz, 0.0, distance))
+    if nl <= 1e-12:
+        raise ValueError(f"plane normal vector is zero or degenerate: {normal_vec}")
+    nx, ny, nz = nx / nl, ny / nl, nz / nl
+    return Multivector.vector(nx, ny, nz, 0.0, distance)
 
 
 def sphere(center: tuple[float, float, float], radius: float) -> Multivector:
-    """Create a sphere from center and radius (grade 4).
+    """Create a sphere from center and radius (grade 1, 对偶形式).
 
-    直接形式 = dual(up(c) - 0.5*r^2*e∞)。
+    s = up(c) - 0.5*r^2*e∞  where up(c) is the conformal center point.
     """
     cx, cy, cz = center
     pc = point(cx, cy, cz)
     half_r2 = 0.5 * radius * radius
     correction = Multivector.vector(0, 0, 0, 0, half_r2)
-    return dual(pc - correction)
+    return pc - correction
 
 
 def circle(
@@ -246,20 +257,14 @@ def circle(
     radius: float,
     normal: tuple[float, float, float],
 ) -> Multivector:
-    """Create a circle as sphere ∩ plane (grade 3, 直接形式).
+    """Create a circle as intersection of sphere and plane (grade 2, 对偶形式).
 
-    C = dual(对偶球 ∧ 对偶平面) —— 即 meet 后再取一致表示。
+    C = sphere ∧ plane  (对偶球 ∧ 对偶平面)
     """
-    cx, cy, cz = center
-    pc = point(cx, cy, cz)
-    s_dual = pc - Multivector.vector(0, 0, 0, 0, 0.5 * radius * radius)
-    nx, ny, nz = normal
-    nl = math.sqrt(nx * nx + ny * ny + nz * nz)
-    if nl > 1e-12:
-        nx, ny, nz = nx / nl, ny / nl, nz / nl
-    d = cx * nx + cy * ny + cz * nz
-    p_dual = Multivector.vector(nx, ny, nz, 0.0, d)
-    return dual(op(s_dual, p_dual))
+    s = sphere(center, radius)
+    d = center[0] * normal[0] + center[1] * normal[1] + center[2] * normal[2]
+    p = plane(normal, d)  # plane() 负责法向量归一化与退化检查
+    return op(s, p)
 
 
 def mv_scalar_inline(s: float) -> Multivector:
@@ -269,46 +274,70 @@ def mv_scalar_inline(s: float) -> Multivector:
     return Multivector(vals)
 
 
-# ── Distance functions (接受直接形式, 内部取对偶) ──────────────────────────
+# ── Distance functions (float64 欧氏公式) ──────────────────────────────────
+#
+# 不走 float32 的 conformal 内积: sqrt(-2·p1·p2) 在远原点时灾难性
+# 抵消 (实测 (1000,0,0)-(1001,0,0) 得 0.0)。null 基下 conformal 权重
+# 即 e0 系数 (槽 4), 显式存储, 无基换算抵消。
+
+
+def _euclidean_coords(p: Multivector) -> tuple[float, float, float]:
+    """Extract Euclidean coordinates from a conformal point.
+
+    Reads the e1/e2/e3 coefficients and normalizes them by the e0
+    (homogeneous weight) coefficient, in float64.
+    """
+    w = float(p.values[4])  # e0 coefficient
+    if abs(w) < 1e-12:
+        raise ValueError("multivector has no e0 component; not a finite point")
+    return (
+        float(p.values[1]) / w,
+        float(p.values[2]) / w,
+        float(p.values[3]) / w,
+    )
 
 
 def dist_point_point(p1: Multivector, p2: Multivector) -> float:
     """Euclidean distance between two conformal points.
 
-    d(p1, p2) = sqrt(-2 * p1·p2)
+    权重归一欧氏坐标直接作差 (float64), 见模块注释。
     """
-    dot = float(ip(p1, p2).values[0])
-    d_sq = -2.0 * dot
-    return math.sqrt(max(0.0, d_sq))
+    x1, y1, z1 = _euclidean_coords(p1)
+    x2, y2, z2 = _euclidean_coords(p2)
+    dx, dy, dz = x1 - x2, y1 - y2, z1 - z2
+    return math.sqrt(dx * dx + dy * dy + dz * dz)
 
 
 def dist_point_plane(p: Multivector, pi: Multivector) -> float:
-    """Signed distance from a conformal point to a (direct-form) plane.
+    """Signed distance from a conformal point to a (对偶形式) plane.
 
-    d = p·π* / |π*_bulk|, π* 为对偶平面。
+    欧氏公式 (n·x − d)/|n|, 平面 π = n + d·e∞ 的 (n, d) 与点的权重
+    归一坐标, 全程 float64。
     """
-    pi_dual = undual(pi)
-    dot = float(ip(p, pi_dual).values[0])
-    n_bulk = norm(bulk(pi_dual))
-    if n_bulk < 1e-12:
+    x, y, z = _euclidean_coords(p)
+    nx, ny, nz = float(pi.values[1]), float(pi.values[2]), float(pi.values[3])
+    d = float(pi.values[5])  # e∞ coefficient
+    nl = math.sqrt(nx * nx + ny * ny + nz * nz)
+    if nl < 1e-12:
         return float("inf")
-    return dot / n_bulk
+    return (nx * x + ny * y + nz * z - d) / nl
 
 
 def dist_point_sphere(p: Multivector, s: Multivector) -> float:
-    """Signed distance from a point to a (direct-form) sphere surface.
+    """Signed distance from a point to a (对偶形式) sphere surface.
 
-    对偶球 s* = up(c) − ½ρ²e∞ (weight w = −s*·e∞, 归一化时 w=1):
-    ρ² = s*²/w², c = s* 的欧氏部分 / w。
+    对偶球 s = w·(up(c) − ½ρ²e∞): 球心 c = v/w, ρ² = |c|² − 2f/w
+    (v = 欧氏部分, w = e0 系数, f = e∞ 系数), float64。
     Positive = outside, negative = inside.
     """
-    s_dual = undual(s)
-    s_vals = s_dual.values
-    w = -float(ip(s_dual, EINF).values[0])
-    cx = float(s_vals[1]) / w
-    cy = float(s_vals[2]) / w
-    cz = float(s_vals[3]) / w
-    rho_sq = float(gp(s_dual, s_dual).values[0]) / (w * w)
+    w = float(s.values[4])  # e0 coefficient
+    if abs(w) < 1e-12:
+        raise ValueError("sphere multivector has no e0 component")
+    v1, v2, v3 = float(s.values[1]), float(s.values[2]), float(s.values[3])
+    f = float(s.values[5])  # e∞ coefficient
+    cx, cy, cz = v1 / w, v2 / w, v3 / w
+    rho_sq = (v1 * v1 + v2 * v2 + v3 * v3) / (w * w) - 2.0 * f / w
     r = math.sqrt(max(0.0, rho_sq))
-    pc = point(cx, cy, cz)
-    return dist_point_point(p, pc) - r
+    x, y, z = _euclidean_coords(p)
+    dx, dy, dz = x - cx, y - cy, z - cz
+    return math.sqrt(dx * dx + dy * dy + dz * dz) - r

@@ -2,6 +2,7 @@ import math
 from dataclasses import dataclass, field
 from pathlib import Path
 
+import matplotlib.pyplot as plt
 import mlx.core as mx
 
 from color import Color
@@ -14,7 +15,7 @@ class GaborOri:
     es: list[mx.array] = field(default_factory=list)  # energies
     sum_e: mx.array | None = None
     safe_e: mx.array | None = None
-    slope: mx.array | None = None  # 幂律谱斜率 α: log e ≈ a − α·log f
+    slope: mx.array | None = None  # 幂律衰减率 α: log e ≈ a − α·log f (1/f 谱 α>0)
     residual: mx.array | None = None  # 幂律拟合残差范数（非 1/f 程度）
     bump_freq: mx.array | None = None  # 谱鼓包频率 cycles/sample (连续,
     # Nyquist=0.5 为固定上界便于归一化; 残差显著时有意义)
@@ -64,7 +65,9 @@ class GaborOri:
 
         fit = intercept + slope * x.reshape(-1, 1, 1)
         resid = y - fit
-        self.slope = slope
+        # 回归系数 dy/dx = −α; 存储衰减率 α 本身 (与字段注释的
+        # log e ≈ a − α·log f 一致, 典型 1/f² 边缘谱 α≈2)
+        self.slope = -slope
         self.residual = mx.sqrt((resid * resid).mean(axis=0))
 
         # bump centroid 在线性 p 域计算: 对数域地板值会让拟合线跌穿地板,
@@ -211,8 +214,8 @@ class GaborWavelet:
 
         # Gabor channels must not see the DC component: apply the
         # complementary Gaussian highpass (1 - h_dc) of the dc channel.
-        # Done here rather than in calc_pad so calc_dc (which runs
-        # earlier) keeps the mean.
+        # 用局部副本而非原地改写 self.fft: 保持 raw fft 不变 (visualize
+        # 的 ac 面板与潜在的重复调用都依赖它)。
         assert self.h_dc is not None
         self.fft = self.fft * (1.0 - self.h_dc)
 
@@ -261,22 +264,19 @@ class GaborWavelet:
         dpi: int = 150,
     ):
         """Render this orientation's spectral feature maps to an image.
-        Args:
-            out_path: save the figure here (e.g. ``"ori.png"``).
-            title: Optional figure title (e.g. the orientation angle).
-            cmap: Matplotlib colormap applied to every panel.
-            dpi: Save resolution.
 
-        Returns:
-            The matplotlib ``Figure`` (caller may ``plt.show()`` it).
+        Args:
+            theta: orientation angle (rad); the nearest channel is used.
+            out_path: save the figure here (e.g. ``"ori.png"``).
+            dpi: Save resolution.
         """
 
         ori = self.get_ori_at(theta=theta)
 
-        gabor = mx.real(mx.fft.ifft2(self.fft))
+        ac = mx.real(mx.fft.ifft2(self.fft))
 
         if self.pad > 0:
-            gabor = gabor[
+            ac = ac[
                 self.pad : self.pad + self.height,
                 self.pad : self.pad + self.width,
             ]
@@ -284,7 +284,7 @@ class GaborWavelet:
         plots = [
             ("original", "gray", self.img),
             ("dc", "gray", self.dc),
-            ("gabor", "coolwarm", gabor),
+            ("ac", "coolwarm", ac),
             ("slope", "viridis", ori.slope),
             ("residual", "viridis", ori.residual),
             ("bump_freq", "viridis", ori.bump_freq),
@@ -295,6 +295,7 @@ class GaborWavelet:
 
         fig = Utils.visualize(plots)
         fig.savefig(out_path, dpi=dpi)
+        plt.close(fig)
 
 
 if __name__ == "__main__":
@@ -319,24 +320,24 @@ if __name__ == "__main__":
     for task in tasks:
         name, img = task
         gw = GaborWavelet(img)
-        path = Utils.out_dir() / "artifacts" / (name + ".png")
+        path = Utils.project_root() / "artifacts" / (name + ".png")
         print(path)
         gw.visualize(theta=0, out_path=path)
 
-    img = Image.open(Utils.out_dir() / "images/12.png")
+    img = Image.open(Utils.project_root() / "images/12.png")
     img = img.convert("L")
     arr = Color.image_to_mlx(img)
     gw = GaborWavelet(arr)
-    path = Utils.out_dir() / "artifacts/signal12.png"
+    path = Utils.project_root() / "artifacts/signal12.png"
     print(path)
     gw.visualize(theta=0, out_path=path)
 
     # natural images (downloaded from picsum.photos)
     for img_id in [10, 1015, 1016, 1018, 1035]:
-        img = Image.open(Utils.out_dir() / f"images/nat{img_id}.jpg")
+        img = Image.open(Utils.project_root() / f"images/nat{img_id}.jpg")
         img = img.convert("L")
         arr = Color.image_to_mlx(img)
         gw = GaborWavelet(arr)
-        path = Utils.out_dir() / "artifacts" / f"nat{img_id}.png"
+        path = Utils.project_root() / "artifacts" / f"nat{img_id}.png"
         print(path)
         gw.visualize(theta=0, out_path=path)

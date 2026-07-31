@@ -200,10 +200,10 @@ def gmm_unary(
             :max_samples
         ]
         fit_x = feats[idx]
-        n_init = 3
+        n_init = 10  # 子采样拟合便宜: 多重启动换更优似然
     else:
         fit_x = feats
-        n_init = 10
+        n_init = 3  # 全量拟合贵: 减少重启次数
     gmm = GaussianMixture(
         n_components=K,
         covariance_type="full",

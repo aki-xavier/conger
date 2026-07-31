@@ -6,16 +6,26 @@ CGA in 5D embeds Euclidean 3D space into a conformal space with basis
 This enables unified representation of points, lines, planes, circles, spheres,
 and rigid-body transformations (motors).
 
-表示约定: 所有原语构造器返回直接 (join) 形式, 关联判据统一为
-op(up(p), X) = 0; 距离函数与 meet 内部处理对偶。
+表示约定 (与 simu.cga 一致): 点/点对/线为直接 (join) 形式, 关联判据
+op(p, X) = 0; 平面/球/圆为对偶形式, 关联判据 ip(p, X) = 0。
+meet 接受直接形式输入 (对偶原语先过 dual())。
 """
 
 from cga.algebra import (
+    E0,
+    E1,
+    E2,
+    E3,
+    EINF,
+    bulk,
     circle,
+    conjugate,
     dist_point_plane,
     dist_point_point,
+    dist_point_sphere,
     dual,
     gp,
+    grade_involution,
     ip,
     line,
     meet,
@@ -27,28 +37,60 @@ from cga.algebra import (
     point_pair,
     reverse,
     sphere,
+    undual,
+    weight,
 )
-from cga.motors import apply_motor, motor, motor_to_matrix, rotor, translator
+from cga.motors import (
+    apply_motor,
+    exp_bivector,
+    extract_velocity,
+    interpolate_motor,
+    log_motor,
+    matrix_to_quaternion,
+    motor,
+    motor_from_matrix,
+    motor_to_matrix,
+    rotor,
+    translator,
+    velocity_bivector,
+)
 from cga.multivector import (
     Multivector,
     mv_bivector,
     mv_scalar,
     mv_vector,
     mv_zeros,
+    stack_mv,
+    unstack_mv,
 )
 
 __all__ = [
+    "E0",
+    "E1",
+    "E2",
+    "E3",
+    "EINF",
     "Multivector",
     "apply_motor",
+    "bulk",
     "circle",
+    "conjugate",
     "dist_point_plane",
     "dist_point_point",
+    "dist_point_sphere",
     "dual",
+    "exp_bivector",
+    "extract_velocity",
     "gp",
+    "grade_involution",
+    "interpolate_motor",
     "ip",
     "line",
+    "log_motor",
+    "matrix_to_quaternion",
     "meet",
     "motor",
+    "motor_from_matrix",
     "motor_to_matrix",
     "mv_bivector",
     "mv_scalar",
@@ -63,5 +105,10 @@ __all__ = [
     "reverse",
     "rotor",
     "sphere",
+    "stack_mv",
     "translator",
+    "undual",
+    "unstack_mv",
+    "velocity_bivector",
+    "weight",
 ]

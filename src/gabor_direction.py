@@ -2,6 +2,7 @@ import math
 from dataclasses import dataclass, field
 from pathlib import Path
 
+import matplotlib.pyplot as plt
 import mlx.core as mx
 
 from gabor import GaborWavelet
@@ -166,7 +167,15 @@ class GaborDirection:
             return mx.take_along_axis(f, dom, axis=0)[0]
 
         self.texture = TextureField(
-            lam=1.0 / mx.maximum(at_dom("bump_freq"), 1e-6),
+            # lam 钳制到滤波器组支撑域 [lam_min, lam_max]; bump 不显著
+            # 处 bump_freq 无意义, 由 residual / weight 门控
+            lam=mx.clip(
+                1.0 / mx.maximum(at_dom("bump_freq"), 1e-6),
+                self.gw.lam_min,
+                self.gw.lams[-1],
+            ),
+            # dir 取全局聚合方向 (能量加权圆均值) 而非 argmax 方向:
+            # R 高时二者一致; R 低时 weight = ρ·R 已把该像素降权
             dir=direction,
             residual=at_dom("residual"),
             weight=rho * R,
@@ -195,6 +204,7 @@ class GaborDirection:
         ]
         fig = Utils.visualize(plots)
         fig.savefig(out_path, dpi=dpi)
+        plt.close(fig)
 
     def visualize_fields(self, out_path: str | Path, dpi: int = 150):
         """Render the aggregated primitive hypothesis fields."""
@@ -208,6 +218,7 @@ class GaborDirection:
         ]
         fig = Utils.visualize(plots)
         fig.savefig(out_path, dpi=dpi)
+        plt.close(fig)
 
 
 if __name__ == "__main__":
@@ -217,12 +228,12 @@ if __name__ == "__main__":
     from color import Color
 
     for img_id in [10, 1015, 1016, 1018, 1035]:
-        img = Image.open(Utils.out_dir() / f"images/nat{img_id}.jpg")
+        img = Image.open(Utils.project_root() / f"images/nat{img_id}.jpg")
         arr = Color.image_to_mlx(img.convert("L"))
         gr = GaborDirection(GaborWavelet(arr))
-        path = Utils.out_dir() / "artifacts" / f"nat{img_id}_direction.png"
+        path = Utils.project_root() / "artifacts" / f"nat{img_id}_direction.png"
         print(path)
         gr.visualize(scale=2, out_path=path)
-        path = Utils.out_dir() / "artifacts" / f"nat{img_id}_fields.png"
+        path = Utils.project_root() / "artifacts" / f"nat{img_id}_fields.png"
         print(path)
         gr.visualize_fields(out_path=path)

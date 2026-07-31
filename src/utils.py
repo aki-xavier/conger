@@ -10,9 +10,9 @@ import matplotlib.pyplot as plt
 
 class Utils:
     @staticmethod
-    def out_dir() -> Path:
-        d = Path(__file__).resolve().parent.parent
-        return d
+    def project_root() -> Path:
+        """Project root directory (parent of ``src/``)."""
+        return Path(__file__).resolve().parent.parent
 
     @staticmethod
     def fftfreq(n: int) -> mx.array:
@@ -78,7 +78,8 @@ class Utils:
     def normalize(arr: mx.array) -> mx.array:
         arr_min = mx.min(arr)
         arr_max = mx.max(arr)
-        return (arr - arr_min) / (arr_max - arr_min)
+        # 常数数组 → 全零 (max−min=0 时避免除零 NaN)
+        return (arr - arr_min) / mx.maximum(arr_max - arr_min, 1e-12)
 
     @staticmethod
     def invert(mlx_arr: mx.array) -> mx.array:
