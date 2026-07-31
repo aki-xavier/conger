@@ -31,3 +31,5 @@ reportUnknownMemberType = false
 reportUnknownArgumentType = false
 reportUnknownVariableType = false
 reportUnknownParameterType = false
+reportOptionalOperand = false
+reportOptionalMemberAccess = false

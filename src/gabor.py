@@ -18,6 +18,9 @@ class GaborOri:
     residual: mx.array | None = None  # 幂律拟合残差范数（非 1/f 程度）
     bump_freq: mx.array | None = None  # 谱鼓包频率 cycles/sample (连续,
     # Nyquist=0.5 为固定上界便于归一化; 残差显著时有意义)
+    bump_width: mx.array | None = None  # 鼓包宽度: excess 在 log f 域的 RMS
+    # (与 bump_freq 同权重集的前两阶矩; 纹理带宽 → shape-from-texture 的
+    # slant 精度界)
     pc: mx.array | None = None  # 跨尺度相位一致性 |Σresp| / Σ|resp|
     odd_frac: mx.array | None = None  # 奇对称占比: 1=阶跃, 0=细线
 
@@ -35,14 +38,17 @@ class GaborOri:
     def calc_powerlaw(self, freqs: list[float]):
         """Per-pixel power-law fit of the band spectrum: log p ≈ a − α·log f.
 
-        Produces three roughly-orthogonal features:
+        Produces roughly-orthogonal features:
         slope      — spectral slope α (replaces centroid/variance/rolloff),
         residual   — RMSE of the fit in log space (non-1/f-ness),
         bump_freq  — frequency of the spectral bump: centroid of the
                      positive linear-domain excess p − p_fit over log f,
                      in cycles/sample (Nyquist = 0.5). Continuous
                      (sub-band precision); meaningful only where
-                     residual is significant.
+                     residual is significant,
+        bump_width — RMS width of the bump over the same excess weights
+                     (log f domain): texture bandwidth → slant precision
+                     bound for shape-from-texture.
         """
         # normalized band energies, floored so log is finite (floored bands
         # count as strong negative deviations from a power law)
@@ -67,6 +73,12 @@ class GaborOri:
         wsum = w.sum(axis=0)
         bc = (w * x.reshape(-1, 1, 1)).sum(axis=0) / mx.maximum(wsum, 1e-12)
         self.bump_freq = mx.exp(bc)  # log f 质心 → 频率
+        # 鼓包宽度: 同一 excess 权重的二阶中心矩 (与质心天然配对, 无需
+        # 半峰搜索, wsum→0 优雅退化), log f (自然对数) 域 RMS
+        var = (w * (x.reshape(-1, 1, 1) - bc) ** 2).sum(axis=0) / mx.maximum(
+            wsum, 1e-12
+        )
+        self.bump_width = mx.sqrt(var)
 
     def calc_phase(self):
         """跨尺度相位特征: pc = 一致性, odd_frac = 奇偶类型(阶跃/细线)。
@@ -176,8 +188,6 @@ class GaborWavelet:
         # before the bank's lowest band (gain ≈ 0.14 at that band's center).
         sigma_f = 0.5 / self.lam_max()
 
-        assert self.xgrid is not None
-        assert self.ygrid is not None
         r2 = self.xgrid**2 + self.ygrid**2
         h_dc = mx.exp(-0.5 * r2 / sigma_f**2)
         dc = mx.real(mx.fft.ifft2(self.fft * h_dc))
@@ -203,7 +213,6 @@ class GaborWavelet:
         # complementary Gaussian highpass (1 - h_dc) of the dc channel.
         # Done here rather than in calc_pad so calc_dc (which runs
         # earlier) keeps the mean.
-        assert self.fft is not None
         assert self.h_dc is not None
         self.fft = self.fft * (1.0 - self.h_dc)
 
@@ -236,8 +245,6 @@ class GaborWavelet:
 
         sigma_f = sigma_f_rel * f0
 
-        assert self.xgrid is not None
-        assert self.ygrid is not None
         u = self.xgrid * math.cos(theta) + self.ygrid * math.sin(theta)
         v = -self.xgrid * math.sin(theta) + self.ygrid * math.cos(theta)
         du = u - f0
@@ -281,6 +288,7 @@ class GaborWavelet:
             ("slope", "viridis", ori.slope),
             ("residual", "viridis", ori.residual),
             ("bump_freq", "viridis", ori.bump_freq),
+            ("bump_width", "viridis", ori.bump_width),
             ("pc", "viridis", ori.pc),
             ("odd_frac", "viridis", ori.odd_frac),
         ]
