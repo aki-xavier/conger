@@ -23,11 +23,12 @@ class GaborScale:
 
     def __post_init__(self):
         for spec in self.spectra:
-            # 核是双边(mod π)的 → 频谱 Hermitian → 响应为实信号
-            resp = mx.real(mx.fft.ifft2(spec))
+            # 单边核 → 解析信号: |resp|² 是平滑包络能量 (相位不变,
+            # 无载波振荡); resp 的复相角留作跨尺度一致性备用
+            resp = mx.fft.ifft2(spec)
             if self.pad > 0:
                 resp = resp[self.pad : -self.pad, self.pad : -self.pad]
-            self.es.append(resp**2)
+            self.es.append(mx.abs(resp) ** 2)
 
         total = self.es[0]
         for e in self.es[1:]:
@@ -106,14 +107,15 @@ class GaborWavelet:
         return min(self.height, self.width) / 2.0
 
     def calc_lams(self):
+        # lams 从长波长到短波长排列 (低频→高频), 与 ffts/scales 顺序一致
         lam_min = self.lam_min
         lam_max = self.lam_max()
         if self.scale_size == 1:
-            self.lams.append(lam_min)
+            self.lams.append(lam_max)
         else:
             for i in range(self.scale_size):
-                lam = lam_min * 2.0 ** (
-                    i * math.log2(lam_max / lam_min) / (self.scale_size - 1)
+                lam = lam_max * 2.0 ** (
+                    -i * math.log2(lam_max / lam_min) / (self.scale_size - 1)
                 )
                 self.lams.append(lam)
 
@@ -148,13 +150,12 @@ class GaborWavelet:
 
     def calc_ffts(self):
         # 各向同性径向高斯核, 把剥离 DC 后的频谱按 1/lam 从低频到高频分带。
-        # lams 从短波长到长波长排列, 故逆序迭代得到低频→高频顺序。
         radius = mx.sqrt(self.xgrid**2 + self.ygrid**2)
         bw = self.bandwidth
         sigma_f_rel = (2.0**bw - 1.0) / (
             (2.0**bw + 1.0) * math.sqrt(2.0 * math.log(2.0))
         )
-        for lam in reversed(self.lams):
+        for lam in self.lams:
             f0 = 1.0 / lam
             sigma_f = sigma_f_rel * f0
             kernel = mx.exp(-0.5 * (radius - f0) ** 2 / sigma_f**2)
@@ -163,8 +164,10 @@ class GaborWavelet:
     def calc_scales(self):
         # 各向异性分解 = 各向同性频带 × 纯角度权重:
         # 在频域极角 φ 上以 θ 为中心放高斯, 与半径无关, 故角选择性
-        # 跨尺度严格一致 (尺度不变)。取向 mod π: φ 与 φ+π 是同一方向,
-        # 角距必须在 π 圆上环绕到 [−π/2, π/2)。
+        # 跨尺度严格一致 (尺度不变)。
+        # 核是单边(mod 2π)的: 只取 θ 方向的正频率半边 → 空域响应为
+        # 解析信号, |resp| 是平滑包络, 相位可用于跨尺度一致性。
+        # (θ+π 通道是 θ 通道的共轭, thetas∈[0,π) 无冗余。)
         # σ_θ = σ_f_rel/γ: 切向宽 σ_f/γ 在 r=f0 处折算成的角度,
         # 沿用 bandwidth/gamma 两个旋钮但纯角度化解释。
         bw = self.bandwidth
@@ -179,7 +182,9 @@ class GaborWavelet:
 
             for theta in self.thetas:
                 d = phi - theta
-                d = d - math.pi * mx.floor(d / math.pi + 0.5)  # wrap mod π
+                d = d - 2.0 * math.pi * mx.floor(
+                    d / (2.0 * math.pi) + 0.5
+                )  # wrap mod 2π
                 kernel = mx.exp(-0.5 * d**2 / sigma_th**2)
                 spectra.append(band * kernel)
 
@@ -204,9 +209,11 @@ class GaborWavelet:
             ("dc", "gray", dc),
         ]
 
-        for idx in range(len(self.ffts)):
-            fft = self.ffts[idx]
-            plots.append((f"{idx}", "gray", self.ifft2(fft)))
+        for idx, scale in enumerate(self.scales):
+            lam = self.lams[idx]
+            plots.append((f"s{idx} λ={lam:.1f} sum_e", "gray", scale.sum_e))
+            plots.append((f"s{idx} λ={lam:.1f} mean_dir", "hsv", scale.mean_dir))
+            plots.append((f"s{idx} λ={lam:.1f} R", "viridis", scale.resultant))
 
         fig = Utils.visualize(plots)
         fig.savefig(out_path)

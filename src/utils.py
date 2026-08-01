@@ -57,7 +57,9 @@ class Utils:
     @staticmethod
     def visualize(plots: list[tuple[str, str, mx.array]]):
         rows, cols = Utils.grid_shape(len(plots))
-        fig, axes = plt.subplots(rows, cols, squeeze=False)
+        fig, axes = plt.subplots(
+            rows, cols, squeeze=False, figsize=(cols * 2.2, rows * 2.2)
+        )
         for row in range(rows):
             for col in range(cols):
                 idx = row * cols + col
