@@ -112,6 +112,25 @@ class Utils:
         return (s + 1.0) * 0.5
 
     @staticmethod
+    def make_slanted_grid(
+        shape: tuple[int, int], lam0: float, slant: float, tilt: float
+    ) -> mx.array:
+        """斜面方格纹理 (正交投影): 表面波长 lam0 的方格, slant=倾斜角
+        (rad, 0=正面), tilt=图像内压缩方向 (rad)。沿 tilt 波长压缩为
+        lam0·cos(slant), 垂直方向不变 —— shape-from-texture 的真值图。"""
+        H, W = shape
+        yy, xx = mx.meshgrid(
+            mx.arange(H, dtype=mx.float32),
+            mx.arange(W, dtype=mx.float32),
+            indexing="ij",
+        )
+        xi = xx * math.cos(tilt) + yy * math.sin(tilt)
+        eta = -xx * math.sin(tilt) + yy * math.cos(tilt)
+        lam_par = lam0 * math.cos(slant)
+        g = mx.sin(2 * math.pi * xi / lam_par) + mx.sin(2 * math.pi * eta / lam0)
+        return ((g + 2.0) * 0.25).astype(mx.float32)
+
+    @staticmethod
     def make_texture_composite(size: int = 128):
         """4-quadrant composite for Gabor clustering test.
         TL: λ=8, 0° | TR: λ=24, 45° | BL: uniform noise | BR: flat 0.5.
@@ -293,6 +312,15 @@ class Utils:
         _, W = shape
         arr = mx.zeros(shape, dtype=mx.float32)
         arr[:, W // 2 :] = 1.0
+        return arr
+
+    @staticmethod
+    def make_corner(shape: tuple[int, int]) -> mx.array:
+        """L 形角点: 右上象限亮 — 竖直边 (x=W/2, y<H/2) 与水平边
+        (y=H/2, x>W/2) 交于 (W/2, H/2)。"""
+        H, W = shape
+        arr = mx.zeros(shape, dtype=mx.float32)
+        arr[: H // 2, W // 2 :] = 1.0
         return arr
 
     @staticmethod
