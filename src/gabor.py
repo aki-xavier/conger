@@ -10,7 +10,7 @@ from utils import Utils
 
 
 @dataclass(slots=True)
-class GaborScale2:
+class GaborScale:
     spectra: list[mx.array]  # 复数频谱 per orientation at this scale
     thetas: list[float]  # orientation angle in rad, uniform in [0, π)
     pad: int = 0  # fft padding, cropped from spatial responses
@@ -57,7 +57,7 @@ class GaborScale2:
 
 
 @dataclass(slots=True)
-class GaborWavelet2:
+class GaborWavelet:
     img: mx.array
     lam_min: float = 3.0  # min wavelength
     height: int = 0
@@ -76,7 +76,7 @@ class GaborWavelet2:
     thetas: list[float] = field(default_factory=list)  # orientation angle in [0, pi]
     lams: list[float] = field(default_factory=list)  # wavelength
     ffts: list[mx.array] = field(default_factory=list)  # ffts
-    scales: list[GaborScale2] = field(default_factory=list)
+    scales: list[GaborScale] = field(default_factory=list)
 
     def __post_init__(self):
         if self.img.ndim != 2:
@@ -183,7 +183,7 @@ class GaborWavelet2:
                 kernel = mx.exp(-0.5 * d**2 / sigma_th**2)
                 spectra.append(band * kernel)
 
-            gs = GaborScale2(spectra=spectra, thetas=self.thetas, pad=self.pad)
+            gs = GaborScale(spectra=spectra, thetas=self.thetas, pad=self.pad)
             self.scales.append(gs)
 
     def ifft2(self, arr: mx.array):
@@ -221,7 +221,7 @@ if __name__ == "__main__":
         img = Image.open(Utils.project_root() / f"images/nat{img_id}.jpg")
         img = img.convert("L")
         arr = Color.image_to_mlx(img)
-        gw = GaborWavelet2(arr)
+        gw = GaborWavelet(arr)
         path = Utils.project_root() / "artifacts" / f"nat{img_id}.png"
         print(path)
         gw.visualize(path)
