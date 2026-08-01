@@ -11,8 +11,10 @@ from utils import Utils
 
 @dataclass(slots=True)
 class GaborScale2:
-    es: list[mx.array]  # energies per orientation at this scale
+    spectra: list[mx.array]  # 复数频谱 per orientation at this scale
     thetas: list[float]  # orientation angle in rad, uniform in [0, π)
+    pad: int = 0  # fft padding, cropped from spatial responses
+    es: list[mx.array] = field(default_factory=list)  # energies per orientation
     sum_e: mx.array | None = None  # total energy over orientations
     safe_e: mx.array | None = None
     mean_dir: mx.array | None = None  # 圆均值方向, rad in [0, π)
@@ -20,11 +22,38 @@ class GaborScale2:
     r2: mx.array | None = None  # |m₂| ∈ [0,1]: 第二谐波——角点/十字（正交方向对）强度
 
     def __post_init__(self):
+        for spec in self.spectra:
+            # 核是双边(mod π)的 → 频谱 Hermitian → 响应为实信号
+            resp = mx.real(mx.fft.ifft2(spec))
+            if self.pad > 0:
+                resp = resp[self.pad : -self.pad, self.pad : -self.pad]
+            self.es.append(resp**2)
+
         total = self.es[0]
         for e in self.es[1:]:
             total = total + e
         self.sum_e = total
         self.safe_e = mx.maximum(self.sum_e, 1e-12)
+
+        # 圆统计 (θ∈[0,π), 角度翻倍): m₁→主方向, m₂→正交方向对
+        m1_re = mx.zeros_like(self.safe_e)
+        m1_im = mx.zeros_like(self.safe_e)
+        m2_re = mx.zeros_like(self.safe_e)
+        m2_im = mx.zeros_like(self.safe_e)
+        for e, theta in zip(self.es, self.thetas):
+            m1_re = m1_re + e * math.cos(2.0 * theta)
+            m1_im = m1_im + e * math.sin(2.0 * theta)
+            m2_re = m2_re + e * math.cos(4.0 * theta)
+            m2_im = m2_im + e * math.sin(4.0 * theta)
+        m1_re = m1_re / self.safe_e
+        m1_im = m1_im / self.safe_e
+        m2_re = m2_re / self.safe_e
+        m2_im = m2_im / self.safe_e
+
+        mean_dir = 0.5 * mx.arctan2(m1_im, m1_re)  # [−π/2, π/2]
+        self.mean_dir = mx.where(mean_dir < 0, mean_dir + math.pi, mean_dir)
+        self.resultant = mx.sqrt(m1_re**2 + m1_im**2)
+        self.r2 = mx.sqrt(m2_re**2 + m2_im**2)
 
 
 @dataclass(slots=True)
@@ -132,9 +161,30 @@ class GaborWavelet2:
             self.ffts.append(self.fft * kernel)
 
     def calc_scales(self):
-        freqs: list[float] = []
-        for lam in self.lams:
-            freqs.append(1.0 / lam)
+        # 各向异性分解 = 各向同性频带 × 纯角度权重:
+        # 在频域极角 φ 上以 θ 为中心放高斯, 与半径无关, 故角选择性
+        # 跨尺度严格一致 (尺度不变)。取向 mod π: φ 与 φ+π 是同一方向,
+        # 角距必须在 π 圆上环绕到 [−π/2, π/2)。
+        # σ_θ = σ_f_rel/γ: 切向宽 σ_f/γ 在 r=f0 处折算成的角度,
+        # 沿用 bandwidth/gamma 两个旋钮但纯角度化解释。
+        bw = self.bandwidth
+        sigma_f_rel = (2.0**bw - 1.0) / (
+            (2.0**bw + 1.0) * math.sqrt(2.0 * math.log(2.0))
+        )
+        sigma_th = sigma_f_rel / self.gamma
+        phi = mx.arctan2(self.ygrid, self.xgrid)  # 频域极角, (−π, π]
+
+        for band in self.ffts:
+            spectra: list[mx.array] = []
+
+            for theta in self.thetas:
+                d = phi - theta
+                d = d - math.pi * mx.floor(d / math.pi + 0.5)  # wrap mod π
+                kernel = mx.exp(-0.5 * d**2 / sigma_th**2)
+                spectra.append(band * kernel)
+
+            gs = GaborScale2(spectra=spectra, thetas=self.thetas, pad=self.pad)
+            self.scales.append(gs)
 
     def ifft2(self, arr: mx.array):
         ret = mx.real(mx.fft.ifft2(arr))
