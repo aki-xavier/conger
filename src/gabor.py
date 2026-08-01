@@ -224,11 +224,18 @@ if __name__ == "__main__":
     from PIL import Image
 
     # natural images (downloaded from picsum.photos)
-    for img_id in [10, 1015, 1016, 1018, 1035]:
-        img = Image.open(Utils.project_root() / f"images/nat{img_id}.jpg")
+    for img_name in [
+        "12.png",
+        "nat10.jpg",
+        "nat1015.jpg",
+        "nat1016.jpg",
+        "nat1018.jpg",
+        "nat1035.jpg",
+    ]:
+        img = Image.open(Utils.project_root() / f"images/{img_name}")
         img = img.convert("L")
         arr = Color.image_to_mlx(img)
         gw = GaborWavelet(arr)
-        path = Utils.project_root() / "artifacts" / f"nat{img_id}.png"
+        path = Utils.project_root() / f"artifacts/{img_name}"
         print(path)
         gw.visualize(path)
