@@ -18,7 +18,6 @@ class RieszScale:
     b0: mx.array  # 带通响应 (偶)
     b1: mx.array  # Riesz-x 响应 (沿 x 奇)
     b2: mx.array  # Riesz-y 响应 (沿 y 奇)
-    pad: int = 0
     amp: mx.array | None = None  # A = sqrt(b0²+b1²+b2²): 局部幅值
     phase: mx.array | None = None  # φ = atan2(|R|, b0): 局部相位 ∈ [0, π]
     ori: mx.array | None = None  # atan2(b2, b1): 结构法向 ∈ (−π, π]
@@ -153,7 +152,7 @@ class RieszWavelet:
                 b0 = b0[self.pad : -self.pad, self.pad : -self.pad]
                 b1 = b1[self.pad : -self.pad, self.pad : -self.pad]
                 b2 = b2[self.pad : -self.pad, self.pad : -self.pad]
-            self.scales.append(RieszScale(b0=b0, b1=b1, b2=b2, pad=self.pad))
+            self.scales.append(RieszScale(b0=b0, b1=b1, b2=b2))
 
     def lam_max(self) -> float:
         """Coarsest supported wavelength for the image dimensions."""
