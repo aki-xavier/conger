@@ -44,15 +44,16 @@ class Utils:
     def grid_shape(n: int) -> tuple[int, int]:
         if n <= 0:
             return (0, 0)
-        # 从 sqrt(n) 向下找第一个能整除 n 的数（不含 1，否则质数会退化成单行）
-        for rows in range(int(math.sqrt(n)), 1, -1):
-            if n % rows == 0:
-                cols = n // rows
-                return (rows, cols)
-        # n 是质数等无法整除的情况：向上取整，倾向 rows < cols（横向布局）
-        cols = math.ceil(math.sqrt(n))
-        rows = math.ceil(n / cols)
-        return (rows, cols)
+        # 在 rows·cols >= n 的约束下取最接近正方形的网格 (rows <= cols,
+        # 横向布局)。不能强求整除: n=22 = 2×11 这类半质数, 最近正方形的
+        # 整除分解是 2×11 —— 一条极宽条带; 放宽到 5×5 (空 3 格) 才正常。
+        best = (1, n)
+        rows = 1
+        while rows <= (cols := math.ceil(n / rows)):
+            if cols - rows < best[1] - best[0]:
+                best = (rows, cols)
+            rows += 1
+        return best
 
     @staticmethod
     def visualize(plots: list[tuple[str, str, mx.array]]):
