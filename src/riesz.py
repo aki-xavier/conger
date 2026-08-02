@@ -50,9 +50,13 @@ class RieszWavelet:
     pad: int = 0
     xgrid: mx.array | None = None
     ygrid: mx.array | None = None
+    radius: mx.array | None = None
+    safe_r: mx.array | None = None
+    m1: mx.array | None = None
+    m2: mx.array | None = None
     dc: mx.array | None = None
-    fft: mx.array | None = None
     lams: list[float] = field(default_factory=list)  # wavelength
+    dc_kernel: mx.array | None = None  # DC 低通核 (与图像内容无关)
     kernels: list[mx.array] = field(default_factory=list)  # radial bandpass
     scales: list[RieszScale] = field(default_factory=list)
 
@@ -69,16 +73,6 @@ class RieszWavelet:
             s = round(math.log2(lam_max / self.lam_min)) + 1
             self.scale_size = max(4, s)
 
-        self.calc_lams()
-        self.calc_freqs()
-        self.calc_kernels()
-        self.calc_scales()
-
-    def lam_max(self) -> float:
-        """Coarsest supported wavelength for the image dimensions."""
-        return min(self.height, self.width) / 2.0
-
-    def calc_lams(self):
         # lams 从长波长到短波长排列 (低频→高频), 与 kernels/scales 顺序一致
         lam_min = self.lam_min
         lam_max = self.lam_max()
@@ -91,34 +85,20 @@ class RieszWavelet:
                 )
                 self.lams.append(lam)
 
-    def calc_freqs(self):
-        # ── self-adaptive padding to avoid FFT wraparound ────────────
-        h, w = self.height, self.width
         if self.adaptive_pad:
             self.pad = int(self.lam_max())
-            h = self.height + 2 * self.pad
-            w = self.width + 2 * self.pad
-            padded = mx.pad(
-                self.img,
-                [(self.pad, self.pad), (self.pad, self.pad)],
-                mode="edge",
-            )
-            self.fft = mx.fft.fft2(padded)
-        else:
-            self.fft = mx.fft.fft2(self.img)
+
+        h = self.height + 2 * self.pad
+        w = self.width + 2 * self.pad
 
         self.xgrid, self.ygrid = Utils.freqgrid((h, w))
         sigma_f = 0.5 / self.lam_max()
+        self.radius = self.xgrid**2 + self.ygrid**2
+        self.safe_r = mx.maximum(mx.sqrt(self.radius), 1e-12)
+        self.dc_kernel = mx.exp(-0.5 * self.radius / sigma_f**2)  # type: ignore
 
-        dist = self.xgrid**2 + self.ygrid**2
-        dc_kernel = mx.exp(-0.5 * dist / sigma_f**2)
-        self.dc = self.fft * dc_kernel
-        self.fft = self.fft - self.dc
-
-    def calc_kernels(self):
         # 各向同性径向高斯带通, 与 gabor.py 同一核族; Riesz 框架下
         # 角度分解不再用方向核, 而用 Riesz 乘子 (见 calc_scales)。
-        radius = mx.sqrt(self.xgrid**2 + self.ygrid**2)
         bw = self.bandwidth
         sigma_f_rel = (2.0**bw - 1.0) / (
             (2.0**bw + 1.0) * math.sqrt(2.0 * math.log(2.0))
@@ -126,29 +106,58 @@ class RieszWavelet:
         for lam in self.lams:
             f0 = 1.0 / lam
             sigma_f = sigma_f_rel * f0
-            kernel = mx.exp(-0.5 * (radius - f0) ** 2 / sigma_f**2)
+            kernel = mx.exp(-0.5 * (mx.sqrt(self.radius) - f0) ** 2 / sigma_f**2)
             self.kernels.append(kernel)
 
-    def calc_scales(self):
         # Riesz 乘子: R(ω) = −j·ω/|ω|。DC 处 0/0, 但带通核在
         # ω=0 处本已为零, 用 safe 半径防 NaN 即可。
-        radius = mx.sqrt(self.xgrid**2 + self.ygrid**2)
-        safe_r = mx.maximum(radius, 1e-12)
-        m1 = (-1j) * self.xgrid / safe_r  # type: ignore # −j·ωx/|ω|
-        m2 = (-1j) * self.ygrid / safe_r  # type: ignore # −j·ωy/|ω|
+        self.m1 = (-1j) * self.xgrid / self.safe_r  # type: ignore # −j·ωx/|ω|
+        self.m2 = (-1j) * self.ygrid / self.safe_r  # type: ignore # −j·ωy/|ω|
+
+        self.update(self.img)
+
+    def update(self, img: mx.array):
+        """实时刷新: 网格/DC核/径向核只依赖形状与核参数, 初始化时
+        算好后与图像内容无关; 逐帧只需重算图像相关部分
+        (FFT, DC 剥离, 各尺度响应)。形状必须与初始化一致。"""
+        if img.shape != (self.height, self.width):
+            raise ValueError(
+                f"img shape {img.shape} != init shape {(self.height, self.width)}"
+            )
+
+        self.img = img
+        self.scales.clear()
+
+        fft: mx.array
+        if self.pad != 0:
+            padded = mx.pad(
+                img,
+                [(self.pad, self.pad), (self.pad, self.pad)],
+                mode="edge",
+            )
+            fft = mx.fft.fft2(padded)
+        else:
+            fft = mx.fft.fft2(img)
+
+        self.dc = fft * self.dc_kernel
+        fft = fft - self.dc
 
         for kernel in self.kernels:
-            spec = self.fft * kernel
+            spec = fft * kernel
             # b0 是实函数 ↔ 频谱 Hermitian; Riesz 乘子保持 Hermitian,
             # b1/b2 也是实函数, 虚部只剩数值噪声, 取 real。
             b0 = mx.real(mx.fft.ifft2(spec))
-            b1 = mx.real(mx.fft.ifft2(spec * m1))
-            b2 = mx.real(mx.fft.ifft2(spec * m2))
+            b1 = mx.real(mx.fft.ifft2(spec * self.m1))
+            b2 = mx.real(mx.fft.ifft2(spec * self.m2))
             if self.pad > 0:
                 b0 = b0[self.pad : -self.pad, self.pad : -self.pad]
                 b1 = b1[self.pad : -self.pad, self.pad : -self.pad]
                 b2 = b2[self.pad : -self.pad, self.pad : -self.pad]
             self.scales.append(RieszScale(b0=b0, b1=b1, b2=b2, pad=self.pad))
+
+    def lam_max(self) -> float:
+        """Coarsest supported wavelength for the image dimensions."""
+        return min(self.height, self.width) / 2.0
 
     def ifft2(self, arr: mx.array):
         ret = mx.real(mx.fft.ifft2(arr))
@@ -288,6 +297,21 @@ if __name__ == "__main__":
         float(mx.mean(mx.cos(2 * sc.ori))),  # type: ignore
     )
     print(f"  ori 圆均值(2θ) = {math.degrees(ori_mean) / 2:.2f}° (期望 30°)")
+
+    # update(): 逐帧刷新应与全新初始化逐位一致
+    import time
+
+    step = Utils.make_step_edge((256, 256))
+    t0 = time.perf_counter()
+    rw.update(step)
+    mx.eval(rw.scales[-1].energy)
+    t1 = time.perf_counter()
+    diff = float(mx.max(mx.abs(rw.scales[0].amp - RieszWavelet(step).scales[0].amp)))
+    stale = float(mx.max(mx.abs(rw.img - step)))  # update 必须同步 self.img
+    print(
+        f"update(step): {1000 * (t1 - t0):.0f}ms, "
+        f"与全新初始化 max|Δamp|={diff:.2e}, img 同步残差={stale:.2e}"
+    )
 
     # ── 跨尺度特征: 三种原型信号的谱形状应显著不同 ──────────────────
     def show_feat(name: str, img: mx.array):
