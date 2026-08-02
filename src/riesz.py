@@ -173,6 +173,102 @@ class RieszWavelet:
         plt.close(fig)
 
 
+@dataclass(slots=True)
+class RieszFeatures:
+    """跨尺度谱统计特征 (逐像素)。
+
+    把每个像素在 S 个尺度上的能量 e_s = amp² 看作尺度轴上的一个
+    分布, 提取形状统计 (坐标 x = 距 lam_max 的倍频程数, log 间隔
+    等距, 单位 octave):
+
+      log_mag   log Σe_s          —— 局部对比度总量
+      slope     log e_s 对 x 的最小二乘斜率 —— 幂律衰减 (1/f 型)
+      residual  拟合 RMS 残差      —— 偏离幂律 = 有峰 (纹理/周期结构)
+      bump      argmax_s e_s      —— 峰所在尺度 (归一化到 [0,1])
+      centroid/spread/skew/kurt   —— 能量分布 p_s = e_s/Σe 的前四阶矩
+      ori_R     跨尺度方向一致性   —— 能量加权 2θ 圆均值 resultant
+      phase_coh 跨尺度相位一致性   —— amp 加权相位 resultant
+                (等价于投影到平均相位: ΣA·cos(φ_s−φ̄)/ΣA)
+    """
+
+    rw: RieszWavelet
+    log_e: mx.array | None = None  # (H, W, S)
+    log_mag: mx.array | None = None
+    slope: mx.array | None = None
+    residual: mx.array | None = None
+    bump: mx.array | None = None
+    centroid: mx.array | None = None
+    spread: mx.array | None = None
+    skew: mx.array | None = None
+    kurt: mx.array | None = None
+    ori_R: mx.array | None = None
+    phase_coh: mx.array | None = None
+
+    def __post_init__(self):
+        e = mx.stack([s.energy for s in self.rw.scales], axis=-1)  # (H,W,S)
+        total = mx.sum(e, axis=-1)
+        safe_total = mx.maximum(total, 1e-12)
+        p = e / safe_total[..., None]
+        self.log_e = mx.log(mx.maximum(e, 1e-12))
+        self.log_mag = mx.log(safe_total)
+
+        lam_max = max(self.rw.lams)
+        x = mx.array([math.log2(lam_max / lam) for lam in self.rw.lams])
+        n_scales = len(self.rw.lams)
+
+        # ── 幂律拟合: y = log e 对 x (octave) 的逐像素线性回归 ──────
+        y = self.log_e
+        xc = x - mx.mean(x)
+        var_x = float(mx.sum(xc**2))
+        self.slope = mx.sum(xc * (y - mx.mean(y, axis=-1, keepdims=True)), axis=-1)
+        self.slope = self.slope / var_x
+        intercept = mx.mean(y, axis=-1) - self.slope * float(mx.mean(x))
+        fit = intercept[..., None] + self.slope[..., None] * x  # type: ignore
+        self.residual = mx.sqrt(mx.mean((y - fit) ** 2, axis=-1))
+        self.bump = mx.argmax(e, axis=-1).astype(mx.float32) / max(n_scales - 1, 1)
+
+        # ── 谱矩 (p 是概率分布, 矩在 octave 坐标上) ─────────────────
+        mu = mx.sum(p * x, axis=-1)
+        d = x - mu[..., None]
+        var = mx.sum(p * d**2, axis=-1)
+        sd = mx.sqrt(mx.maximum(var, 1e-12))
+        self.centroid = mu
+        self.spread = sd
+        self.skew = mx.sum(p * d**3, axis=-1) / sd**3
+        self.kurt = mx.sum(p * d**4, axis=-1) / sd**4
+
+        # ── 跨尺度方向一致性: ori 是法向 (轴向), 用 2θ 圆统计 ──────
+        ori = mx.stack([s.ori for s in self.rw.scales], axis=-1)
+        m_re = mx.sum(e * mx.cos(2 * ori), axis=-1)
+        m_im = mx.sum(e * mx.sin(2 * ori), axis=-1)
+        self.ori_R = mx.sqrt(m_re**2 + m_im**2) / safe_total
+
+        # ── 跨尺度相位一致性: 边缘上各尺度 φ≈π/2 对齐 → ≈1,
+        # 纹理/噪声上相位随机 → ≈0 ────────────────────────────────
+        a = mx.stack([s.amp for s in self.rw.scales], axis=-1)
+        ph = mx.stack([s.phase for s in self.rw.scales], axis=-1)
+        p_re = mx.sum(a * mx.cos(ph), axis=-1)
+        p_im = mx.sum(a * mx.sin(ph), axis=-1)
+        self.phase_coh = mx.sqrt(p_re**2 + p_im**2)
+        self.phase_coh = self.phase_coh / mx.maximum(mx.sum(a, axis=-1), 1e-12)
+
+    def visualize(self, out_path: str | Path):
+        plots = [
+            ("original", "gray", self.rw.img),
+            ("log_mag", "viridis", self.log_mag),
+            ("slope", "RdBu_r", self.slope),
+            ("residual", "viridis", self.residual),
+            ("bump", "viridis", self.bump),
+            ("centroid", "viridis", self.centroid),
+            ("skew", "RdBu_r", self.skew),
+            ("ori_R", "viridis", self.ori_R),
+            ("phase_coh", "viridis", self.phase_coh),
+        ]
+        fig = Utils.visualize(plots)
+        fig.savefig(out_path)
+        plt.close(fig)
+
+
 if __name__ == "__main__":
     from PIL import Image
 
@@ -193,6 +289,23 @@ if __name__ == "__main__":
     )
     print(f"  ori 圆均值(2θ) = {math.degrees(ori_mean) / 2:.2f}° (期望 30°)")
 
+    # ── 跨尺度特征: 三种原型信号的谱形状应显著不同 ──────────────────
+    def show_feat(name: str, img: mx.array):
+        f = RieszFeatures(RieszWavelet(img))
+        print(
+            f"{name}: slope={float(f.slope.mean()):+.2f} "
+            f"resid={float(f.residual.mean()):.2f} "
+            f"bump={float(f.bump.mean()):.2f} "
+            f"spread={float(f.spread.mean()):.2f}oct "
+            f"ori_R={float(f.ori_R.mean()):.2f} "
+            f"phase_coh={float(f.phase_coh.mean()):.2f}"
+        )
+
+    print("── cross-scale features (图均值) ──")
+    show_feat("grating λ=16", grating)
+    show_feat("noise        ", Utils.synthesize_signal04(256))
+    show_feat("step edge    ", Utils.make_step_edge((256, 256)))
+
     # natural images
     for img_name in [
         "12.png",
@@ -209,3 +322,5 @@ if __name__ == "__main__":
         path = Utils.project_root() / f"artifacts/riesz_{img_name}"
         print(path)
         rw3.visualize(path)
+        fpath = Utils.project_root() / f"artifacts/rieszfeat_{img_name}"
+        RieszFeatures(rw3).visualize(fpath)
