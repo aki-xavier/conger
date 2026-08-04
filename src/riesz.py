@@ -181,6 +181,40 @@ class RieszWavelet:
         plt.close(fig)
 
 
+def _box_mean(m: mx.array, k: int) -> mx.array:
+    """分离式盒均值 (edge pad, k 奇数), 逐轴 cumsum 差分实现。"""
+    p = k // 2
+    m = mx.pad(m, [(p, p), (p, p)], mode="edge")
+    c = mx.concatenate([mx.zeros((1, m.shape[1])), mx.cumsum(m, axis=0)], axis=0)
+    m = (c[k:] - c[:-k]) / k
+    c = mx.concatenate([mx.zeros((m.shape[0], 1)), mx.cumsum(m, axis=1)], axis=1)
+    return (c[:, k:] - c[:, :-k]) / k
+
+
+_COH_FLOOR_CACHE: dict[tuple, tuple[float, float]] = {}  # type: ignore
+
+
+def _coherence_floor(rw: RieszWavelet) -> tuple[float, float]:
+    """相干统计的噪声底线: 纯白噪声经同一滤波器组后的 ori_R /
+    phase_coh 均值。这是滤波器组属性, 与图像内容无关 —— 标定
+    一次按 (形状, 尺度数, 带宽) 缓存。"""
+    key = (rw.height, rw.width, rw.scale_size, rw.bandwidth, rw.lam_min)
+    if key not in _COH_FLOOR_CACHE:
+        noise = mx.random.normal((rw.height, rw.width), key=mx.random.key(0))
+        tmp = RieszWavelet(
+            noise,
+            lam_min=rw.lam_min,
+            scale_size=rw.scale_size,
+            bandwidth=rw.bandwidth,
+        )
+        f = RieszFeatures(tmp, gain_control=False)
+        _COH_FLOOR_CACHE[key] = (
+            float(mx.mean(f.ori_R)),
+            float(mx.mean(f.phase_coh)),
+        )
+    return _COH_FLOOR_CACHE[key]
+
+
 @dataclass(slots=True)
 class RieszFeatures:
     """跨尺度谱统计特征 (逐像素)。
@@ -189,17 +223,32 @@ class RieszFeatures:
     分布, 提取形状统计 (坐标 x = 距 lam_max 的倍频程数, log 间隔
     等距, 单位 octave):
 
-      log_mag   log Σe_s          —— 局部对比度总量
+      log_mag   log Σe_s 减邻域均值 —— 局部对比度 (非绝对曝光)
       slope     log e_s 对 x 的最小二乘斜率 —— 幂律衰减 (1/f 型)
       residual  拟合 RMS 残差      —— 偏离幂律 = 有峰 (纹理/周期结构)
       bump      argmax_s e_s      —— 峰所在尺度 (归一化到 [0,1])
       centroid/spread/skew/kurt   —— 能量分布 p_s = e_s/Σe 的前四阶矩
       ori_R     跨尺度方向一致性   —— 能量加权 2θ 圆均值 resultant
+      mean_ori  跨尺度平均法向     —— 同一圆均值的幅角一半 (−π/2, π/2]
       phase_coh 跨尺度相位一致性   —— amp 加权相位 resultant
                 (等价于投影到平均相位: ΣA·cos(φ_s−φ̄)/ΣA)
+
+    增益控制 (gain_control=True, 特征进 GMM 前除掉局部增益/噪声
+    这一隐藏变量, 否则 GMM 按亮度带而不是结构聚类):
+      ① Wiener 噪声收缩: e_s ← e_s²/(e_s + floor_s)。白噪声经带
+         通 ψ_s 后 E[e_s] = 3σ²ΣK_s²/N (Parseval, Riesz 三元组 |m|
+         合计≈3); σ̂ 用最细尺度 b0 的 MAD 估计 (抗结构污染, 不用
+         分位数 —— 全图纹理时没有无结构像素)。平滑收缩无悬崖,
+         硬截断会在能量剖面上制造 log(0) 台阶毁掉幂律拟合。
+      ② 相干特征 SNR 收缩: 比值特征在纯噪声下的取值 ≈0.76/0.8
+         而不是 0 —— 这是滤波器组属性 (白噪声经这组核的相干统
+         计), 用合成噪声标定一次并缓存, 扣底归一: 噪声 → 0,
+         干净边缘 → 1。
+      ③ log_mag 局部归一 (Retinex 式): 减盒均值 → 局部对比度。
     """
 
     rw: RieszWavelet
+    gain_control: bool = True
     log_e: mx.array | None = None  # (H, W, S)
     log_mag: mx.array | None = None
     slope: mx.array | None = None
@@ -210,15 +259,28 @@ class RieszFeatures:
     skew: mx.array | None = None
     kurt: mx.array | None = None
     ori_R: mx.array | None = None
+    mean_ori: mx.array | None = None
     phase_coh: mx.array | None = None
 
     def __post_init__(self):
         e = mx.stack([s.energy for s in self.rw.scales], axis=-1)  # (H,W,S)
+
+        if self.gain_control:  # ① Wiener 噪声收缩 (平滑, 无悬崖)
+            b0f = self.rw.scales[-1].b0  # lams 降序 → 最细尺度在末尾
+            mad = mx.median(mx.abs(b0f - mx.median(b0f)))
+            n_freq = self.rw.kernels[0].size
+            k2 = mx.stack([mx.sum(k**2) for k in self.rw.kernels])
+            sig2 = (1.4826 * mad) ** 2 * n_freq / k2[-1]  # 图像噪声方差
+            floor = 3.0 * sig2 * k2 / n_freq  # (S,) 逐尺度噪声能量
+            e = e * e / (e + floor)
+
         total = mx.sum(e, axis=-1)
         safe_total = mx.maximum(total, 1e-12)
         p = e / safe_total[..., None]
         self.log_e = mx.log(mx.maximum(e, 1e-12))
         self.log_mag = mx.log(safe_total)
+        if self.gain_control:  # ③ log_mag 局部归一 (Retinex 式)
+            self.log_mag = self.log_mag - _box_mean(self.log_mag, 15)
 
         lam_max = max(self.rw.lams)
         x = mx.array([math.log2(lam_max / lam) for lam in self.rw.lams])
@@ -250,6 +312,8 @@ class RieszFeatures:
         m_re = mx.sum(e * mx.cos(2 * ori), axis=-1)
         m_im = mx.sum(e * mx.sin(2 * ori), axis=-1)
         self.ori_R = mx.sqrt(m_re**2 + m_im**2) / safe_total
+        # 圆均值幅角的一半即平均法向; ori_R 低处方向无定义但数值无害
+        self.mean_ori = 0.5 * mx.arctan2(m_im, m_re)
 
         # ── 跨尺度相位一致性: 边缘上各尺度 φ≈π/2 对齐 → ≈1,
         # 纹理/噪声上相位随机 → ≈0 ────────────────────────────────
@@ -259,6 +323,12 @@ class RieszFeatures:
         p_im = mx.sum(a * mx.sin(ph), axis=-1)
         self.phase_coh = mx.sqrt(p_re**2 + p_im**2)
         self.phase_coh = self.phase_coh / mx.maximum(mx.sum(a, axis=-1), 1e-12)
+
+        if self.gain_control:  # ② 相干特征扣滤波器组噪声底线
+            r_fl, p_fl = _coherence_floor(self.rw)
+            self.ori_R = mx.maximum(self.ori_R - r_fl, 0.0) / max(1 - r_fl, 1e-3)
+            self.phase_coh = mx.maximum(self.phase_coh - p_fl, 0.0)
+            self.phase_coh = self.phase_coh / max(1 - p_fl, 1e-3)
 
     def visualize(self, out_path: str | Path):
         plots = [
@@ -328,6 +398,14 @@ if __name__ == "__main__":
     show_feat("grating λ=16", grating)
     show_feat("noise        ", Utils.synthesize_signal04(256))
     show_feat("step edge    ", Utils.make_step_edge((256, 256)))
+
+    # mean_ori: grating 上应等于法向 30° (mod π)
+    f_g = RieszFeatures(RieszWavelet(grating))
+    mo = 0.5 * math.atan2(
+        float(mx.mean(mx.sin(2 * f_g.mean_ori))),  # type: ignore
+        float(mx.mean(mx.cos(2 * f_g.mean_ori))),  # type: ignore
+    )
+    print(f"mean_ori 圆均值(2θ) = {math.degrees(mo):.2f}° (期望 30°)")
 
     # natural images
     for img_name in [

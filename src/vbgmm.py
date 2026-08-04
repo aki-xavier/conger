@@ -229,9 +229,11 @@ class VBGMM:
     def _e_step(self, z: mx.array, q: Posterior) -> mx.array:
         """r_nk ∝ π̃_k·|Λ̃_k|^{1/2}·exp(−D/2β_k − ν_k/2·maha_nk)。"""
         d = z.shape[1]
-        # (z−m)ᵀW(z−m) 按二次型展开, 全分量一起算
-        zz = mx.einsum("nd,kde,ne->nk", z, q.w, z)
-        zm = mx.einsum("nd,kde,ke->nk", z, q.w, q.m)
+        # (z−m)ᵀW(z−m): 两步收缩 —— 单步 einsum("nd,kde,ne") 会
+        # 物化 (N,K,D,E) 中间量 (462×490 图 ≈ 700MB), 慢 3 倍
+        zw = mx.einsum("nd,kde->nke", z, q.w)
+        zz = mx.sum(zw * z[:, None, :], axis=-1)
+        zm = mx.sum(zw * q.m[None, :, :], axis=-1)
         mm = mx.einsum("kd,kde,ke->k", q.m, q.w, q.m)
         maha = zz - 2.0 * zm + mm[None, :]
 
@@ -299,14 +301,17 @@ class VBGMM:
         return int(mx.sum(self.weights > min_weight))
 
     def pixel_evidence(self, cls: str, x: mx.array | None = None) -> mx.array:
-        """逐像素类证据 (N,) ∈ {0,1}, 规则来自合成真值验证:
-        边缘 = 宽带幂律谱 (resid 小, spread 大) + 跨尺度相干 (ori_R 高);
-        周期纹理 = 窄带单峰 (resid 大, bump 居中, spread 小)。
+        """逐像素类证据 (N,) ∈ {0,1}, 规则来自合成真值验证 (增益控制
+        后的特征语义): 边缘 = 宽带幂律谱 (resid 小, spread 大) + 跨
+        尺度相位对齐 (phase_coh 高); 周期纹理 = 窄带单峰 (resid 大,
+        bump 居中, spread 小)。注意 ori_R 不能用: 平坦区的能量是
+        边缘泄漏, 方向天然相干, ori_R 分不开; phase_coh 在增益控制
+        后才是最强判别 (边缘 ≈0.55, 平坦 ≈0.17, 纹理 ≈0.34)。
         逐像素特征不会被责任混合稀释, 分量均值才会。"""
         x = self.x_orig if x is None else x
         f = {name: x[:, i] for i, name in enumerate(FEAT_NAMES)}  # type: ignore
         if cls == "edge":
-            mask = (f["resid"] < 1.0) & (f["spread"] > 1.0) & (f["ori_R"] > 0.9)
+            mask = (f["resid"] < 1.0) & (f["spread"] > 1.0) & (f["phase_coh"] > 0.4)
         elif cls == "texture":
             mask = (
                 (f["resid"] > 1.5)
@@ -386,7 +391,7 @@ if __name__ == "__main__":
     img = img + mx.random.normal((H, W), key=mx.random.key(3)) * 0.01
 
     feat = RieszFeatures(RieszWavelet(img))
-    gm = VBGMM(feature_matrix(feat), k_max=16)
+    gm = VBGMM(feature_matrix(feat), k_max=48)
 
     e = gm.elbo
     mono = max((e[i] - e[i + 1] for i in range(len(e) - 1)), default=0.0)
@@ -426,7 +431,7 @@ if __name__ == "__main__":
     im = Image.open(Utils.project_root() / "images/12.png").convert("L")
     arr = Color.image_to_mlx(im)
     feat2 = RieszFeatures(RieszWavelet(arr))
-    gm2 = VBGMM(feature_matrix(feat2), k_max=16)
+    gm2 = VBGMM(feature_matrix(feat2), k_max=48)
     print(f"12.png: ELBO {gm2.elbo[0]:.1f} → {gm2.elbo[-1]:.1f}, K_eff={gm2.k_eff()}")
     path2 = Utils.project_root() / "artifacts/vbgmm_12.png"
     visualize_maps(arr, gm2, arr.shape, path2)
@@ -445,9 +450,9 @@ if __name__ == "__main__":
     X2 = feature_matrix(RieszFeatures(RieszWavelet(img2)))
     mx.eval(X2)
     t1 = time.perf_counter()
-    gm_cold = VBGMM(X2, k_max=16)
+    gm_cold = VBGMM(X2, k_max=48)
     t2 = time.perf_counter()
-    gm_warm = VBGMM(X2, k_max=16, warm=gm.posterior, subsample=8192)
+    gm_warm = VBGMM(X2, k_max=48, warm=gm.posterior, subsample=8192)
     t3 = time.perf_counter()
     print(
         f"frame2 特征提取 {1000 * (t1 - t0):.0f}ms | "
