@@ -249,6 +249,7 @@ class RieszFeatures:
 
     rw: RieszWavelet
     gain_control: bool = True
+    retinex_k: int = 0  # ③ 的盒均值窗: 0 = 自动绑定最粗尺度波长 (λ_max/4, 奇数)
     log_e: mx.array | None = None  # (H, W, S)
     log_mag: mx.array | None = None
     slope: mx.array | None = None
@@ -280,7 +281,10 @@ class RieszFeatures:
         self.log_e = mx.log(mx.maximum(e, 1e-12))
         self.log_mag = mx.log(safe_total)
         if self.gain_control:  # ③ log_mag 局部归一 (Retinex 式)
-            self.log_mag = self.log_mag - _box_mean(self.log_mag, 15)
+            # 窗宽绑定最粗尺度波长: 除照明所需的"缓变"先验天然以
+            # λ_max 为参照; 图幅变化时窗宽随之缩放, 不再是绝对像素数
+            k = self.retinex_k or max(7, int(self.rw.lam_max() // 4) | 1)
+            self.log_mag = self.log_mag - _box_mean(self.log_mag, k)
 
         lam_max = max(self.rw.lams)
         x = mx.array([math.log2(lam_max / lam) for lam in self.rw.lams])

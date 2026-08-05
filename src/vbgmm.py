@@ -112,10 +112,12 @@ class VBGMM:
     x_orig: mx.array  # (N, D) 原始特征
     k_max: int = 8
     alpha0: float = 1e-2  # Dirichlet 浓度: 小 → 稀疏混合
+    alpha0_grid: tuple[float, ...] | None = None  # 冷启动经验贝叶斯网格 (选定即冻结)
     beta0: float = 1.0  # NIW 均值先验强度
     max_iter: int = 100
     tol: float = 1e-5
-    subsample: int = 0  # >0 时 M 步只用这么多随机像素 (E 步始终全图)
+    subsample: int = 0  # >0: M 步子采样数; <0: 自动按 subsample_cap 封顶 (E 步始终全图)
+    subsample_cap: int = 8192  # 自动子采样的预算上限 (调度器接管前的默认形态)
     warm: Posterior | None = None  # 暖启动: 上一帧的后验 (online VB 简化版)
     elbo_every: int = 1  # 每几轮算一次 ELBO (标量同步是固定开销)
     mu: mx.array | None = None  # 特征均值 (标准化用)
@@ -131,19 +133,43 @@ class VBGMM:
         x = self.x_orig
         self.mu = mx.mean(x, axis=0)
         self.sd = mx.maximum(mx.sqrt(mx.var(x, axis=0)), 1e-6)
-        self._fit((x - self.mu) / self.sd)
+        z = (x - self.mu) / self.sd
+        if self.alpha0_grid is not None and self.warm is None:
+            self._select_alpha0(z)
+        else:
+            self._fit(z)
         nk = mx.sum(self.r, axis=0)
         self.weights = self.alpha / mx.sum(self.alpha)
         self.means_orig = (self.r.T @ x) / mx.maximum(nk[:, None], 1e-12)
+
+    def _select_alpha0(self, z: mx.array):
+        """经验贝叶斯选 α0: 对网格每个候选完整拟合, 取最终 ELBO 最大者。
+        冷启动 _init_resp 用固定 key, 各候选初始责任一致, ELBO 可比。
+        只有冷启动时启用 (暖启动应延续上一帧的先验, 不重新选)。"""
+        best = (-math.inf, self.alpha0)
+        saved = None
+        assert self.alpha0_grid is not None
+        for a in self.alpha0_grid:
+            self.alpha0 = a
+            self.elbo = []
+            self._fit(z)
+            if self.elbo[-1] > best[0]:
+                best = (self.elbo[-1], a)
+                saved = (self.r, self.alpha, self.posterior, list(self.elbo))
+        self.alpha0 = best[1]
+        self.r, self.alpha, self.posterior, self.elbo = saved  # type: ignore
 
     # ── VB-EM 主循环 ──────────────────────────────────────────────
 
     def _fit(self, z: mx.array):
         # M 步拟合可以只用子采样 (聚类统计量对子采样稳健),
-        # 最终责任始终对全图重算。
-        if 0 < self.subsample < z.shape[0]:
+        # 最终责任始终对全图重算。subsample < 0: 自动按 subsample_cap 封顶。
+        sub = self.subsample
+        if sub < 0:
+            sub = min(z.shape[0], self.subsample_cap)
+        if 0 < sub < z.shape[0]:
             idx = mx.random.permutation(z.shape[0], key=mx.random.key(1))
-            z_fit = z[idx[: self.subsample]]
+            z_fit = z[idx[:sub]]
         else:
             z_fit = z
 
@@ -197,20 +223,32 @@ class VBGMM:
         nu = _nu0(d) + nk
         m = (nk / beta)[:, None] * xbar  # m0 = 0 的收缩
 
-        # W_k⁻¹ = W0⁻¹ + N_k·S_k + (β0·N_k/β_k)·x̄x̄ᵀ (m0=0, W0=I)。
-        # S_k 加 1e-3 正则: ori_R/phase_coh 会饱和在 1.0、bump 是量化值,
-        # 零方差方向让 W 特征值爆炸, float32 下 logdet 与 ν·tr(W)
-        # 的抵消失效 → ELBO 发散。等价 sklearn reg_covar。
+        # W_k⁻¹ = W0⁻¹ + N_k·Ŝ_k + (β0·N_k/β_k)·x̄x̄ᵀ (m0=0, W0=I)。
+        # Ŝ_k = S_k 的特征值地板 (替代原 1e-3 固定正则, 曾试 LW 收缩,
+        # 见下行)。S_k = m2 − x̄x̄ᵀ 的相消在 float32 下产生 O(1e-4)
+        # 的负特征值; 大分量 N_k·λ < −1 时 W_k⁻¹ 不定 → inv 出不定的
+        # W → maha 变负 → 整行 log_rho −inf → 责任 NaN (实测 nat10
+        # 第 32 轮爆发)。Ledoit-Wolf 收缩对这类分量恰好估计 λ≈0
+        # (Frobenius 意义良态), 救不了单方向的负特征值, 且收缩整体
+        # 偏离精确 M 步打破 ELBO 单调性, 故弃用。改为逐分量特征值
+        # 钳底 ε·μ (μ = 该分量平均特征值, ε=1e-3): 只修退化方向,
+        # 不动良态方向, 地板随分量尺度自适应 (饱和/量化特征的近零
+        # 方差方向同样被兜住, 覆盖原 1e-3 正则的防爆职能)。
         eye = mx.eye(d)
-        winv = eye + nk[:, None, None] * (s + 1e-3 * eye)
-        winv = winv + (self.beta0 * nk / beta)[:, None, None] * (
-            xbar[:, :, None] @ xbar[:, None, :]
-        )
+        tr = mx.sum(s * eye, axis=(1, 2))  # Tr(S_k), 取 μ 用
 
-        # MLX 的 inv/cholesky 只有 CPU stream, 逐分量算
+        # MLX 的 eigh/inv/cholesky 只有 CPU stream, 逐分量算
         w_list, logdet_w, tr_w = [], [], []
         for j in range(self.k_max):
-            wj = mx.linalg.inv(winv[j], stream=mx.cpu)
+            ev, q_vec = mx.linalg.eigh(s[j], stream=mx.cpu)
+            mu_j = max(float(tr[j]) / d, 1e-6)
+            ev = mx.maximum(ev, 1e-3 * mu_j)
+            s_floor = (q_vec * ev) @ q_vec.T
+            winv_j = eye + float(nk[j]) * s_floor
+            winv_j = winv_j + float(self.beta0 * nk[j] / beta[j]) * (
+                xbar[j][:, None] @ xbar[j][None, :]
+            )
+            wj = mx.linalg.inv(winv_j, stream=mx.cpu)
             w_list.append(wj)
             logdet_w.append(logdet_spd(wj))
             tr_w.append(float(mx.trace(wj)))
@@ -311,7 +349,8 @@ class VBGMM:
         x = self.x_orig if x is None else x
         f = {name: x[:, i] for i, name in enumerate(FEAT_NAMES)}  # type: ignore
         if cls == "edge":
-            mask = (f["resid"] < 1.0) & (f["spread"] > 1.0) & (f["phase_coh"] > 0.4)
+            thr = self._phase_coh_thr(f["phase_coh"])
+            mask = (f["resid"] < 1.0) & (f["spread"] > 1.0) & (f["phase_coh"] > thr)
         elif cls == "texture":
             mask = (
                 (f["resid"] > 1.5)
@@ -322,6 +361,18 @@ class VBGMM:
         else:
             raise ValueError(f"unknown class: {cls}")
         return mask.astype(mx.float32)
+
+    @staticmethod
+    def _phase_coh_thr(v: mx.array) -> float:
+        """phase_coh 阈值的锚点化: 按全图分布的 20%/90% 分位取 lo/hi,
+        thr = lo + 0.6·(hi−lo), 再夹在 [0.3, 0.5]。合成锚点上
+        lo≈0.17 (平坦), hi≈0.55 (边缘), 0.6 相对位 ≈ 原固定阈值 0.4;
+        分位自适应让阈值随图内增益/噪声整体漂移, 夹取防极端分布退化。"""
+        s = mx.sort(v)
+        n = s.shape[0]
+        lo = float(s[int(0.2 * (n - 1))])
+        hi = float(s[int(0.9 * (n - 1))])
+        return float(mx.clip(mx.array(lo + 0.6 * (hi - lo)), 0.3, 0.5))
 
     def class_fraction(
         self, cls: str, x: mx.array | None = None, r: mx.array | None = None

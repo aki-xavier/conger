@@ -107,6 +107,7 @@ def propagate(
     lam: float = 0.3,
     gain: float = 0.3,
     hops: tuple[int, ...] = (1, 2, 4),
+    eps: float = 1e-3,
 ) -> mx.array:
     """切向连续性传播 (吸引耦合)。
 
@@ -120,6 +121,7 @@ def propagate(
     超加性 (长程一致抬升弱边缘, 增幅随轮数累积, 不宜多轮);
     只升不降 —— 孤立高响应的抑制交给聚类 (GMM 对孤立亮斑
     本来就判非边缘), 传播不重复发明惩罚机制。
+    max|Δout| < eps 时提前退出 (定点收敛, 通常末轮才触发)。
     """
     yy, xx = _grid(like.shape)
     ang = normal + math.pi / 2.0  # 切向
@@ -141,7 +143,11 @@ def propagate(
             s = mx.maximum(mx.sqrt(a * b), 0.5 * mx.maximum(a, b))
             support = mx.maximum(support, s)
         target = mx.maximum(support, out + gain * support * (1.0 - out))
-        out = mx.clip((1.0 - lam) * out + lam * target, 0.0, 1.0)
+        new = mx.clip((1.0 - lam) * out + lam * target, 0.0, 1.0)
+        if float(mx.max(mx.abs(new - out))) < eps:  # 定点早停: 不再变化即收敛
+            out = new
+            break
+        out = new
     return out
 
 
@@ -184,14 +190,25 @@ class EdgePrior:
     lam: float = 0.5  # 每轮向支撑移动的步长
     gain: float = 0.3  # 超加性: 长程一致对似然的额外抬升
     beta: float = 8.0  # NMS 软硬度
-    dir_smooth: int = 6  # 方向场内绘轮数 ≈ 可桥接缺口半径 (px)
-    hops: tuple[int, ...] = (1, 2, 4, 8)  # 传播跳距: 最远桥接半径 (px)
+    dir_smooth: int = 6  # 方向场内绘轮数 ≈ 可桥接缺口半径 (λ_min/3 单位)
+    hops: tuple[int, ...] = (1, 2, 4, 8)  # 传播跳距: 最远桥接半径 (同单位)
+    eps: float = 1e-3  # 传播定点早停阈值 (max|Δout|)
+
+    def _scale(self, feat: RieszFeatures) -> tuple[int, tuple[int, ...]]:
+        """把像素量纲的 dir_smooth/hops 绑定到滤波器组最细波长:
+        空间作用半径的物理含义是"相对于最细结构尺度的多远",
+        λ_min 变化 (分辨率/核参数调整) 时半径随之缩放。"""
+        s = feat.rw.lam_min / 3.0
+        ds = max(3, round(self.dir_smooth * s))
+        hp = tuple(max(1, round(h * s)) for h in self.hops)
+        return ds, hp
 
     def enhance(self, like: mx.array, feat: RieszFeatures) -> mx.array:
         """融合快速路: 方向场先内绘, 再沿切向传播。"""
-        normal, conf = smooth_normal(feat.mean_ori, feat.ori_R, self.dir_smooth)
+        ds, hp = self._scale(feat)
+        normal, conf = smooth_normal(feat.mean_ori, feat.ori_R, ds)
         return propagate(
-            like, normal, conf, self.n_iter, self.lam, self.gain, self.hops
+            like, normal, conf, self.n_iter, self.lam, self.gain, hp, self.eps
         )
 
     def enhance_per_scale(self, feat: RieszFeatures) -> mx.array:
@@ -202,7 +219,8 @@ class EdgePrior:
         p = e / mx.maximum(mx.sum(e, axis=-1, keepdims=True), 1e-12)
         ori = mx.stack([s.ori for s in feat.rw.scales], axis=-1)
         conf = mx.broadcast_to(mx.sqrt(p), p.shape)  # 能量弱的方向不可信
-        return propagate(p, ori, conf, self.n_iter, self.lam, self.gain, self.hops)
+        _, hp = self._scale(feat)
+        return propagate(p, ori, conf, self.n_iter, self.lam, self.gain, hp, self.eps)
 
     def nms(self, like: mx.array, feat: RieszFeatures) -> mx.array:
         """法向软 NMS: 定位信号 = 总能量 Σe_s (连续, 有真实脊线)。"""
