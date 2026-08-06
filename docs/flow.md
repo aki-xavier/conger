@@ -74,6 +74,8 @@ $\hat{C}_{ij}$ 为归一化后的候选圆。几何不一致（两切向无法�
 
 文献：Geisler et al. (2001) 边缘共现统计；Parent & Zucker (1989)；Ren & Malik (2002) 概率轮廓补全；Dimiccoli & Salembier T 结深度分离。
 
+**实现备注**（`src/grouping.py`，`PerceptualGrouping`）：与设计的三处偏差——① 残差加亚像素定位噪声地板 `res_floor`（像素采样的 edgel 位置有 ±0.15px 量化起伏，相邻对残差被放大、跳点反而更共圆，不加地板会在曲线上产生交错碎链）；② T 结候选除折线求交外增加**链端点延长线**来源（真实 T 的竖杠止于遮挡边、折线本身不相交，直接求交检不出）；③ 支撑判据要求数量与**臂延伸**双达标（防碎链段造成伪 T）。已知限制：L 角点在局部与 T 同构（底边贯穿 + 竖边单侧终止），会被报告为 T 结，需更上层上下文区分；真实管线中竖杠与遮挡边间距超过 `t_radius` 时漏检（端点延长够不到），此时依赖跨缺口补全先行桥接。
+
 ## 2. 场景分割层（Scene Segmentation）
 
 **输入**：组织层图元（边界 `line`/归属）、VBGMM 类后验、深度融合层的深度反馈（虚线边，第二轮起）。
@@ -341,6 +343,8 @@ $w_i$ 逆方差加权；遮挡偏序作为约束集，不参与加权表决。
 | `rw.features()` → `edgemap` | 方向场 | `mean_ori`（法向，(−π/2,π/2]）、`ori_R`（置信 ∈[0,1]），均 (H,W) float32 |
 | `EdgePrior.enhance` → `nms` | 增强似然图 | (H,W) float32 ∈[0,1]；`enhance_per_scale` 为 (H,W,S)（诊断用） |
 | `EdgePrior.nms` → 下游 | 细化边缘图 | (H,W) float32，仅相对意义（显示时按最大值归一） |
+| `EdgePrior.enhance` + `feat.mean_ori` → `PerceptualGrouping.run` | 增强似然图 + 法向场 | 均 (H,W) float32；`run(like, mean_ori)` |
+| `PerceptualGrouping.run` → 下游 | `GroupingResult`（NamedTuple） | `edgels: Edgels`（`pos` (M,2) float32 亚像素 (row,col)、`normal/tangent` (M,2)、`strength` (M,)）；`chains: list[mx.array]`（(L,) int edgel 下标有序序列）；`lines: list[line blade]`（每链两端点）；`completions: list[(i, j, p)]`（端点对 + 连续概率，按 p 降序）；`circles: list[circle blade]`（p≥`complete_thr` 的补全弧段拟合圆）；`t_junctions: list[TJunction]`（`pos/front/behind/support`，偏序 front≻behind） |
 | `VBGMM.infer`（逐帧） | 新帧责任 | 输入 (N,7) → 输出 (N,K)，固定后验单次 E 步 |
 | `RieszWavelet.update`（逐帧） | 形状不变的重算 | 要求输入形状 = 初始化形状，否则抛错 |
 
