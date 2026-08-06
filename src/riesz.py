@@ -101,6 +101,8 @@ class RieszWavelet:
     lams: list[float] = field(default_factory=list)  # wavelength
     dc_kernel: mx.array | None = None  # DC 低通核 (与图像内容无关)
     kernels: list[mx.array] = field(default_factory=list)  # radial bandpass
+    n_freq: int = 0  # 频域网格点数 (kernels[0].size)
+    k2: mx.array | None = None  # (S,) 逐尺度 ΣK_s² (增益控制① Parseval 用)
     scales: list[RieszScale] = field(default_factory=list)
 
     def __post_init__(self):
@@ -151,6 +153,11 @@ class RieszWavelet:
             sigma_f = sigma_f_rel * f0
             kernel = mx.exp(-0.5 * (mx.sqrt(self.radius) - f0) ** 2 / sigma_f**2)
             self.kernels.append(kernel)
+
+        # 逐尺度核能量: 纯核属性, 缓存供增益控制①的 Parseval 噪声
+        # floor 逐帧复用 (见 features)。
+        self.n_freq = self.kernels[0].size
+        self.k2 = mx.stack([mx.sum(k**2) for k in self.kernels])
 
         # Riesz 乘子: R(ω) = −j·ω/|ω|。DC 处 0/0, 但带通核在
         # ω=0 处本已为零, 用 safe 半径防 NaN 即可。
@@ -216,17 +223,17 @@ class RieszWavelet:
 
         返回 FeatureMaps (NamedTuple, 不可变): 以上 11 张 (H,W) 特征图
         + log_e (H,W,S)。不预组特征矩阵 —— 选哪几列、什么顺序是下游
-        的事 (vbgmm 按 FEAT_NAMES 自行 stack)。常数皆重算, x/xc 等
-        S 维小量开销可忽略。
+        的事 (vbgmm 按 FEAT_NAMES 自行 stack)。核能量 k2/n_freq 初始化
+        时已缓存, x/xc 等 S 维小量每帧重算但开销可忽略。
         """
         e = mx.stack([s.energy for s in self.scales], axis=-1)  # (H,W,S)
 
         if gain_control:  # ① Wiener 噪声收缩 (平滑, 无悬崖)
             b0f = self.scales[-1].b0  # lams 降序 → 最细尺度在末尾
             mad = mx.median(mx.abs(b0f - mx.median(b0f)))
-            n_freq = self.kernels[0].size
-            k2 = mx.stack([mx.sum(k**2) for k in self.kernels])
-            sig2 = (1.4826 * mad) ** 2 * n_freq / k2[-1]  # 图像噪声方差
+            n_freq = self.n_freq
+            k2 = self.k2
+            sig2 = (1.4826 * mad) ** 2 * n_freq / k2[-1]  # type: ignore # 图像噪声方差
             floor = 3.0 * sig2 * k2 / n_freq  # (S,) 逐尺度噪声能量
             e = e * e / (e + floor)
 
