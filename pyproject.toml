@@ -4,11 +4,7 @@ version = "0.1.0"
 description = "Add your description here"
 readme = "README.md"
 requires-python = ">=3.14"
-dependencies = [
-    "matplotlib>=3.11.1",
-    "mlx>=0.32.0",
-    "numpy>=2.5.1",
-]
+dependencies = ["matplotlib>=3.11.1", "mlx>=0.32.0", "numpy>=2.5.1"]
 
 # ═══════════════════════════════════════════════════════════════════════
 # ruff — linter & formatter
@@ -37,3 +33,4 @@ reportUnusedVariable = false
 reportUnknownLambdaType = false
 reportMissingParameterType = false
 reportArgumentType = false
+reportMissingTypeArgument = false

@@ -1,7 +1,7 @@
 import math
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import NamedTuple
+from typing import ClassVar, NamedTuple
 
 import matplotlib.pyplot as plt
 import mlx.core as mx
@@ -57,30 +57,6 @@ class FeatureMaps(NamedTuple):
     log_e: mx.array  # log 逐尺度能量 (H,W,S)
 
 
-_COH_FLOOR_CACHE: dict[tuple, tuple[float, float]] = {}  # type: ignore
-
-
-def _coherence_floor(rw: RieszWavelet) -> tuple[float, float]:
-    """相干统计的噪声底线: 纯白噪声经同一滤波器组后的 ori_R /
-    phase_coh 均值。这是滤波器组属性, 与图像内容无关 —— 标定
-    一次按 (形状, 尺度数, 带宽) 缓存。"""
-    key = (rw.height, rw.width, rw.scale_size, rw.bandwidth, rw.lam_min)
-    if key not in _COH_FLOOR_CACHE:
-        noise = mx.random.normal((rw.height, rw.width), key=mx.random.key(0))
-        tmp = RieszWavelet(
-            noise,
-            lam_min=rw.lam_min,
-            scale_size=rw.scale_size,
-            bandwidth=rw.bandwidth,
-        )
-        f = tmp.features(gain_control=False)
-        _COH_FLOOR_CACHE[key] = (
-            float(mx.mean(f.ori_R)),
-            float(mx.mean(f.phase_coh)),
-        )
-    return _COH_FLOOR_CACHE[key]
-
-
 @dataclass(slots=True)
 class RieszWavelet:
     img: mx.array
@@ -104,6 +80,37 @@ class RieszWavelet:
     n_freq: int = 0  # 频域网格点数 (kernels[0].size)
     k2: mx.array | None = None  # (S,) 逐尺度 ΣK_s² (增益控制① Parseval 用)
     scales: list[RieszScale] = field(default_factory=list)
+
+    # 相干噪声底线缓存: (H, W, scale_size, bandwidth, lam_min) → (r_fl, p_fl)
+    # 类级, 跨实例去重; 底线是滤波器组属性, 与图像内容无关。
+    coh_floor_cache: ClassVar[dict[tuple, tuple[float, float]]] = {}
+
+    @classmethod
+    def coherence_floor(
+        cls,
+        shape: tuple[int, int],
+        lam_min: float,
+        scale_size: int,
+        bandwidth: float,
+    ) -> tuple[float, float]:
+        """相干统计的噪声底线: 纯白噪声经同一滤波器组后的 ori_R /
+        phase_coh 均值。标定一次按 (形状, 尺度数, 带宽, lam_min)
+        在类级缓存, 同配置实例共享。"""
+        key = (shape[0], shape[1], scale_size, bandwidth, lam_min)
+        if key not in cls.coh_floor_cache:
+            noise = mx.random.normal(shape, key=mx.random.key(0))
+            probe = cls(
+                noise,
+                lam_min=lam_min,
+                scale_size=scale_size,
+                bandwidth=bandwidth,
+            )
+            f = probe.features(gain_control=False)
+            cls.coh_floor_cache[key] = (
+                float(mx.mean(f.ori_R)),
+                float(mx.mean(f.phase_coh)),
+            )
+        return cls.coh_floor_cache[key]
 
     def __post_init__(self):
         if self.img.ndim != 2:
@@ -287,8 +294,13 @@ class RieszWavelet:
         phase_coh = mx.sqrt(p_re**2 + p_im**2)
         phase_coh = phase_coh / mx.maximum(mx.sum(a, axis=-1), 1e-12)
 
-        if gain_control:  # ② 相干特征扣噪声底线 (初始化时已标定)
-            r_fl, p_fl = _coherence_floor(self)
+        if gain_control:  # ② 相干特征扣噪声底线 (类级缓存, 惰性标定)
+            r_fl, p_fl = self.coherence_floor(
+                (self.height, self.width),
+                self.lam_min,
+                self.scale_size,
+                self.bandwidth,
+            )
             ori_R = mx.maximum(ori_R - r_fl, 0.0)
             ori_R = ori_R / max(1 - r_fl, 1e-3)
             phase_coh = mx.maximum(phase_coh - p_fl, 0.0)
@@ -345,23 +357,22 @@ class RieszWavelet:
         fig.savefig(out_path)
         plt.close(fig)
 
-
-def visualize_features(rw: RieszWavelet, feat: FeatureMaps, out_path: str | Path):
-    """rw.features() 输出的特征图可视化。"""
-    plots = [
-        ("original", "gray", rw.img),
-        ("log_mag", "viridis", feat.log_mag),
-        ("slope", "RdBu_r", feat.slope),
-        ("residual", "viridis", feat.residual),
-        ("bump", "viridis", feat.bump),
-        ("centroid", "viridis", feat.centroid),
-        ("skew", "RdBu_r", feat.skew),
-        ("ori_R", "viridis", feat.ori_R),
-        ("phase_coh", "viridis", feat.phase_coh),
-    ]
-    fig = Utils.visualize(plots)
-    fig.savefig(out_path)
-    plt.close(fig)
+    def visualize_features(self, feat: FeatureMaps, out_path: str | Path):
+        """self.features() 输出的特征图可视化。"""
+        plots = [
+            ("original", "gray", self.img),
+            ("log_mag", "viridis", feat.log_mag),
+            ("slope", "RdBu_r", feat.slope),
+            ("residual", "viridis", feat.residual),
+            ("bump", "viridis", feat.bump),
+            ("centroid", "viridis", feat.centroid),
+            ("skew", "RdBu_r", feat.skew),
+            ("ori_R", "viridis", feat.ori_R),
+            ("phase_coh", "viridis", feat.phase_coh),
+        ]
+        fig = Utils.visualize(plots)
+        fig.savefig(out_path)
+        plt.close(fig)
 
 
 if __name__ == "__main__":
@@ -441,4 +452,4 @@ if __name__ == "__main__":
         print(path)
         rw3.visualize(path)
         fpath = Utils.project_root() / f"artifacts/rieszfeat_{img_name}"
-        visualize_features(rw3, rw3.features(), fpath)
+        rw3.visualize_features(rw3.features(), fpath)

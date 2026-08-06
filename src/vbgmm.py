@@ -1,6 +1,7 @@
 import math
 from dataclasses import dataclass, field
 from pathlib import Path
+from typing import ClassVar
 
 import matplotlib.pyplot as plt
 import mlx.core as mx
@@ -9,78 +10,7 @@ from color import Color
 from riesz import FeatureMaps, RieszWavelet
 from utils import Utils
 
-# ── MLX 缺的特殊函数: 递推 + 渐近展开 ─────────────────────────────
-
-
-def digamma(x: mx.array) -> mx.array:
-    """ψ(x): 递推 ψ(x)=ψ(x+1)−1/x 推到 x≥8, 再用渐近级数。"""
-    y = mx.zeros_like(x)
-    for _ in range(16):
-        small = x < 8.0
-        y = mx.where(small, y - 1.0 / x, y)
-        x = mx.where(small, x + 1.0, x)
-    return y + mx.log(x) - 0.5 / x - 1.0 / (12.0 * x**2) + 1.0 / (120.0 * x**4)
-
-
-def lgamma(x: mx.array) -> mx.array:
-    """ln Γ(x): 递推 lnΓ(x)=lnΓ(x+1)−ln x 推到 x≥8, 再 Stirling。"""
-    y = mx.zeros_like(x)
-    for _ in range(16):
-        small = x < 8.0
-        y = mx.where(small, y - mx.log(x), y)
-        x = mx.where(small, x + 1.0, x)
-    stir = (x - 0.5) * mx.log(x) - x + 0.5 * math.log(2.0 * math.pi)
-    return y + stir + 1.0 / (12.0 * x) - 1.0 / (360.0 * x**3)
-
-
-def mvlgamma(a: mx.array, d: int) -> mx.array:
-    """多元 ln Γ_d(a) = d(d−1)/4·lnπ + Σᵢ lnΓ(a+(1−i)/2)。"""
-    i = mx.arange(d, dtype=mx.float32)
-    off = a[..., None] + 0.5 * (1.0 - i)
-    return d * (d - 1) / 4.0 * math.log(math.pi) + mx.sum(lgamma(off), axis=-1)
-
-
-def logdet_spd(a: mx.array) -> float:
-    """ln|A|, A 对称正定。MLX cholesky 只有 CPU stream。"""
-    d = a.shape[-1]
-    jitter = mx.eye(d) * 1e-6
-    L = mx.linalg.cholesky(a + jitter, stream=mx.cpu)
-    return float(2.0 * mx.sum(mx.log(mx.diagonal(L))))
-
-
-# ── 特征图 → 特征矩阵 (本模块按需组装) ─────────────────────────────
-
-FEAT_NAMES = ["log_mag", "slope", "resid", "bump", "spread", "ori_R", "phase_coh"]
-
-
-def feature_matrix(feat: FeatureMaps) -> mx.array:
-    """rw.features() 的逐像素特征图 → (N,7) 特征矩阵 (未标准化)。
-    选哪几列、什么顺序由本模块按 FEAT_NAMES 决定; 列名 resid
-    对应特征图 residual。"""
-    cols = [
-        feat.log_mag,
-        feat.slope,
-        feat.residual,
-        feat.bump,
-        feat.spread,
-        feat.ori_R,
-        feat.phase_coh,
-    ]
-    return mx.stack(cols, axis=-1).reshape(-1, 7)
-
-
 # ── 变分贝叶斯 GMM (全协方差, NIW 先验) ────────────────────────────
-
-
-def _nu0(d: int) -> float:
-    """Wishart 先验自由度。"""
-    return float(d + 2)
-
-
-def _lnb0(nu0: float, d: int) -> float:
-    """ln B(W0, ν0), W0 = I (Bishop B.79)。"""
-    lnb = -(nu0 * d / 2.0) * math.log(2.0)
-    return lnb - float(mvlgamma(mx.array([nu0 / 2.0]), d)[0])
 
 
 @dataclass(slots=True)
@@ -131,22 +61,102 @@ class VBGMM:
     means_orig: mx.array | None = None  # (K, D) 分量均值 (原始空间)
     elbo: list[float] = field(default_factory=list)
 
+    # 特征矩阵列名 (本模块按需组装特征; 列名 resid 对应特征图 residual)
+    FEAT_NAMES: ClassVar[list[str]] = [
+        "log_mag",
+        "slope",
+        "resid",
+        "bump",
+        "spread",
+        "ori_R",
+        "phase_coh",
+    ]
+
+    # ── MLX 缺的特殊函数: 递推 + 渐近展开 ─────────────────────────
+
+    @staticmethod
+    def digamma(x: mx.array) -> mx.array:
+        """ψ(x): 递推 ψ(x)=ψ(x+1)−1/x 推到 x≥8, 再用渐近级数。"""
+        y = mx.zeros_like(x)
+        for _ in range(16):
+            small = x < 8.0
+            y = mx.where(small, y - 1.0 / x, y)
+            x = mx.where(small, x + 1.0, x)
+        return y + mx.log(x) - 0.5 / x - 1.0 / (12.0 * x**2) + 1.0 / (120.0 * x**4)
+
+    @staticmethod
+    def lgamma(x: mx.array) -> mx.array:
+        """ln Γ(x): 递推 lnΓ(x)=lnΓ(x+1)−ln x 推到 x≥8, 再 Stirling。"""
+        y = mx.zeros_like(x)
+        for _ in range(16):
+            small = x < 8.0
+            y = mx.where(small, y - mx.log(x), y)
+            x = mx.where(small, x + 1.0, x)
+        stir = (x - 0.5) * mx.log(x) - x + 0.5 * math.log(2.0 * math.pi)
+        return y + stir + 1.0 / (12.0 * x) - 1.0 / (360.0 * x**3)
+
+    @staticmethod
+    def mvlgamma(a: mx.array, d: int) -> mx.array:
+        """多元 ln Γ_d(a) = d(d−1)/4·lnπ + Σᵢ lnΓ(a+(1−i)/2)。"""
+        i = mx.arange(d, dtype=mx.float32)
+        off = a[..., None] + 0.5 * (1.0 - i)
+        return d * (d - 1) / 4.0 * math.log(math.pi) + mx.sum(
+            VBGMM.lgamma(off), axis=-1
+        )
+
+    @staticmethod
+    def logdet_spd(a: mx.array) -> float:
+        """ln|A|, A 对称正定。MLX cholesky 只有 CPU stream。"""
+        d = a.shape[-1]
+        jitter = mx.eye(d) * 1e-6
+        L = mx.linalg.cholesky(a + jitter, stream=mx.cpu)
+        return float(2.0 * mx.sum(mx.log(mx.diagonal(L))))
+
+    @staticmethod
+    def nu0(d: int) -> float:
+        """Wishart 先验自由度。"""
+        return float(d + 2)
+
+    @staticmethod
+    def lnb0(nu0: float, d: int) -> float:
+        """ln B(W0, ν0), W0 = I (Bishop B.79)。"""
+        lnb = -(nu0 * d / 2.0) * math.log(2.0)
+        return lnb - float(VBGMM.mvlgamma(mx.array([nu0 / 2.0]), d)[0])
+
+    # ── 特征图 → 特征矩阵 (本模块按需组装) ─────────────────────────
+
+    @staticmethod
+    def feature_matrix(feat: FeatureMaps) -> mx.array:
+        """rw.features() 的逐像素特征图 → (N,7) 特征矩阵 (未标准化)。
+        选哪几列、什么顺序由本模块按 FEAT_NAMES 决定; 列名 resid
+        对应特征图 residual。"""
+        cols = [
+            feat.log_mag,
+            feat.slope,
+            feat.residual,
+            feat.bump,
+            feat.spread,
+            feat.ori_R,
+            feat.phase_coh,
+        ]
+        return mx.stack(cols, axis=-1).reshape(-1, 7)
+
     def __post_init__(self):
         x = self.x_orig
         self.mu = mx.mean(x, axis=0)
         self.sd = mx.maximum(mx.sqrt(mx.var(x, axis=0)), 1e-6)
         z = (x - self.mu) / self.sd
         if self.alpha0_grid is not None and self.warm is None:
-            self._select_alpha0(z)
+            self.select_alpha0(z)
         else:
-            self._fit(z)
+            self.fit(z)
         nk = mx.sum(self.r, axis=0)
         self.weights = self.alpha / mx.sum(self.alpha)
         self.means_orig = (self.r.T @ x) / mx.maximum(nk[:, None], 1e-12)
 
-    def _select_alpha0(self, z: mx.array):
+    def select_alpha0(self, z: mx.array):
         """经验贝叶斯选 α0: 对网格每个候选完整拟合, 取最终 ELBO 最大者。
-        冷启动 _init_resp 用固定 key, 各候选初始责任一致, ELBO 可比。
+        冷启动 init_resp 用固定 key, 各候选初始责任一致, ELBO 可比。
         只有冷启动时启用 (暖启动应延续上一帧的先验, 不重新选)。"""
         best = (-math.inf, self.alpha0)
         saved = None
@@ -154,7 +164,7 @@ class VBGMM:
         for a in self.alpha0_grid:
             self.alpha0 = a
             self.elbo = []
-            self._fit(z)
+            self.fit(z)
             if self.elbo[-1] > best[0]:
                 best = (self.elbo[-1], a)
                 saved = (self.r, self.alpha, self.posterior, list(self.elbo))
@@ -163,7 +173,7 @@ class VBGMM:
 
     # ── VB-EM 主循环 ──────────────────────────────────────────────
 
-    def _fit(self, z: mx.array):
+    def fit(self, z: mx.array):
         # M 步拟合可以只用子采样 (聚类统计量对子采样稳健),
         # 最终责任始终对全图重算。subsample < 0: 自动按 subsample_cap 封顶。
         sub = self.subsample
@@ -175,14 +185,14 @@ class VBGMM:
         else:
             z_fit = z
 
-        r = self._init_resp(z_fit)
+        r = self.init_resp(z_fit)
         q = None
         prev = -math.inf
         for it in range(self.max_iter):
-            q = self._m_step(z_fit, r)
-            r = self._e_step(z_fit, q)
+            q = self.m_step(z_fit, r)
+            r = self.e_step(z_fit, q)
             if it % self.elbo_every == 0:
-                bound = self._elbo(z_fit, r, q)
+                bound = self.compute_elbo(z_fit, r, q)
                 self.elbo.append(bound)
                 # 只在正的微小增益时收敛; ELBO 下降是 bug 信号, 不能当收敛
                 gain = bound - prev
@@ -190,14 +200,14 @@ class VBGMM:
                     break
                 prev = bound
         self.posterior = q
-        self.r = r if z_fit is z else self._e_step(z, q)
+        self.r = r if z_fit is z else self.e_step(z, q)
         self.alpha = q.alpha
 
-    def _init_resp(self, z: mx.array) -> mx.array:
+    def init_resp(self, z: mx.array) -> mx.array:
         """初始责任: 有暖启动后验则先做一次 E 步 (跟踪模式只需
         再迭代 1–5 轮), 否则随机中心硬分配 + 平滑。"""
         if self.warm is not None:
-            return self._e_step(z, self.warm)
+            return self.e_step(z, self.warm)
         n, _ = z.shape
         k = self.k_max
         idx = mx.random.permutation(n, key=mx.random.key(0))[:k]
@@ -208,7 +218,7 @@ class VBGMM:
         return mx.eye(k)[assign] * 0.9 + 0.1 / k
 
     @staticmethod
-    def _stats(z: mx.array, r: mx.array):
+    def stats(z: mx.array, r: mx.array):
         """责任加权的充分统计量 N_k / x̄_k / S_k。"""
         nk = mx.sum(r, axis=0)
         safe = mx.maximum(nk, 1e-12)
@@ -217,12 +227,12 @@ class VBGMM:
         s = m2 - xbar[:, :, None] @ xbar[:, None, :]
         return nk, xbar, s
 
-    def _m_step(self, z: mx.array, r: mx.array) -> Posterior:
+    def m_step(self, z: mx.array, r: mx.array) -> Posterior:
         d = z.shape[1]
-        nk, xbar, s = self._stats(z, r)
+        nk, xbar, s = self.stats(z, r)
         alpha = self.alpha0 + nk
         beta = self.beta0 + nk
-        nu = _nu0(d) + nk
+        nu = self.nu0(d) + nk
         m = (nk / beta)[:, None] * xbar  # m0 = 0 的收缩
 
         # W_k⁻¹ = W0⁻¹ + N_k·Ŝ_k + (β0·N_k/β_k)·x̄x̄ᵀ (m0=0, W0=I)。
@@ -252,21 +262,21 @@ class VBGMM:
             )
             wj = mx.linalg.inv(winv_j, stream=mx.cpu)
             w_list.append(wj)
-            logdet_w.append(logdet_spd(wj))
+            logdet_w.append(self.logdet_spd(wj))
             tr_w.append(float(mx.trace(wj)))
         w = mx.stack(w_list)
         logdet_w = mx.array(logdet_w)
         tr_w = mx.array(tr_w)
         mx.eval(w, logdet_w, tr_w)
 
-        log_pi = digamma(alpha) - digamma(mx.sum(alpha))  # E[ln π_k]
+        log_pi = self.digamma(alpha) - self.digamma(mx.sum(alpha))  # E[ln π_k]
         i_off = mx.arange(d, dtype=mx.float32)
-        log_lt = mx.sum(digamma((nu[:, None] + 1.0 - i_off) / 2.0), axis=1)
+        log_lt = mx.sum(self.digamma((nu[:, None] + 1.0 - i_off) / 2.0), axis=1)
         log_lt = log_lt + d * math.log(2.0) + logdet_w  # E[ln|Λ_k|]
 
         return Posterior(alpha, beta, nu, m, w, logdet_w, tr_w, log_pi, log_lt)
 
-    def _e_step(self, z: mx.array, q: Posterior) -> mx.array:
+    def e_step(self, z: mx.array, q: Posterior) -> mx.array:
         """r_nk ∝ π̃_k·|Λ̃_k|^{1/2}·exp(−D/2β_k − ν_k/2·maha_nk)。"""
         d = z.shape[1]
         # (z−m)ᵀW(z−m): 两步收缩 —— 单步 einsum("nd,kde,ne") 会
@@ -283,13 +293,13 @@ class VBGMM:
         rho = mx.exp(log_rho)
         return rho / mx.sum(rho, axis=1, keepdims=True)
 
-    def _elbo(self, z: mx.array, r: mx.array, q: Posterior) -> float:
+    def compute_elbo(self, z: mx.array, r: mx.array, q: Posterior) -> float:
         """Bishop 10.70–10.77。统计量必须用 E 步后的新 r 重算,
         否则算出来的不是当前 q 的真实下界, 会出现假性的非单调。"""
         d = z.shape[1]
         k = self.k_max
-        nu0 = _nu0(d)
-        nk, xbar, s = self._stats(z, r)
+        nu0 = self.nu0(d)
+        nk, xbar, s = self.stats(z, r)
 
         def qform(a: mx.array) -> mx.array:
             """aᵀ W_k a, (K,D) → (K,)"""
@@ -302,26 +312,30 @@ class VBGMM:
 
         # E[ln p(Z|π)] (10.72) 与 E[ln p(π)] (10.73)
         e_z = float(mx.sum(nk * q.log_pi))
-        e_pi = float(lgamma(mx.array([k * self.alpha0]))[0])
-        e_pi -= k * float(lgamma(mx.array([self.alpha0]))[0])
+        e_pi = float(self.lgamma(mx.array([k * self.alpha0]))[0])
+        e_pi -= k * float(self.lgamma(mx.array([self.alpha0]))[0])
         e_pi += float((self.alpha0 - 1.0) * mx.sum(q.log_pi))
 
         # E[ln p(μ,Λ)] (10.74): 注意马氏项是 β0·ν_k 不是 β_k·ν_k
         # (后者 ≈ nk², 随聚类收紧爆炸 → 假发散)
         t_mu = q.log_lt - d * self.beta0 / q.beta - self.beta0 * q.nu * qform(q.m)
         e_mula = 0.5 * k * d * math.log(self.beta0 / (2.0 * math.pi))
-        e_mula += 0.5 * float(mx.sum(t_mu)) + k * _lnb0(nu0, d)
+        e_mula += 0.5 * float(mx.sum(t_mu)) + k * self.lnb0(nu0, d)
         e_mula += 0.5 * (nu0 - d - 1.0) * float(mx.sum(q.log_lt))
         e_mula -= 0.5 * float(mx.sum(q.nu * q.tr_w))  # W0⁻¹ = I → Tr(W)
 
         # E[ln q(Z)] (10.75) 与 E[ln q(π)] (10.76)
         e_qz = float(mx.sum(r * mx.log(mx.maximum(r, 1e-12))))
         e_qpi = float(mx.sum((q.alpha - 1.0) * q.log_pi))
-        e_qpi += float(lgamma(mx.sum(q.alpha))) - float(mx.sum(lgamma(q.alpha)))
+        e_qpi += float(self.lgamma(mx.sum(q.alpha))) - float(
+            mx.sum(self.lgamma(q.alpha))
+        )
 
         # E[ln q(μ,Λ)] (10.77); Wishart 熵 H[Λ] (Bishop B.82)
         neg_lnb = 0.5 * q.nu * q.logdet_w
-        neg_lnb = neg_lnb + (q.nu * d / 2.0) * math.log(2.0) + mvlgamma(q.nu / 2.0, d)
+        neg_lnb = (
+            neg_lnb + (q.nu * d / 2.0) * math.log(2.0) + self.mvlgamma(q.nu / 2.0, d)
+        )
         h = neg_lnb - 0.5 * (q.nu - d - 1.0) * q.log_lt + q.nu * d / 2.0
         t_qmla = 0.5 * q.log_lt + 0.5 * d * mx.log(q.beta / (2.0 * math.pi))
         e_qmla = float(mx.sum(t_qmla - d / 2.0 - h))
@@ -334,7 +348,7 @@ class VBGMM:
         """逐帧推断: 固定已拟合的后验参数, 对新特征只做一次 E 步。
         这是实时模式每帧的唯一贝叶斯计算 (毫秒级)。"""
         z = (x_new - self.mu) / self.sd
-        return self._e_step(z, self.posterior)
+        return self.e_step(z, self.posterior)
 
     def k_eff(self, min_weight: float = 0.01) -> int:
         """有效分量数: 混合权重超过阈值的分量个数。"""
@@ -349,9 +363,9 @@ class VBGMM:
         后才是最强判别 (边缘 ≈0.55, 平坦 ≈0.17, 纹理 ≈0.34)。
         逐像素特征不会被责任混合稀释, 分量均值才会。"""
         x = self.x_orig if x is None else x
-        f = {name: x[:, i] for i, name in enumerate(FEAT_NAMES)}  # type: ignore
+        f = {name: x[:, i] for i, name in enumerate(self.FEAT_NAMES)}  # type: ignore
         if cls == "edge":
-            thr = self._phase_coh_thr(f["phase_coh"])
+            thr = self.phase_coh_thr(f["phase_coh"])
             mask = (f["resid"] < 1.0) & (f["spread"] > 1.0) & (f["phase_coh"] > thr)
         elif cls == "texture":
             mask = (
@@ -365,7 +379,7 @@ class VBGMM:
         return mask.astype(mx.float32)
 
     @staticmethod
-    def _phase_coh_thr(v: mx.array) -> float:
+    def phase_coh_thr(v: mx.array) -> float:
         """phase_coh 阈值的锚点化: 按全图分布的 20%/90% 分位取 lo/hi,
         thr = lo + 0.6·(hi−lo), 再夹在 [0.3, 0.5]。合成锚点上
         lo≈0.17 (平坦), hi≈0.55 (边缘), 0.6 相对位 ≈ 原固定阈值 0.4;
@@ -398,37 +412,46 @@ class VBGMM:
     def labels(self) -> mx.array:
         return mx.argmax(self.r, axis=1)
 
+    def edge_likelihood(
+        self,
+        shape: tuple[int, int],
+        x: mx.array | None = None,
+        r: mx.array | None = None,
+    ) -> mx.array:
+        """逐像素边缘似然 (H,W)。x/r 缺省用拟合数据,
+        逐帧模式传 infer() 的结果。"""
+        return self.class_likelihood("edge", x, r).reshape(shape)
 
-def neighbor_similarity(r: mx.array, shape: tuple[int, int]) -> mx.array:
-    """共分配相似度: r_i·r_j 是后验意义下两像素同类的概率。
-    对 4 邻域取均值 → 区域内部 ≈1, 边界 ≈0, 即相似性聚类的
-    软边界图 (不需要 N×N 全相似度矩阵)。"""
-    h, w = shape
-    rr = r.reshape(h, w, -1)
-    sim = mx.zeros((h, w))
-    right = mx.sum(rr[:, :-1] * rr[:, 1:], axis=-1)
-    sim = sim.at[:, :-1].add(right).at[:, 1:].add(right)
-    down = mx.sum(rr[:-1] * rr[1:], axis=-1)
-    sim = sim.at[:-1].add(down).at[1:].add(down)
-    return sim / 4.0
+    @staticmethod
+    def neighbor_similarity(r: mx.array, shape: tuple[int, int]) -> mx.array:
+        """共分配相似度: r_i·r_j 是后验意义下两像素同类的概率。
+        对 4 邻域取均值 → 区域内部 ≈1, 边界 ≈0, 即相似性聚类的
+        软边界图 (不需要 N×N 全相似度矩阵)。"""
+        h, w = shape
+        rr = r.reshape(h, w, -1)
+        sim = mx.zeros((h, w))
+        right = mx.sum(rr[:, :-1] * rr[:, 1:], axis=-1)
+        sim = sim.at[:, :-1].add(right).at[:, 1:].add(right)
+        down = mx.sum(rr[:-1] * rr[1:], axis=-1)
+        sim = sim.at[:-1].add(down).at[1:].add(down)
+        return sim / 4.0
 
-
-def visualize_maps(img, gm: VBGMM, shape, out_path: str | Path):
-    h, w = shape
-    edge = gm.class_likelihood("edge").reshape(h, w)
-    tex = gm.class_likelihood("texture").reshape(h, w)
-    labs = gm.labels().reshape(h, w).astype(mx.float32)
-    bnd = 1.0 - neighbor_similarity(gm.r, shape)
-    plots = [
-        ("original", "gray", img),
-        ("edge likelihood", "gray", edge),
-        ("texture likelihood", "gray", tex),
-        ("labels", "tab10", labs),
-        ("1 − neighbor sim", "gray", bnd),
-    ]
-    fig = Utils.visualize(plots)
-    fig.savefig(out_path)
-    plt.close(fig)
+    def visualize_maps(self, img, shape, out_path: str | Path):
+        h, w = shape
+        edge = self.class_likelihood("edge").reshape(h, w)
+        tex = self.class_likelihood("texture").reshape(h, w)
+        labs = self.labels().reshape(h, w).astype(mx.float32)
+        bnd = 1.0 - self.neighbor_similarity(self.r, shape)
+        plots = [
+            ("original", "gray", img),
+            ("edge likelihood", "gray", edge),
+            ("texture likelihood", "gray", tex),
+            ("labels", "tab10", labs),
+            ("1 − neighbor sim", "gray", bnd),
+        ]
+        fig = Utils.visualize(plots)
+        fig.savefig(out_path)
+        plt.close(fig)
 
 
 if __name__ == "__main__":
@@ -445,13 +468,13 @@ if __name__ == "__main__":
 
     rw = RieszWavelet(img)
     feat = rw.features()
-    gm = VBGMM(feature_matrix(feat), k_max=48)
+    gm = VBGMM(VBGMM.feature_matrix(feat), k_max=48)
 
     e = gm.elbo
     mono = max((e[i] - e[i + 1] for i in range(len(e) - 1)), default=0.0)
     print(f"ELBO: {e[0]:.1f} → {e[-1]:.1f} ({len(e)} iters, 最大回退 {mono:.2f})")
     print(f"effective K = {gm.k_eff()} / {gm.k_max}")
-    hdr = "w      " + " ".join(f"{n:>9s}" for n in FEAT_NAMES) + "  e_frac t_frac"
+    hdr = "w      " + " ".join(f"{n:>9s}" for n in VBGMM.FEAT_NAMES) + "  e_frac t_frac"
     print(hdr)
     e_frac = gm.class_fraction("edge")
     t_frac = gm.class_fraction("texture")
@@ -478,17 +501,17 @@ if __name__ == "__main__":
             f"tex={float(tex[:, sl].mean()):.2f}"
         )
     path = Utils.project_root() / "artifacts/vbgmm_synth.png"
-    visualize_maps(img, gm, (H, W), path)
+    gm.visualize_maps(img, (H, W), path)
     print(path)
 
     # ── natural image ────────────────────────────────────────────────
     im = Image.open(Utils.project_root() / "images/12.png").convert("L")
     arr = Color.image_to_mlx(im)
     feat2 = RieszWavelet(arr).features()
-    gm2 = VBGMM(feature_matrix(feat2), k_max=48)
+    gm2 = VBGMM(VBGMM.feature_matrix(feat2), k_max=48)
     print(f"12.png: ELBO {gm2.elbo[0]:.1f} → {gm2.elbo[-1]:.1f}, K_eff={gm2.k_eff()}")
     path2 = Utils.project_root() / "artifacts/vbgmm_12.png"
-    visualize_maps(arr, gm2, arr.shape, path2)
+    gm2.visualize_maps(arr, arr.shape, path2)
     print(path2)
 
     # ── 实时模式: 相邻帧 (边界移动) 冷启动 vs 暖启动 ────────────────
@@ -503,7 +526,7 @@ if __name__ == "__main__":
     t0 = time.perf_counter()
     rw.update(img2)
     feat = rw.features()
-    X2 = feature_matrix(feat)
+    X2 = VBGMM.feature_matrix(feat)
     mx.eval(X2)
     t1 = time.perf_counter()
     gm_cold = VBGMM(X2, k_max=48)
