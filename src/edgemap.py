@@ -7,7 +7,7 @@ import matplotlib.pyplot as plt
 import mlx.core as mx
 
 from color import Color
-from riesz import RieszFeatures, RieszWavelet
+from riesz import FeatureMaps, RieszWavelet
 from utils import Utils
 from vbgmm import VBGMM, feature_matrix
 
@@ -194,37 +194,37 @@ class EdgePrior:
     hops: tuple[int, ...] = (1, 2, 4, 8)  # 传播跳距: 最远桥接半径 (同单位)
     eps: float = 1e-3  # 传播定点早停阈值 (max|Δout|)
 
-    def _scale(self, feat: RieszFeatures) -> tuple[int, tuple[int, ...]]:
+    def scale(self, rw: RieszWavelet) -> tuple[int, tuple[int, ...]]:
         """把像素量纲的 dir_smooth/hops 绑定到滤波器组最细波长:
         空间作用半径的物理含义是"相对于最细结构尺度的多远",
         λ_min 变化 (分辨率/核参数调整) 时半径随之缩放。"""
-        s = feat.rw.lam_min / 3.0
+        s = rw.lam_min / 3.0
         ds = max(3, round(self.dir_smooth * s))
         hp = tuple(max(1, round(h * s)) for h in self.hops)
         return ds, hp
 
-    def enhance(self, like: mx.array, feat: RieszFeatures) -> mx.array:
+    def enhance(self, like: mx.array, feat: FeatureMaps, rw: RieszWavelet) -> mx.array:
         """融合快速路: 方向场先内绘, 再沿切向传播。"""
-        ds, hp = self._scale(feat)
+        ds, hp = self.scale(rw)
         normal, conf = smooth_normal(feat.mean_ori, feat.ori_R, ds)
         return propagate(
             like, normal, conf, self.n_iter, self.lam, self.gain, hp, self.eps
         )
 
-    def enhance_per_scale(self, feat: RieszFeatures) -> mx.array:
+    def enhance_per_scale(self, rw: RieszWavelet) -> mx.array:
         """逐尺度通道 (H,W,S): 每个尺度用各自 ori 传播各自的能量
         份额 p_s = e_s/Σe, 跨尺度不混 —— ori_R 低处的多结构竞争
         在这里被分开。诊断用: 不做方向内绘, 也不含 GMM 似然。"""
-        e = mx.stack([s.energy for s in feat.rw.scales], axis=-1)
+        e = mx.stack([s.energy for s in rw.scales], axis=-1)
         p = e / mx.maximum(mx.sum(e, axis=-1, keepdims=True), 1e-12)
-        ori = mx.stack([s.ori for s in feat.rw.scales], axis=-1)
+        ori = mx.stack([s.ori for s in rw.scales], axis=-1)
         conf = mx.broadcast_to(mx.sqrt(p), p.shape)  # 能量弱的方向不可信
-        _, hp = self._scale(feat)
+        _, hp = self.scale(rw)
         return propagate(p, ori, conf, self.n_iter, self.lam, self.gain, hp, self.eps)
 
-    def nms(self, like: mx.array, feat: RieszFeatures) -> mx.array:
+    def nms(self, like: mx.array, feat: FeatureMaps, rw: RieszWavelet) -> mx.array:
         """法向软 NMS: 定位信号 = 总能量 Σe_s (连续, 有真实脊线)。"""
-        loc = mx.stack([s.energy for s in feat.rw.scales], axis=-1)
+        loc = mx.stack([s.energy for s in rw.scales], axis=-1)
         loc = mx.sum(loc, axis=-1)
         return soft_nms(like, loc, feat.mean_ori, self.beta)
 
@@ -280,12 +280,13 @@ if __name__ == "__main__":
     img = img + mx.random.normal((H, W), key=mx.random.key(3)) * 0.01
     img[100:103, 90:93] = img[100:103, 90:93] + 0.3
 
-    feat = RieszFeatures(RieszWavelet(img))
+    rw = RieszWavelet(img)
+    feat = rw.features()
     gm = VBGMM(feature_matrix(feat), k_max=48)
     like = edge_likelihood(gm, (H, W))
     prior = EdgePrior()
-    enh = prior.enhance(like, feat)
-    thin = prior.nms(enh, feat)
+    enh = prior.enhance(like, feat, rw)
+    thin = prior.nms(enh, feat, rw)
 
     regions = [
         ("weak edge @64   ", slice(20, 50), slice(62, 66)),
@@ -323,12 +324,13 @@ if __name__ == "__main__":
     ]:
         im = Image.open(Utils.project_root() / f"images/{img_name}").convert("L")
         arr = Color.image_to_mlx(im)
-        feat2 = RieszFeatures(RieszWavelet(arr))
+        rw2 = RieszWavelet(arr)
+        feat2 = rw2.features()
         gm2 = VBGMM(feature_matrix(feat2), k_max=48)
         like2 = edge_likelihood(gm2, arr.shape)
         t0 = time.perf_counter()
-        enh2 = prior.enhance(like2, feat2)
-        thin2 = prior.nms(enh2, feat2)
+        enh2 = prior.enhance(like2, feat2, rw2)
+        thin2 = prior.nms(enh2, feat2, rw2)
         mx.eval(thin2)
         t1 = time.perf_counter()
         path2 = Utils.project_root() / f"artifacts/edgemap_{img_name}"
@@ -340,23 +342,22 @@ if __name__ == "__main__":
 
     # ── 逐尺度通道 (以 12.png 为例) ──────────────────────────────────
     t0 = time.perf_counter()
-    ps = prior.enhance_per_scale(feat2)
+    ps = prior.enhance_per_scale(rw2)
     mx.eval(ps)
     t1 = time.perf_counter()
     print(f"per-scale enhance {ps.shape}: {1000 * (t1 - t0):.0f}ms (诊断用, 非逐帧)")
 
     # ── 逐帧全链路计时 (实时管线形态, 以 12.png 为例) ───────────────
-    # 后台慢速暖启动刷新 VBGMM 后验; 逐帧 = update + 特征 + infer + 先验
-    rw2 = feat2.rw
+    # 后台慢速暖启动刷新 VBGMM 后验; 逐帧 = update + 特征刷新 + infer + 先验
     for rep in range(3):
         t0 = time.perf_counter()
         rw2.update(arr)
-        f_ = RieszFeatures(rw2)
-        x_ = feature_matrix(f_)
+        feat2 = rw2.features()
+        x_ = feature_matrix(feat2)
         r_ = gm2.infer(x_)
         l_ = edge_likelihood(gm2, arr.shape, x_, r_)
-        e_ = prior.enhance(l_, f_)
-        t_ = prior.nms(e_, f_)
+        e_ = prior.enhance(l_, feat2, rw2)
+        t_ = prior.nms(e_, feat2, rw2)
         mx.eval(t_)
         t1 = time.perf_counter()
         print(f"逐帧全链路 rep{rep}: {1000 * (t1 - t0):.0f}ms")

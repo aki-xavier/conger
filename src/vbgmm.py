@@ -6,7 +6,7 @@ import matplotlib.pyplot as plt
 import mlx.core as mx
 
 from color import Color
-from riesz import RieszFeatures, RieszWavelet
+from riesz import FeatureMaps, RieszWavelet
 from utils import Utils
 
 # ── MLX 缺的特殊函数: 递推 + 渐近展开 ─────────────────────────────
@@ -48,13 +48,15 @@ def logdet_spd(a: mx.array) -> float:
     return float(2.0 * mx.sum(mx.log(mx.diagonal(L))))
 
 
-# ── Riesz 特征 → 特征矩阵 ─────────────────────────────────────────
+# ── 特征图 → 特征矩阵 (本模块按需组装) ─────────────────────────────
 
 FEAT_NAMES = ["log_mag", "slope", "resid", "bump", "spread", "ori_R", "phase_coh"]
 
 
-def feature_matrix(feat: RieszFeatures) -> mx.array:
-    """(H,W) 特征图栈 → (N,7) 特征矩阵 (未标准化)。"""
+def feature_matrix(feat: FeatureMaps) -> mx.array:
+    """rw.features() 的逐像素特征图 → (N,7) 特征矩阵 (未标准化)。
+    选哪几列、什么顺序由本模块按 FEAT_NAMES 决定; 列名 resid
+    对应特征图 residual。"""
     cols = [
         feat.log_mag,
         feat.slope,
@@ -64,7 +66,7 @@ def feature_matrix(feat: RieszFeatures) -> mx.array:
         feat.ori_R,
         feat.phase_coh,
     ]
-    return mx.stack([c.reshape(-1) for c in cols], axis=-1)
+    return mx.stack(cols, axis=-1).reshape(-1, 7)
 
 
 # ── 变分贝叶斯 GMM (全协方差, NIW 先验) ────────────────────────────
@@ -441,7 +443,8 @@ if __name__ == "__main__":
     img[:, 192:] = Utils.make_grating((H, 64), 8.0, 0.0)[:, :64]
     img = img + mx.random.normal((H, W), key=mx.random.key(3)) * 0.01
 
-    feat = RieszFeatures(RieszWavelet(img))
+    rw = RieszWavelet(img)
+    feat = rw.features()
     gm = VBGMM(feature_matrix(feat), k_max=48)
 
     e = gm.elbo
@@ -481,7 +484,7 @@ if __name__ == "__main__":
     # ── natural image ────────────────────────────────────────────────
     im = Image.open(Utils.project_root() / "images/12.png").convert("L")
     arr = Color.image_to_mlx(im)
-    feat2 = RieszFeatures(RieszWavelet(arr))
+    feat2 = RieszWavelet(arr).features()
     gm2 = VBGMM(feature_matrix(feat2), k_max=48)
     print(f"12.png: ELBO {gm2.elbo[0]:.1f} → {gm2.elbo[-1]:.1f}, K_eff={gm2.k_eff()}")
     path2 = Utils.project_root() / "artifacts/vbgmm_12.png"
@@ -498,7 +501,9 @@ if __name__ == "__main__":
     img2 = img2 + mx.random.normal((H, W), key=mx.random.key(4)) * 0.01
 
     t0 = time.perf_counter()
-    X2 = feature_matrix(RieszFeatures(RieszWavelet(img2)))
+    rw.update(img2)
+    feat = rw.features()
+    X2 = feature_matrix(feat)
     mx.eval(X2)
     t1 = time.perf_counter()
     gm_cold = VBGMM(X2, k_max=48)

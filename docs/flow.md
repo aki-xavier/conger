@@ -332,12 +332,13 @@ $w_i$ 逆方差加权；遮挡偏序作为约束集，不参与加权表决。
 | 边（产出 → 消费） | 数据 | 形状 / 类型 |
 |---|---|---|
 | 图像 → `RieszWavelet` | 灰度图 | (H,W) float32，[0,1] |
-| `RieszWavelet` → `RieszFeatures` | 逐尺度响应 | `scales: list[RieszScale]`，每个含 `b0/b1/b2` 及派生 `amp/energy/phase/ori`，均 (H,W) float32；`lams: list[float]`（S 个波长，降序） |
-| `RieszFeatures` → `feature_matrix` | 逐像素特征图 | 12 张 (H,W) float32：`log_mag/slope/residual/bump/centroid/spread/skew/kurt/ori_R/mean_ori/phase_coh`（+`log_e` (H,W,S)） |
-| `feature_matrix` → `VBGMM` | 特征矩阵 | (N,7) float32，N=H·W，列序 = `FEAT_NAMES`：`log_mag/slope/resid/bump/spread/ori_R/phase_coh` |
+| `RieszWavelet` → `rw.features()` | 逐尺度响应 | `scales: list[RieszScale]`，每个含 `b0/b1/b2` 及派生 `amp/energy/phase/ori`，均 (H,W) float32；`lams: list[float]`（S 个波长，降序） |
+| `rw.features()` → 下游 | 逐像素特征图（`FeatureMaps`，NamedTuple 不可变，无 rw 回引用，不预组特征矩阵） | 11 张 (H,W) float32：`log_mag/slope/residual/bump/centroid/spread/skew/kurt/ori_R/mean_ori/phase_coh`（+`log_e` (H,W,S)） |
+| `feature_matrix(feat)` → `VBGMM` | 特征矩阵（`vbgmm` 按 `FEAT_NAMES` 选列组装） | (N,7) float32，N=H·W，列序 = `FEAT_NAMES`：`log_mag/slope/resid/bump/spread/ori_R/phase_coh` |
+| `rw`（`scales`/`lam_min`）→ `edgemap` | 逐尺度响应与核参数 | `EdgePrior` 的 `enhance/nms/enhance_per_scale` 显式接收 `rw`：`rw.scales` 的 `energy/ori` 供 per-scale 通道与 NMS 定位信号，`rw.lam_min` 绑定空间作用半径 |
 | `VBGMM` 内部状态 / 跨帧 `warm` | 变分后验 | `Posterior`：`alpha/beta/nu/logdet_w/tr_w/log_pi/log_lt` (K,)，`m` (K,D)，`w` (K,D,D)；另有 `r` (N,K) 责任、`weights` (K,)、`means_orig` (K,D)、`mu/sd` (D,) 标准化参数、`elbo: list[float]` |
 | `VBGMM.class_likelihood` → `edgemap` | 类后验似然图 | (N,) → reshape (H,W) float32，∈[0,1]（`L_e`/`L_t`） |
-| `RieszFeatures` → `edgemap` | 方向场 | `mean_ori`（法向，(−π/2,π/2]）、`ori_R`（置信 ∈[0,1]），均 (H,W) float32 |
+| `rw.features()` → `edgemap` | 方向场 | `mean_ori`（法向，(−π/2,π/2]）、`ori_R`（置信 ∈[0,1]），均 (H,W) float32 |
 | `EdgePrior.enhance` → `nms` | 增强似然图 | (H,W) float32 ∈[0,1]；`enhance_per_scale` 为 (H,W,S)（诊断用） |
 | `EdgePrior.nms` → 下游 | 细化边缘图 | (H,W) float32，仅相对意义（显示时按最大值归一） |
 | `VBGMM.infer`（逐帧） | 新帧责任 | 输入 (N,7) → 输出 (N,K)，固定后验单次 E 步 |
