@@ -6,9 +6,13 @@ CGA in 5D embeds Euclidean 3D space into a conformal space with basis
 This enables unified representation of points, lines, planes, circles, spheres,
 and rigid-body transformations (motors).
 
-表示约定 (与 simu.cga 一致): 点/点对/线为直接 (join) 形式, 关联判据
-op(p, X) = 0; 平面/球/圆为对偶形式, 关联判据 ip(p, X) = 0。
-meet 接受直接形式输入 (对偶原语先过 dual())。
+OOP 表面:
+  - Multivector: 32 分量多重向量, 代数运算全是方法
+    (gp/ip/op/reverse/dual/meet/norm/...)。
+  - 图元类: Point / PointPair / Line (直接形式, 关联判据 p.op(X) = 0),
+    Plane / Sphere / Circle (对偶形式, 关联判据 p.ip(X) = 0)。
+  - Motor: 刚体变换 versor, O' = M.apply(O); exp/log/插值/速度提取
+    都是类方法或方法。
 """
 
 from cga.algebra import (
@@ -17,52 +21,15 @@ from cga.algebra import (
     E2,
     E3,
     EINF,
-    bulk,
-    circle,
-    conjugate,
-    dist_point_plane,
-    dist_point_point,
-    dist_point_sphere,
-    dual,
-    gp,
-    grade_involution,
-    ip,
-    line,
-    meet,
-    norm,
-    normalize,
-    op,
-    plane,
-    point,
-    point_pair,
-    reverse,
-    sphere,
-    undual,
-    weight,
+    Circle,
+    Line,
+    Plane,
+    Point,
+    PointPair,
+    Sphere,
 )
-from cga.motors import (
-    apply_motor,
-    exp_bivector,
-    extract_velocity,
-    interpolate_motor,
-    log_motor,
-    matrix_to_quaternion,
-    motor,
-    motor_from_matrix,
-    motor_to_matrix,
-    rotor,
-    translator,
-    velocity_bivector,
-)
-from cga.multivector import (
-    Multivector,
-    mv_bivector,
-    mv_scalar,
-    mv_vector,
-    mv_zeros,
-    stack_mv,
-    unstack_mv,
-)
+from cga.motors import Motor
+from cga.multivector import Multivector
 
 __all__ = [
     "E0",
@@ -70,45 +37,12 @@ __all__ = [
     "E2",
     "E3",
     "EINF",
+    "Circle",
+    "Line",
+    "Motor",
     "Multivector",
-    "apply_motor",
-    "bulk",
-    "circle",
-    "conjugate",
-    "dist_point_plane",
-    "dist_point_point",
-    "dist_point_sphere",
-    "dual",
-    "exp_bivector",
-    "extract_velocity",
-    "gp",
-    "grade_involution",
-    "interpolate_motor",
-    "ip",
-    "line",
-    "log_motor",
-    "matrix_to_quaternion",
-    "meet",
-    "motor",
-    "motor_from_matrix",
-    "motor_to_matrix",
-    "mv_bivector",
-    "mv_scalar",
-    "mv_vector",
-    "mv_zeros",
-    "norm",
-    "normalize",
-    "op",
-    "plane",
-    "point",
-    "point_pair",
-    "reverse",
-    "rotor",
-    "sphere",
-    "stack_mv",
-    "translator",
-    "undual",
-    "unstack_mv",
-    "velocity_bivector",
-    "weight",
+    "Plane",
+    "Point",
+    "PointPair",
+    "Sphere",
 ]

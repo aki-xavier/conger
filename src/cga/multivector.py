@@ -15,6 +15,8 @@ e0·e∞ = -1。e0 与 e∞ 非正交, 故 blade 的几何积不能用正交基�
 远原点坐标提取无基换算抵消。All components are stored in MLX arrays.
 """
 
+import math
+
 import mlx.core as mx
 
 # ── Basis blade definitions ────────────────────────────────────────────────
@@ -250,6 +252,20 @@ for g in range(NUM_GRADES):
 
 GRADE_MASKS = _GRADE_MASKS
 
+
+def _grade_signs(sign_of_grade) -> mx.array:
+    """Build a per-component ±1 mask from a per-grade sign function."""
+    vals = [1.0] * NUM_COMPONENTS
+    for g in range(NUM_GRADES):
+        for idx in GRADE_INDICES[g]:
+            vals[idx] = float(sign_of_grade(g))
+    return mx.array(vals, dtype=mx.float32)
+
+
+# Sign masks for the involutions, precomputed once at module load.
+_REVERSE_MASK = _grade_signs(lambda g: (-1) ** (g * (g - 1) // 2))
+_INVOLUTION_MASK = _grade_signs(lambda g: -1 if g % 2 else 1)
+
 # ── Flattened GP table for scatter_add-based geometric product ─────────────
 
 # GP_MASK[i,j,k] = sign if GP_TABLE[i][j] contributes to k, else 0
@@ -414,6 +430,116 @@ class Multivector:
     def copy(self) -> Multivector:
         return Multivector(mx.array(self.values))
 
+    # ── 代数运算 (实现即验证过的原 cga.algebra 函数, 逐字搬入) ──────
+
+    def gp(self, other: Multivector) -> Multivector:
+        """几何积。result[k] = Σ GP_MASK[i,j,k]·self_i·other_j,
+        用预计算的稀疏非零 (i,j) 对索引。"""
+        prod = self.values[GP_NONZERO_I] * other.values[GP_NONZERO_J]
+        mask_rows = GP_MASK[GP_NONZERO_I, GP_NONZERO_J, :]  # (N, 32)
+        return Multivector((mask_rows * prod[:, None]).sum(axis=0))
+
+    def ip(self, other: Multivector) -> Multivector:
+        """左收缩 (inner product) self ⌋ other。
+
+        blade 规则对全 grade 对的线性扩张:
+            a ⌋ b = Σ_{r<=s} < <a>_r * <b>_s >_{s-r}
+        对一般混合 grade multivector 正确。"""
+        result = mx.zeros(NUM_COMPONENTS, dtype=mx.float32)
+        for ga in range(NUM_GRADES):
+            a_g = self.values * GRADE_MASKS[ga]
+            if not bool(mx.any(a_g != 0).item()):
+                continue
+            for gb in range(ga, NUM_GRADES):
+                b_g = other.values * GRADE_MASKS[gb]
+                if not bool(mx.any(b_g != 0).item()):
+                    continue
+                prod = Multivector(a_g).gp(Multivector(b_g))
+                result = result + prod.values * GRADE_MASKS[gb - ga]
+        return Multivector(result)
+
+    def op(self, other: Multivector) -> Multivector:
+        """外积 self ∧ other。
+
+        blade 规则对全 grade 对的线性扩张:
+            a ∧ b = Σ_{r,s} < <a>_r * <b>_s >_{r+s}
+        对一般混合 grade multivector 正确。"""
+        result = mx.zeros(NUM_COMPONENTS, dtype=mx.float32)
+        for ga in range(NUM_GRADES):
+            a_g = self.values * GRADE_MASKS[ga]
+            if not bool(mx.any(a_g != 0).item()):
+                continue
+            for gb in range(NUM_GRADES - ga):
+                b_g = other.values * GRADE_MASKS[gb]
+                if not bool(mx.any(b_g != 0).item()):
+                    continue
+                prod = Multivector(a_g).gp(Multivector(b_g))
+                result = result + prod.values * GRADE_MASKS[ga + gb]
+        return Multivector(result)
+
+    def reverse(self) -> Multivector:
+        """反转 involution: grade-k blade 乘 (-1)^{k(k-1)/2}。"""
+        return Multivector(self.values * _REVERSE_MASK)
+
+    def grade_involution(self) -> Multivector:
+        """Grade involution: 奇 grade 分量取负。"""
+        return Multivector(self.values * _INVOLUTION_MASK)
+
+    def conjugate(self) -> Multivector:
+        """Clifford 共轭: reverse + grade involution。"""
+        return self.reverse().grade_involution()
+
+    def dual(self) -> Multivector:
+        """Hodge 对偶: 乘逆伪标量 I⁻¹。
+
+        定向约定: I = e123 ∧ e∞ ∧ e0, 与 `clifford` 库的 conformal
+        伪标量 e12345 一致 (e∞ ∧ e0 = +e45)。此定向下 I² = −1,
+        故 I⁻¹ = −I, dual(A) = A · I⁻¹。
+        """
+        # I = e123∧e∞∧e0 = -(canonical blade 31);  I⁻¹ = -I = +blade31.
+        I_inv_vals = mx.zeros(NUM_COMPONENTS, dtype=mx.float32)
+        I_inv_vals[31] = 1.0
+        return self.gp(Multivector(I_inv_vals))
+
+    def undual(self) -> Multivector:
+        """对偶的逆: dual(dual(x)) = −x (因 I⁻² = I² = −1), 故 undual = −dual。
+
+        从直接形式还原对偶形式 (n + d·e∞ / up(c) − ½ρ²e∞) 时使用。
+        """
+        return -self.dual()
+
+    def meet(self, other: Multivector) -> Multivector:
+        """两个直接形式原语的交: self ∨ other = (self* ∧ other*)*。
+
+        输入需为直接形式; 对偶形式的原语 (plane/sphere/circle) 先过
+        dual() 再传入。例: π1.dual().meet(π2.dual()) = 交线 (直接形式)。
+        """
+        return self.dual().op(other.dual()).dual()
+
+    def norm(self) -> float:
+        """欧氏范数: sqrt(|⟨self · reverse(self)⟩₀|)。"""
+        s = float(self.gp(self.reverse()).values[0])
+        return math.sqrt(abs(s))
+
+    def normalized(self) -> Multivector:
+        """归一化到单位范数。"""
+        n = self.norm()
+        if n < 1e-12:
+            return Multivector.zeros()
+        return self / n
+
+    def bulk(self) -> Multivector:
+        """欧氏 (bulk) 部分: 不含 e0/e∞ 的分量。"""
+        euc_indices = [0, 1, 2, 3, 6, 7, 10, 16]
+        vals = mx.zeros(NUM_COMPONENTS, dtype=mx.float32)
+        for idx in euc_indices:
+            vals[idx] = self.values[idx]
+        return Multivector(vals)
+
+    def weight(self) -> Multivector:
+        """Conformal (weight) 部分: 含 e0/e∞ 的分量。"""
+        return self - self.bulk()
+
 
 def _blade_name(idx: int) -> str:
     blade = _BASIS_BLADES[idx]
@@ -421,29 +547,3 @@ def _blade_name(idx: int) -> str:
         return "1"
     names = {0: "e1", 1: "e2", 2: "e3", 3: "e0", 4: "e∞"}
     return "".join(names[v] for v in blade)
-
-
-def mv_zeros() -> Multivector:
-    return Multivector.zeros()
-
-
-def mv_scalar(s: float) -> Multivector:
-    return Multivector.scalar(s)
-
-
-def mv_vector(
-    v1: float, v2: float, v3: float, v0: float = 0.0, ve: float = 0.0
-) -> Multivector:
-    return Multivector.vector(v1, v2, v3, v0, ve)
-
-
-def mv_bivector(components: list[float]) -> Multivector:
-    return Multivector.bivector(components)
-
-
-def stack_mv(mvs: list[Multivector]) -> mx.array:
-    return mx.stack([mv.values for mv in mvs])
-
-
-def unstack_mv(arr: mx.array) -> list[Multivector]:
-    return [Multivector(arr[i]) for i in range(arr.shape[0])]

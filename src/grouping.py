@@ -50,7 +50,7 @@ from typing import NamedTuple
 import matplotlib.pyplot as plt
 import mlx.core as mx
 
-from cga import circle, line, point
+from cga import Circle, Line, Point
 from cga.multivector import Multivector
 from edgemap import EdgePrior
 from utils import Utils
@@ -69,7 +69,7 @@ class Edgels(NamedTuple):
         """提升为 2D conformal 点 (x=col, y=row, z=0)。不做反投影 —
         深度未知时图像点只对应 3D 射线 (flow.md §1.1)。"""
         r, c = float(self.pos[idx, 0]), float(self.pos[idx, 1])
-        return point(c, r, 0.0)
+        return Point(c, r, 0.0)
 
 
 class TJunction(NamedTuple):
@@ -319,7 +319,7 @@ class PerceptualGrouping:
                 completions.append((a, b, prob))
                 if prob >= self.complete_thr and circ is not None:
                     (cx, cy), rho = circ
-                    circles.append(circle((cx, cy, 0.0), rho, (0, 0, 1)))
+                    circles.append(Circle((cx, cy, 0.0), rho, (0, 0, 1)))
         completions.sort(key=lambda t: -t[2])
         return completions, circles
 
@@ -492,7 +492,7 @@ class PerceptualGrouping:
         lines = []
         for ch in chains:
             p1, p2 = ed.cga_point(int(ch[0])), ed.cga_point(int(ch[-1]))
-            lines.append(line(p1, p2))
+            lines.append(Line(p1, p2))
         completions, circles = self.complete(ed, chains)
         t_junctions = self.detect_t_junctions(ed, chains)
         return GroupingResult(
