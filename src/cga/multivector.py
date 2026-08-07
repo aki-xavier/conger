@@ -1,29 +1,29 @@
-"""Multivector representation for 5D Conformal Geometric Algebra.
+"""5D 共形几何代数 (CGA) 的 multivector 表示。
 
-A multivector in 5D CGA has 32 components organized by grade:
-  Grade 0: 1 scalar
-  Grade 1: 5 vectors   {e1, e2, e3, e0, einf}
-  Grade 2: 10 bivectors
-  Grade 3: 10 trivectors
-  Grade 4: 5 quadvectors
-  Grade 5: 1 pseudoscalar
+5D CGA 的 multivector 有 32 个分量, 按 grade 组织:
+  Grade 0: 1 个标量
+  Grade 1: 5 个向量   {e1, e2, e3, e0, e∞}
+  Grade 2: 10 个二重向量
+  Grade 3: 10 个三重向量
+  Grade 4: 5 个四重向量
+  Grade 5: 1 个伪标量
 
 基取 null 基 {e1, e2, e3, e0, e∞}: e0² = e∞² = 0,
 e0·e∞ = -1。e0 与 e∞ 非正交, 故 blade 的几何积不能用正交基的递归
 公式——积表构建时对 blade_b 的全排列做反对称化 (见 _compute_gp)。
 代价是建表稍慢 (一次性), 收益是 conformal 权重 (e0 系数) 显式存储,
-远原点坐标提取无基换算抵消。All components are stored in MLX arrays.
+远原点坐标提取无基换算抵消。所有分量存于 MLX 数组。
 """
 
 import math
 
 import mlx.core as mx
 
-# ── Basis blade definitions ────────────────────────────────────────────────
+# ── 基 blade 定义 ──────────────────────────────────────────────────
 
-# Canonical ordering of the 32 basis blades (公开: 互操作/工具脚本
+# 32 个基 blade 的规范排序 (公开: 互操作/工具脚本
 # 的合法元数据, 如 compare_clifford.py 的基变换)
-# Each blade is a tuple of basis vector indices: 0=e1, 1=e2, 2=e3, 3=e0, 4=e∞
+# 每个 blade 是基向量下标元组: 0=e1, 1=e2, 2=e3, 3=e0, 4=e∞
 BASIS_BLADES: list[tuple[int, ...]] = [
     # Grade 0 (1)
     (),
@@ -68,30 +68,30 @@ BASIS_BLADES: list[tuple[int, ...]] = [
 NUM_COMPONENTS = 32
 NUM_GRADES = 6
 
-# Map blade tuple -> index for fast lookup
+# blade 元组 → 下标的快速查表
 _BLADE_TO_IDX = {blade: i for i, blade in enumerate(BASIS_BLADES)}
 
-# Grade of each blade index
+# 每个 blade 下标的 grade
 _BLADE_GRADE = [len(blade) for blade in BASIS_BLADES]
 
-# Indices grouped by grade
+# 按 grade 分组的下标
 GRADE_INDICES: list[list[int]] = [[] for _ in range(NUM_GRADES)]
 for i, g in enumerate(_BLADE_GRADE):
     GRADE_INDICES[g].append(i)
 
-# Grade sizes: [1, 5, 10, 10, 5, 1]
+# 各 grade 的尺寸: [1, 5, 10, 10, 5, 1]
 GRADE_SIZES = [len(g) for g in GRADE_INDICES]
 
-# Slice ranges for each grade in the flat array
+# 各 grade 在扁平数组里的切片区间
 _GRADE_SLICES: list[tuple[int, int]] = []
 offset = 0
 for size in GRADE_SIZES:
     _GRADE_SLICES.append((offset, offset + size))
     offset += size
 
-# ── Metric for basis vectors ───────────────────────────────────────────────
-# Indices: 0=e1, 1=e2, 2=e3, 3=e0, 4=einf
-# e1^2=e2^2=e3^2=1, e0^2=einf^2=0, e0·einf = einf·e0 = -1
+# ── 基向量的度规 ───────────────────────────────────────────────────
+# 下标: 0=e1, 1=e2, 2=e3, 3=e0, 4=e∞
+# e1²=e2²=e3²=1, e0²=e∞²=0, e0·e∞ = e∞·e0 = −1
 _VECTOR_METRIC = mx.array(
     [
         [1, 0, 0, 0, 0],
@@ -105,7 +105,7 @@ _VECTOR_METRIC = mx.array(
 
 
 def _parity(seq: list[int]) -> int:
-    """Compute the permutation parity to sort seq. Returns (-1)^swaps."""
+    """把 seq 排序所需的排列奇偶性, 返回 (-1)^交换次数。"""
     arr = list(seq)
     swaps = 0
     n = len(arr)
@@ -120,34 +120,33 @@ def _parity(seq: list[int]) -> int:
 def _compute_gp(
     blade_a: tuple[int, ...], blade_b: tuple[int, ...]
 ) -> list[tuple[int, int]]:
-    """Compute geometric product of two basis blades.
+    """计算两个基 blade 的几何积。
 
-    blade_b is a WEDGE product b_1 ∧ ... ∧ b_q.  Because e0 and einf are not
-    orthogonal (e0·einf = -1), the wedge is NOT the sequential geometric
-    product of its vectors; it is the antisymmetrized geometric product:
+    blade_b 是外积 b_1 ∧ ... ∧ b_q。由于 e0 与 e∞ 非正交
+    (e0·e∞ = -1), 外积不等于其向量序列的顺序几何积, 而是反对称化
+    的几何积:
 
         b_1 ∧ ... ∧ b_q = (1/q!) Σ_σ sign(σ) b_σ(1) * ... * b_σ(q)
 
-    Each permuted vector sequence is multiplied through blade_a with the
-    recursive formula A * v = A ⌋ v + A ∧ v, where the contraction is
+    每个排列后的向量序列用递归公式 A * v = A ⌋ v + A ∧ v 逐一乘过
+    blade_a, 其中收缩为
 
         A ⌋ v = Σ_i (-1)^{|A|-i} g(a_i, v) * (a_1 ∧ ... ∧ â_i ∧ ... ∧ a_k)
 
-    Coefficients must come out integral (blades are signed permutation
-    products); a fractional result means the table builder itself is wrong,
-    so we raise instead of silently rounding.
+    系数必须为整数 (blade 是带符号的排列积); 出现分数意味着建表
+    本身出错, 故直接抛异常而不是静默取整。
 
-    Returns list of (sign, result_blade_idx).
+    返回 (符号, 结果 blade 下标) 的列表。
     """
     import itertools
     import math
 
-    # Accumulate results as {blade_tuple: accumulated_coeff}
+    # 以 {blade 元组: 累计系数} 累加结果
     results: dict[tuple[int, ...], float] = {}
     q = len(blade_b)
     for perm in itertools.permutations(blade_b):
-        perm_sign = _parity(list(perm))  # blade_b is sorted: parity of σ
-        # Multiply blade_a by the vectors of perm, sequentially.
+        perm_sign = _parity(list(perm))  # blade_b 已排序: 即 σ 的奇偶性
+        # 把 perm 的向量逐个乘过 blade_a
         partial = {blade_a: 1.0}
         for bv in perm:
             new_partial: dict[tuple[int, ...], float] = {}
@@ -155,7 +154,7 @@ def _compute_gp(
                 cur_list = list(cur_blade)
                 k = len(cur_list)
 
-                # Term 1: contraction — for each vector in cur_blade
+                # 第 1 项: 收缩 —— 对 cur_blade 里的每个向量
                 for i in range(k):
                     metric_val = float(_VECTOR_METRIC[cur_list[i], bv])
                     if metric_val == 0:
@@ -166,8 +165,8 @@ def _compute_gp(
                         new_partial.get(contracted, 0.0) + term_sign
                     )
 
-                # Term 2: outer product — append bv; canonicalization parity
-                # handles the sign later
+                # 第 2 项: 外积 —— 追加 bv; 符号由后面的规范化
+                # 奇偶性处理
                 wedge_blade = tuple(cur_list + [bv])
                 new_partial[wedge_blade] = new_partial.get(wedge_blade, 0.0) + cur_sign
 
@@ -177,8 +176,7 @@ def _compute_gp(
         for blade, coef in partial.items():
             results[blade] = results.get(blade, 0.0) + scale * coef
 
-    # Canonicalize results: sort blades, accumulate fractional coefficients,
-    # round only after all contributions are merged.
+    # 规范化结果: blade 排序, 先累计分数系数, 全部合并后再取整
     coef_by_idx: dict[int, float] = {}
     for blade, sign in results.items():
         if abs(sign) < 1e-12:
@@ -205,7 +203,7 @@ def _compute_gp(
 
 
 def _build_gp_table() -> list[list[list[tuple[int, int]]]]:
-    """Build the geometric product multiplication table."""
+    """构建几何积乘法表。"""
     gp_table = [[[] for _ in range(NUM_COMPONENTS)] for _ in range(NUM_COMPONENTS)]
 
     for i in range(NUM_COMPONENTS):
@@ -215,15 +213,15 @@ def _build_gp_table() -> list[list[list[tuple[int, int]]]]:
     return gp_table
 
 
-# Build the table once at module load
+# 模块加载时建表一次
 _GP_TABLE = _build_gp_table()
 
-# ── Precomputed sparse GP arrays for MLX ───────────────────────────────────
+# ── 供 MLX 用的预计算稀疏 GP 数组 ──────────────────────────────────
 
-# Maximum terms in any product
+# 任一乘积的最大项数
 _max_terms = max(len(terms) for row in _GP_TABLE for terms in row)
 
-# Build dense index/sign arrays padded with zeros using Python lists (one-time cost)
+# 用 Python 列表构建补零的稠密下标/符号数组 (一次性开销)
 _signs_list = [
     [[0.0] * _max_terms for _ in range(NUM_COMPONENTS)] for _ in range(NUM_COMPONENTS)
 ]
@@ -244,7 +242,7 @@ GP_SIGNS = mx.array(_signs_list, dtype=mx.float32)
 GP_INDICES = mx.array(_indices_list, dtype=mx.int32)
 GP_COUNTS = mx.array(_counts_list, dtype=mx.int32)
 
-# ── Grade projection masks ─────────────────────────────────────────────────
+# ── grade 投影掩码 ─────────────────────────────────────────────────
 
 _GRADE_MASKS = []
 for g in range(NUM_GRADES):
@@ -255,7 +253,7 @@ GRADE_MASKS = _GRADE_MASKS
 
 
 def _grade_signs(sign_of_grade) -> mx.array:
-    """Build a per-component ±1 mask from a per-grade sign function."""
+    """由"逐 grade 符号函数"构建逐分量 ±1 掩码。"""
     vals = [1.0] * NUM_COMPONENTS
     for g in range(NUM_GRADES):
         for idx in GRADE_INDICES[g]:
@@ -263,13 +261,13 @@ def _grade_signs(sign_of_grade) -> mx.array:
     return mx.array(vals, dtype=mx.float32)
 
 
-# Sign masks for the involutions, precomputed once at module load.
+# 两种对合的符号掩码, 模块加载时预计算一次
 _REVERSE_MASK = _grade_signs(lambda g: (-1) ** (g * (g - 1) // 2))
 _INVOLUTION_MASK = _grade_signs(lambda g: -1 if g % 2 else 1)
 
-# ── Flattened GP table for scatter_add-based geometric product ─────────────
+# ── 供 scatter_add 式几何积用的扁平化 GP 表 ────────────────────────
 
-# GP_MASK[i,j,k] = sign if GP_TABLE[i][j] contributes to k, else 0
+# GP_MASK[i,j,k] = 符号 (若 GP_TABLE[i][j] 对 k 有贡献), 否则 0
 _mask_list = [
     [[0.0] * NUM_COMPONENTS for _ in range(NUM_COMPONENTS)]
     for _ in range(NUM_COMPONENTS)
@@ -280,7 +278,7 @@ for i in range(NUM_COMPONENTS):
             _mask_list[i][j][dst] += float(sign)
 GP_MASK = mx.array(_mask_list, dtype=mx.float32)
 
-# Non-zero (i,j) pairs for sparse computation
+# 稀疏计算用的非零 (i,j) 对
 _nz_i = []
 _nz_j = []
 for i in range(NUM_COMPONENTS):
@@ -292,11 +290,11 @@ GP_NONZERO_I = mx.array(_nz_i, dtype=mx.int32)
 GP_NONZERO_J = mx.array(_nz_j, dtype=mx.int32)
 
 
-# ── Multivector class ──────────────────────────────────────────────────────
+# ── Multivector 类 ─────────────────────────────────────────────────
 
 
 class Multivector:
-    """A 32-component multivector in 5D CGA, backed by an MLX array.
+    """5D CGA 的 32 分量 multivector, 以 MLX 数组为后端。
 
     系数存储于 null 基 {e1, e2, e3, e0, e∞} 下 (槽 4 = e0, 槽 5 = e∞)。
     """
@@ -304,6 +302,7 @@ class Multivector:
     __slots__ = ("values",)
 
     def __init__(self, values: mx.array | None = None):
+        """由 32 分量数组构造; None 表示零 multivector。"""
         if values is None:
             self.values = mx.zeros(NUM_COMPONENTS, dtype=mx.float32)
         elif isinstance(values, mx.array):
@@ -318,10 +317,12 @@ class Multivector:
 
     @staticmethod
     def zeros() -> Multivector:
+        """零 multivector。"""
         return Multivector(mx.zeros(NUM_COMPONENTS, dtype=mx.float32))
 
     @staticmethod
     def scalar(s: float) -> Multivector:
+        """标量 multivector (仅 grade-0 分量)。"""
         vals = mx.zeros(NUM_COMPONENTS, dtype=mx.float32)
         vals[0] = s
         return Multivector(vals)
@@ -330,7 +331,7 @@ class Multivector:
     def vector(
         v1: float, v2: float, v3: float, v0: float = 0.0, ve: float = 0.0
     ) -> Multivector:
-        """Vector from Euclidean (v1,v2,v3) + e0/einf coefficients (v0/ve)."""
+        """由欧氏分量 (v1,v2,v3) + e0/e∞ 系数 (v0/ve) 构造向量。"""
         vals = mx.zeros(NUM_COMPONENTS, dtype=mx.float32)
         vals[1] = v1
         vals[2] = v2
@@ -341,6 +342,7 @@ class Multivector:
 
     @staticmethod
     def bivector(components: list[float]) -> Multivector:
+        """由 10 个 grade-2 分量构造二重向量。"""
         if len(components) != 10:
             raise ValueError(f"Expected 10 bivector components, got {len(components)}")
         vals = mx.zeros(NUM_COMPONENTS, dtype=mx.float32)
@@ -350,17 +352,21 @@ class Multivector:
         return Multivector(vals)
 
     def grade(self, g: int) -> Multivector:
+        """提取 grade-g 投影。"""
         mask = GRADE_MASKS[g]
         return Multivector(self.values * mask)
 
     def scalar_part(self) -> float:
+        """标量部 (grade-0 分量)。"""
         return float(self.values[0])
 
     def vector_part(self) -> mx.array:
+        """向量部 (grade-1 的 5 个分量)。"""
         start, end = _GRADE_SLICES[1]
         return self.values[start:end]
 
     def euclidean_vector(self) -> tuple[float, float, float]:
+        """欧氏向量部 (e1/e2/e3 三个系数)。"""
         return (float(self.values[1]), float(self.values[2]), float(self.values[3]))
 
     def e0_coeff(self) -> float:
@@ -372,6 +378,7 @@ class Multivector:
         return float(self.values[5])
 
     def bivector_part(self) -> mx.array:
+        """二重向量部 (grade-2 的 10 个分量)。"""
         start, end = _GRADE_SLICES[2]
         return self.values[start:end]
 
@@ -385,24 +392,31 @@ class Multivector:
         return bool(mx.all(mx.abs(self.values) < 1e-10).item())
 
     def __add__(self, other: Multivector) -> Multivector:
+        """逐分量加法。"""
         return Multivector(self.values + other.values)
 
     def __sub__(self, other: Multivector) -> Multivector:
+        """逐分量减法。"""
         return Multivector(self.values - other.values)
 
     def __mul__(self, scalar: float) -> Multivector:
+        """标量乘法 (几何积请用 gp())。"""
         return Multivector(self.values * scalar)
 
     def __rmul__(self, scalar: float) -> Multivector:
+        """右标量乘法。"""
         return Multivector(self.values * scalar)
 
     def __truediv__(self, scalar: float) -> Multivector:
+        """标量除法。"""
         return Multivector(self.values / scalar)
 
     def __neg__(self) -> Multivector:
+        """逐分量取负。"""
         return Multivector(-self.values)
 
     def __repr__(self) -> str:
+        """按 grade 列出非零分量的可读表示。"""
         parts = []
         for g in range(NUM_GRADES):
             for idx in GRADE_INDICES[g]:
@@ -418,17 +432,19 @@ class Multivector:
         return "Multivector(" + " ".join(parts) + ")"
 
     def __eq__(self, other: object) -> bool:
+        """近似相等 (allclose, atol=1e-6)。"""
         if not isinstance(other, Multivector):
             return False
         return bool(mx.allclose(self.values, other.values, atol=1e-6).item())
 
     def __hash__(self) -> int:
-        # 精确表示的哈希; __eq__ 是近似比较 (atol=1e-6), 故"近似相等
-        # 但非逐位相同"的 multivector 会有不同哈希——作 dict key/set
-        # 成员时请自行量化或取整后再用。
+        """精确表示的哈希。注意 __eq__ 是近似比较 (atol=1e-6), 故
+        "近似相等但非逐位相同"的 multivector 会有不同哈希——作
+        dict key/set 成员时请自行量化或取整后再用。"""
         return hash(tuple(self.values.tolist()))
 
     def copy(self) -> Multivector:
+        """拷贝 (新 MLX 数组)。"""
         return Multivector(mx.array(self.values))
 
     # ── 代数运算 (实现即验证过的原 cga.algebra 函数, 逐字搬入) ──────
@@ -501,7 +517,7 @@ class Multivector:
         伪标量 e12345 一致 (e∞ ∧ e0 = +e45)。此定向下 I² = −1,
         故 I⁻¹ = −I, dual(A) = A · I⁻¹。
         """
-        # I = e123∧e∞∧e0 = -(canonical blade 31);  I⁻¹ = -I = +blade31.
+        # I = e123∧e∞∧e0 = −(规范 blade 31);  I⁻¹ = −I = +blade31
         I_inv_vals = mx.zeros(NUM_COMPONENTS, dtype=mx.float32)
         I_inv_vals[31] = 1.0
         return self.gp(Multivector(I_inv_vals))
@@ -547,6 +563,7 @@ class Multivector:
 
 
 def _blade_name(idx: int) -> str:
+    """blade 下标 → 可读名 (如 (0,1) → "e12", 标量 → "1")。"""
     blade = BASIS_BLADES[idx]
     if not blade:
         return "1"

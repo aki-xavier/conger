@@ -46,6 +46,7 @@ class GaborScale:
     r2: mx.array | None = None  # |m₂| ∈ [0,1]: 第二谐波——角点/十字（正交方向对）强度
 
     def __post_init__(self):
+        """逐方向 ifft 出解析响应, 取包络能量并做圆统计。"""
         for spec in self.spectra:
             # 单边核 → 解析信号: |resp|² 是平滑包络能量 (相位不变,
             # 无载波振荡); resp 的复相角留作跨尺度一致性备用
@@ -90,8 +91,8 @@ class GaborWavelet:
     scale_size: int = 0
     ori_size: int = 8
     bandwidth: float = 1.0  # used to create gabor kernel
-    gamma: float = 1.0  # used to create gabor kernel; 1.0 gives enough
-    # angular selectivity for the second orientation harmonic (r2) to survive
+    gamma: float = 1.0  # 核的纵横比; 1.0 给出足够的角选择性,
+    # 让第二方向谐波 (r2) 不被抹掉
     adaptive_pad: bool = True
     pad: int = 0
     xgrid: mx.array | None = None
@@ -104,6 +105,7 @@ class GaborWavelet:
     scales: list[GaborScale] = field(default_factory=list)
 
     def __post_init__(self):
+        """参数校验后依次建波长/方向/频域核并分解各尺度。"""
         if self.img.ndim != 2:
             raise ValueError(f"img must be 2D, got shape {self.img.shape}")
         if self.ori_size < 1:
@@ -127,10 +129,11 @@ class GaborWavelet:
         self.calc_scales()
 
     def lam_max(self) -> float:
-        """Coarsest supported wavelength for the image dimensions."""
+        """图像尺寸支持的最粗波长。"""
         return min(self.height, self.width) / 2.0
 
     def calc_lams(self):
+        """波长序列: lam_max→lam_min 对数等距 (与 ffts/scales 同序)。"""
         # lams 从长波长到短波长排列 (低频→高频), 与 ffts/scales 顺序一致
         lam_min = self.lam_min
         lam_max = self.lam_max()
@@ -144,11 +147,13 @@ class GaborWavelet:
                 self.lams.append(lam)
 
     def calc_thetas(self):
+        """方向序列: [0, π) 均布 ori_size 个。"""
         for i in range(self.ori_size):
             theta = i * math.pi / self.ori_size
             self.thetas.append(theta)
 
     def calc_freqs(self):
+        """自适应 padding 防 FFT 回绕; fft2 后高斯低通剥 DC。"""
         # ── self-adaptive padding to avoid FFT wraparound ────────────
         h, w = self.height, self.width
         if self.adaptive_pad:
@@ -173,6 +178,7 @@ class GaborWavelet:
         self.fft = self.fft - self.dc
 
     def calc_ffts(self):
+        """各向同性径向高斯核, 把剥 DC 后的频谱按 1/λ 从低频到高频分带。"""
         # 各向同性径向高斯核, 把剥离 DC 后的频谱按 1/lam 从低频到高频分带。
         radius = mx.sqrt(self.xgrid**2 + self.ygrid**2)
         bw = self.bandwidth
@@ -186,6 +192,7 @@ class GaborWavelet:
             self.ffts.append(self.fft * kernel)
 
     def calc_scales(self):
+        """各向异性分解: 频带 × 纯角度权重 → 逐尺度 GaborScale。"""
         # 各向异性分解 = 各向同性频带 × 纯角度权重:
         # 在频域极角 φ 上以 θ 为中心放高斯, 与半径无关, 故角选择性
         # 跨尺度严格一致 (尺度不变)。
@@ -216,6 +223,7 @@ class GaborWavelet:
             self.scales.append(gs)
 
     def ifft2(self, arr: mx.array):
+        """逆变换取实部, 并按 pad 裁回原尺寸。"""
         ret = mx.real(mx.fft.ifft2(arr))
         if self.adaptive_pad:
             ret = ret[
@@ -226,6 +234,7 @@ class GaborWavelet:
         return ret
 
     def visualize(self, out_path: str | Path):
+        """原图/DC/逐尺度 sum_e·mean_dir·R 拼图保存。"""
         dc = self.ifft2(self.dc)
 
         plots = [
@@ -247,7 +256,7 @@ class GaborWavelet:
 if __name__ == "__main__":
     from PIL import Image
 
-    # natural images (downloaded from picsum.photos)
+    # 自然图像 (picsum.photos 下载)
     for img_name in [
         "12.png",
         "nat10.jpg",

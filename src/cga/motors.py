@@ -307,7 +307,7 @@ class Motor(Multivector):
         vx_val, vy_val, vz_val = linear
 
         vals = mx.zeros(NUM_COMPONENTS, dtype=mx.float32)
-        # Angular part (bivector):
+        # 角速度部分 (二重向量):
         vals[6] = wz  # e12
         vals[7] = -wy  # e13 (from ωy*e31 = -ωy*e13)
         vals[10] = wx  # e23
@@ -336,7 +336,7 @@ class Motor(Multivector):
 
         vals = V.values
         wx = float(vals[10])  # e23
-        wy = -float(vals[7])  # e13 (negated because e31 = -e13)
+        wy = -float(vals[7])  # e13 (取负因 e31 = -e13)
         wz = float(vals[6])  # e12
         # v∧e∞ 分量槽位: (i, 4) = e_i∧e∞
         vx = float(vals[9])  # e1∧e∞

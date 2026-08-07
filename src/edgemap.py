@@ -101,6 +101,7 @@ class EdgePrior:
         i01, i10, i11 = i00 + 1, i00 + w, i00 + w + 1
 
         def sample(m: mx.array) -> mx.array:
+            """双线性采样闭包: m 为 (H,W) 或 (H,W,S)。"""
             if m.ndim == 2:
                 flat = m.reshape(-1)
                 v00, v01 = flat[i00], flat[i01]
@@ -109,6 +110,7 @@ class EdgePrior:
                 flat = m.reshape(h * w, m.shape[-1])
 
                 def g(idx: mx.array) -> mx.array:
+                    """按扁平索引 gather 并还原 (H,W,S) 形状。"""
                     r = mx.take_along_axis(flat, idx.reshape(h * w, -1), axis=0)
                     return r.reshape(m.shape)
 
@@ -222,6 +224,7 @@ class EdgePrior:
         )
 
         def gate(other: mx.array) -> mx.array:
+            """相对差的 sigmoid 门控 (loc 高于对侧 → ≈1)。"""
             z = beta * (loc - other) / mx.maximum(loc, 1e-6)
             return 1.0 / (1.0 + mx.exp(-z))
 

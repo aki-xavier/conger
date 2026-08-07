@@ -212,6 +212,7 @@ class PerceptualGrouping:
         d = xj - xi
 
         def cross(a: mx.array, b: mx.array) -> mx.array:
+            """2D 叉积标量: a_x·b_y − a_y·b_x。"""
             return a[:, 0] * b[:, 1] - a[:, 1] * b[:, 0]
 
         det = cross(ni, nj)  # 法向线交点存在 ⇔ det≠0
@@ -463,6 +464,7 @@ class PerceptualGrouping:
         near = mx.abs(along) <= self.t_radius
 
         def stat(sel: mx.array) -> tuple[int, float]:
+            """单臂支撑统计: (带内 edgel 数, 最大延伸)。"""
             hit = band & far & near & sel
             n = int(mx.sum(hit))
             span = float(mx.max(mx.where(hit, mx.abs(along), 0.0)))
@@ -558,12 +560,14 @@ if __name__ == "__main__":
         return like, ori
 
     def hline(r: float, c0: float, c1: float, step: float = 0.5):
+        """水平线段探针: (点列, 法向列)。"""
         cs = mx.arange(c0, c1 + step, step)
         pts = mx.stack([mx.full_like(cs, r), cs], axis=-1)
         nrm = mx.stack([mx.ones_like(cs), mx.zeros_like(cs)], axis=-1)
         return pts, nrm
 
     def vline(c: float, r0: float, r1: float, step: float = 0.5):
+        """竖直线段探针: (点列, 法向列)。"""
         rs = mx.arange(r0, r1 + step, step)
         pts = mx.stack([rs, mx.full_like(rs, c)], axis=-1)
         nrm = mx.stack([mx.zeros_like(rs), mx.ones_like(rs)], axis=-1)
@@ -576,6 +580,7 @@ if __name__ == "__main__":
         a1: float,
         step: float = 0.02,
     ):
+        """圆弧探针 (角度单位为度): (点列, 法向列)。"""
         ang = mx.arange(math.radians(a0), math.radians(a1), step)
         pts = mx.stack(
             [center[0] + rho * mx.sin(ang), center[1] + rho * mx.cos(ang)], axis=-1

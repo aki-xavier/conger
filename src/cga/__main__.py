@@ -1,4 +1,4 @@
-"""CGA package self-check: python -m cga
+"""CGA 包自检: python -m cga
 
 验证核心代数与原语/versor 的正确性 (OOP API)。约定:
 点/点对/线为直接形式, 关联判据 p.op(X) = 0; 平面/球/圆为对偶
@@ -25,6 +25,7 @@ _ok = 0
 
 
 def check(name: str, cond: bool) -> None:
+    """断言一条检查并计数。"""
     global _ok
     assert cond, f"FAIL: {name}"
     _ok += 1
@@ -32,14 +33,17 @@ def check(name: str, cond: bool) -> None:
 
 
 def close(a: float, b: float, tol: float = 1e-4) -> bool:
+    """|a−b| < tol。"""
     return abs(float(a) - float(b)) < tol
 
 
 def vmax(mv: Multivector) -> float:
+    """分量的最大绝对值。"""
     return float(mx.abs(mv.values).max().item())
 
 
 def main() -> None:
+    """全部自检: 代数 / 图元 / versor / exp-log / 距离。"""
     # null 性 + 距离
     p1, p2 = Point(0, 0, 0), Point(1, 0, 0)
     check("point is null", close(p1.gp(p1).values[0], 0))
@@ -93,8 +97,7 @@ def main() -> None:
     Lm = pi.dual().meet(pi2.dual())  # 交线: y=1, z=2, 沿 x 方向
     check(
         "meet(plane,plane) = line",
-        close(vmax(Point(0, 1, 2).op(Lm)), 0)
-        and close(vmax(Point(5, 1, 2).op(Lm)), 0),
+        close(vmax(Point(0, 1, 2).op(Lm)), 0) and close(vmax(Point(5, 1, 2).op(Lm)), 0),
     )
     Lz = Line(Point(0, 0, -2), Point(0, 0, 2))  # z 轴
     unit_s = Sphere((0, 0, 0), 1.0)

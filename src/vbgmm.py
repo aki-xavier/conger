@@ -175,6 +175,8 @@ class VBGMM:
         return mx.stack(cols, axis=-1).reshape(-1, 7)
 
     def __post_init__(self):
+        """标准化并拟合 (冷启动可选 α0 网格), 再导出混合权重与
+        原始空间的分量均值。"""
         x = self.x_orig
         self.mu = mx.mean(x, axis=0)
         self.sd = mx.maximum(mx.sqrt(mx.var(x, axis=0)), 1e-6)
@@ -207,6 +209,8 @@ class VBGMM:
     # ── VB-EM 主循环 ──────────────────────────────────────────────
 
     def fit(self, z: mx.array):
+        """VB-EM 主循环: M 步→E 步→ELBO, 正微增益判收敛。
+        子采样只作用 M 步, 最终责任始终对全图重算。"""
         # M 步拟合可以只用子采样 (聚类统计量对子采样稳健),
         # 最终责任始终对全图重算。subsample < 0: 自动按 subsample_cap 封顶。
         sub = self.subsample
@@ -261,6 +265,8 @@ class VBGMM:
         return nk, xbar, s
 
     def m_step(self, z: mx.array, r: mx.array) -> Posterior:
+        """NIW/Dirichlet 后验更新 (Bishop 10.57–10.63 式),
+        含 S_k 特征值钳底 (防 W⁻¹ 不定, 详见内联注释)。"""
         d = z.shape[1]
         nk, xbar, s = self.stats(z, r)
         alpha = self.alpha0 + nk
@@ -340,7 +346,7 @@ class VBGMM:
         nk, xbar, s = self.stats(z, r)
 
         def qform(a: mx.array) -> mx.array:
-            """aᵀ W_k a, (K,D) → (K,)"""
+            """二次型 aᵀW_ka, (K,D) → (K,)。"""
             return mx.einsum("kd,kde,ke->k", a, q.w, a)
 
         # E[ln p(X|Z,μ,Λ)] (10.71)
@@ -448,6 +454,7 @@ class VBGMM:
         return r @ self.class_fraction(cls, x, r)
 
     def labels(self) -> mx.array:
+        """硬标签: argmax_k r_nk。"""
         return mx.argmax(self.r, axis=1)
 
     def feedback_round(
@@ -520,6 +527,7 @@ class VBGMM:
         return sim / 4.0
 
     def visualize_maps(self, img, shape, out_path: str | Path):
+        """原图/边缘似然/纹理似然/硬标签/软边界 五联图保存。"""
         h, w = shape
         edge = self.class_likelihood("edge").reshape(h, w)
         tex = self.class_likelihood("texture").reshape(h, w)

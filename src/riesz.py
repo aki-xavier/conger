@@ -57,6 +57,7 @@ class RieszScale:
     energy: mx.array = field(init=False)  # A²
 
     def __post_init__(self):
+        """由 b0/b1/b2 派生 energy/amp/phase/ori。"""
         r2 = self.b1**2 + self.b2**2
         self.energy = self.b0**2 + r2
         self.amp = mx.sqrt(self.energy)
@@ -145,6 +146,8 @@ class RieszWavelet:
         return cls.coh_floor_cache[key]
 
     def __post_init__(self):
+        """校验参数; 建波长/pad/频域网格/DC 核/径向带通核/Riesz 乘子
+        (全部只依赖形状与核参数), 再走 update 算图像相关部分。"""
         if self.img.ndim != 2:
             raise ValueError(f"img must be 2D, got shape {self.img.shape}")
         if self.bandwidth <= 0:
@@ -354,7 +357,7 @@ class RieszWavelet:
         )
 
     def lam_max(self) -> float:
-        """Coarsest supported wavelength for the image dimensions."""
+        """图像尺寸支持的最粗波长。"""
         return min(self.height, self.width) / 2.0
 
     @staticmethod
@@ -368,6 +371,7 @@ class RieszWavelet:
         return (c[:, k:] - c[:, :-k]) / k
 
     def ifft2(self, arr: mx.array):
+        """逆变换取实部, 并按 pad 裁回原尺寸。"""
         ret = mx.real(mx.fft.ifft2(arr))
         if self.adaptive_pad:
             ret = ret[
@@ -378,6 +382,7 @@ class RieszWavelet:
         return ret
 
     def visualize(self, out_path: str | Path):
+        """原图/DC/逐尺度 amp·phase·ori 拼图保存。"""
         plots = [("original", "gray", self.img), ("dc", "gray", self.ifft2(self.dc))]
         for idx, scale in enumerate(self.scales):
             lam = self.lams[idx]
@@ -444,6 +449,7 @@ if __name__ == "__main__":
 
     # ── 跨尺度特征: 三种原型信号的谱形状应显著不同 ──────────────────
     def show_feat(name: str, img: mx.array):
+        """打印一张图的谱特征图均值 (六指标)。"""
         f = RieszWavelet(img).features()
         print(
             f"{name}: slope={float(f.slope.mean()):+.2f} "

@@ -55,6 +55,7 @@ def cf_to_ours(cf) -> np.ndarray:
 
 
 def ours_vec(mv: Multivector) -> np.ndarray:
+    """本包 Multivector → 32 分量 numpy 向量 (float64)。"""
     return np.asarray(mv.values, dtype=np.float64)
 
 
@@ -73,6 +74,7 @@ def check(name: str, a: np.ndarray, b: np.ndarray, tol: float = 2e-4) -> None:
 
 
 def rand_mv(seed: int, dense: bool = True) -> Multivector:
+    """随机 multivector (dense=True 稠密; False 随机稀疏化 70%)。"""
     rng = np.random.default_rng(seed)
     v = rng.normal(size=32)
     if not dense:
@@ -81,6 +83,7 @@ def rand_mv(seed: int, dense: bool = True) -> Multivector:
 
 
 def main() -> None:
+    """全面对比: 代数 / 图元 / versor / exp-log / 矩阵 / 距离。"""
     print("== 代数运算 (随机稠密/稀疏 multivector) ==")
     I_cf = blades["e12345"]
     for seed, dense in ((0, True), (1, True), (2, False)):

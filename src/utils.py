@@ -9,14 +9,16 @@ import matplotlib.pyplot as plt
 
 
 class Utils:
+    """图像合成 / 频率网格 / 可视化等杂项工具。"""
+
     @staticmethod
     def project_root() -> Path:
-        """Project root directory (parent of ``src/``)."""
+        """项目根目录 (src/ 的父目录)。"""
         return Path(__file__).resolve().parent.parent
 
     @staticmethod
     def fftfreq(n: int) -> mx.array:
-        """MLX version of np.fft.fftfreq(n), in cycles/sample (Nyquist = 0.5)."""
+        """np.fft.fftfreq(n) 的 MLX 版, 单位 cycles/sample (Nyquist = 0.5)。"""
         k = mx.arange(n, dtype=mx.float32)
         half = (n + 1) // 2
         k = mx.where(k < half, k, k - n)
@@ -24,7 +26,7 @@ class Utils:
 
     @staticmethod
     def freqgrid(shape: tuple[int, ...]) -> list[mx.array]:
-        """Generate normalized frequency grids for a given height and width."""
+        """给定 (高, 宽) 生成归一化频率网格。"""
         height, width = shape
         x = Utils.fftfreq(width)
         y = Utils.fftfreq(height)
@@ -34,6 +36,7 @@ class Utils:
     def standard_normal_pdf(
         amp: float, sigma: float, x: mx.array, y: mx.array
     ) -> mx.array:
+        """二维各向同性高斯: amp·exp(−(x²+y²)/(2σ²))。"""
         amp = abs(amp)
         sigma = abs(sigma)
         exponent = -0.5 * (x**2 + y**2) / (sigma**2)
@@ -42,6 +45,7 @@ class Utils:
 
     @staticmethod
     def grid_shape(n: int) -> tuple[int, int]:
+        """n 个面板的拼图网格 (rows, cols), 最接近正方形。"""
         if n <= 0:
             return (0, 0)
         # 在 rows·cols >= n 的约束下取最接近正方形的网格 (rows <= cols,
@@ -57,6 +61,7 @@ class Utils:
 
     @staticmethod
     def visualize(plots: list[tuple[str, str, mx.array]]):
+        """多面板拼图: (标题, colormap, 数据) 列表 → matplotlib fig。"""
         rows, cols = Utils.grid_shape(len(plots))
         fig, axes = plt.subplots(
             rows, cols, squeeze=False, figsize=(cols * 2.2, rows * 2.2)
@@ -67,7 +72,7 @@ class Utils:
                 ax = axes[row][col]
                 ax.set_xticks([])
                 ax.set_yticks([])
-                if idx >= len(plots):  # grid has more slots than plots
+                if idx >= len(plots):  # 网格槽位多于面板数
                     ax.axis("off")
                     continue
                 title, cmap, data = plots[idx]
@@ -79,6 +84,7 @@ class Utils:
 
     @staticmethod
     def normalize(arr: mx.array) -> mx.array:
+        """线性归一化到 [0,1] (常数数组 → 全零, 防除零)。"""
         arr_min = mx.min(arr)
         arr_max = mx.max(arr)
         # 常数数组 → 全零 (max−min=0 时避免除零 NaN)
@@ -86,16 +92,19 @@ class Utils:
 
     @staticmethod
     def invert(mlx_arr: mx.array) -> mx.array:
+        """反相: 1 − x。"""
         return 1.0 - mlx_arr
 
     @staticmethod
     def synthesize_signal01(size: int = 300) -> mx.array:
+        """竖直阶跃边缘: 左半 0, 右半 1。"""
         left = mx.zeros((size, size // 2), dtype=mx.float32)
         right = mx.ones((size, size - size // 2), dtype=mx.float32)
         return mx.concatenate([left, right], axis=1)
 
     @staticmethod
     def synthesize_signal02(size: int = 300) -> mx.array:
+        """黑 → 线性渐变 → 白 的灰度过渡带。"""
         black = mx.zeros((size, int(size * 0.45)), dtype=mx.float32)
         x_end = int(size * 0.55)
         ramp = mx.linspace(0.0, 1.0, x_end - int(size * 0.45))
@@ -105,7 +114,7 @@ class Utils:
 
     @staticmethod
     def make_grating(shape, wavelength, angle_rad, phase=0.0) -> mx.array:  # type: ignore
-        """Sinusoidal grating at given wavelength (px) and angle (rad), in [0, 1]."""
+        """给定波长 (px) 与角度 (rad) 的正弦光栅, 值域 [0,1]。"""
         H, W = shape
         y = mx.arange(H, dtype=mx.float32)
         x = mx.arange(W, dtype=mx.float32)
@@ -135,9 +144,8 @@ class Utils:
 
     @staticmethod
     def make_texture_composite(size: int = 128):
-        """4-quadrant composite for Gabor clustering test.
-        TL: λ=8, 0° | TR: λ=24, 45° | BL: uniform noise | BR: flat 0.5.
-        """
+        """四象限合成图 (Gabor 聚类测试用): 左上 λ=8,0°; 右上
+        λ=24,45°; 左下 均匀噪声; 右下 平坦 0.5。"""
         H, W = size, size
         hh, hw = H // 2, W // 2
         tl = Utils.make_grating((hh, hw), wavelength=8.0, angle_rad=0.0)
@@ -151,18 +159,12 @@ class Utils:
 
     @staticmethod
     def synthesize_signal03(size: int = 300) -> mx.array:
-        """Sinusoidal grating — fine texture, no edge.
-
-        Vertical grating at 8 px wavelength fills the entire image.
-        """
+        """正弦光栅 —— 纯细纹理, 无边缘 (全图 8px 波长竖直光栅)。"""
         return Utils.make_grating((size, size), wavelength=8.0, angle_rad=0.0)
 
     @staticmethod
     def synthesize_signal04(size: int = 300) -> mx.array:
-        """Random Gaussian noise — broadband texture.
-
-        Normalized to [0, 1] after clipping to 2σ.
-        """
+        """高斯白噪声 —— 宽带纹理 (裁到 2σ 后归一化到 [0,1])。"""
         noise = mx.random.normal(shape=(size, size), key=mx.random.key(0))
         return Utils.normalize(mx.clip(noise, -2.0, 2.0))
 
@@ -170,22 +172,12 @@ class Utils:
     def synthesize_signal05(
         size: int = 300, wavelength: float = 16.0, boundary: float = 0.5
     ) -> mx.array:
-        """Vertical grating on the left, smooth on the right — direction-specific
-        continuity drop at the boundary.
+        """左光栅右平坦 —— 边界处方向选择性连续性跌落。
 
-        Left half: vertical-stripe grating (θ=0° texture).
-        Right half: uniform gray (no texture).
+        左半竖直光栅 (θ=0° 纹理), 右半均匀灰。边界处 θ=0° 方向连续
+        性急降 (纹理→平坦); θ=90° 两侧都无纹理 → 无跌落。
 
-        At the boundary, θ=0° continuity drops sharply (texture →
-        smooth). At θ=90° no texture exists in either half → no drop.
-
-        Args:
-            size: Image side length (square).
-            wavelength: Grating wavelength in pixels.
-            boundary: Horizontal position of the boundary (0..1).
-
-        Returns:
-            (size, size) float32 array.
+        boundary 为边界的横向相对位置 (0..1)。返回 (size,size) float32。
         """
         grating = Utils.make_grating((size, size), wavelength=wavelength, angle_rad=0.0)
         x = mx.arange(size, dtype=mx.float32) / size
@@ -197,19 +189,10 @@ class Utils:
     def synthesize_signal06(
         size: int = 300, wavelength: float = 16.0, boundary: float = 0.5
     ) -> mx.array:
-        """Smooth on the left, grating on the right — Type B: smooth→texture.
+        """左平坦右光栅 —— Type B: 平坦→纹理。
 
-        Left half: uniform gray. Right half: grating. At the boundary,
-        all spectral metrics jump simultaneously as energy shifts
-        from a single coarse scale to a specific matching scale.
-
-        Args:
-            size: Image side length (square).
-            wavelength: Grating wavelength in pixels.
-            boundary: Position of the boundary (0..1).
-
-        Returns:
-            (size, size) float32 array.
+        边界处能量从单一粗尺度跳到特定匹配尺度, 所有谱指标同时跳变。
+        boundary 为边界相对位置 (0..1)。返回 (size,size) float32。
         """
         grating = Utils.make_grating((size, size), wavelength=wavelength, angle_rad=0.0)
         x = mx.arange(size, dtype=mx.float32) / size
@@ -224,20 +207,10 @@ class Utils:
         wavelength2: float = 8.0,
         boundary: float = 0.5,
     ) -> mx.array:
-        """Grating frequency change — Type D: texture→texture (different scale).
+        """光栅频率突变 —— Type D: 纹理→纹理 (不同尺度)。
 
-        Left half: grating at wavelength1. Right half: grating at
-        wavelength2. Slope and bump_freq jump; the fit residual stays
-        similar (both halves are single-scale).
-
-        Args:
-            size: Image side length (square).
-            wavelength1: Left grating wavelength in pixels.
-            wavelength2: Right grating wavelength in pixels.
-            boundary: Position of the boundary (0..1).
-
-        Returns:
-            (size, size) float32 array.
+        左半 wavelength1, 右半 wavelength2。slope 与 bump 跳变;
+        拟合残差相近 (两半都是单尺度)。返回 (size,size) float32。
         """
         g1 = Utils.make_grating((size, size), wavelength=wavelength1, angle_rad=0.0)
         g2 = Utils.make_grating((size, size), wavelength=wavelength2, angle_rad=0.0)
@@ -252,20 +225,10 @@ class Utils:
         right_val: float = 0.2,
         boundary: float = 0.5,
     ) -> mx.array:
-        """Bright→dark smooth — Type E: illumination change only.
+        """亮→暗平坦 —— Type E: 仅照明变化。
 
-        Left half: uniform bright. Right half: uniform dark. All
-        spectral shape metrics remain constant (same coarse-scale
-        energy). Only absolute pixel intensity changes.
-
-        Args:
-            size: Image side length (square).
-            left_val: Left half intensity (0..1).
-            right_val: Right half intensity (0..1).
-            boundary: Position of the boundary (0..1).
-
-        Returns:
-            (size, size) float32 array.
+        谱形状指标不变 (同样的粗尺度能量), 只有像素绝对强度变。
+        返回 (size,size) float32。
         """
         x = mx.arange(size, dtype=mx.float32) / size
         mask = mx.where(x < boundary, 1.0, 0.0).reshape(1, -1)
@@ -278,19 +241,11 @@ class Utils:
     def synthesize_signal09(
         size: int = 300, wavelength: float = 16.0, boundary: float = 0.5
     ) -> mx.array:
-        """Noise on the left, grating on the right — Type C: noise→texture.
+        """左噪声右光栅 —— Type C: 噪声→纹理。
 
-        Noise has edge-like spectral properties (energy spread across
-        all scales → poor power-law fit). Grating has energy at
-        a single matching scale. All metrics jump at the boundary.
-
-        Args:
-            size: Image side length (square).
-            wavelength: Right grating wavelength in pixels.
-            boundary: Position of the boundary (0..1).
-
-        Returns:
-            (size, size) float32 array.
+        噪声的谱类似边缘 (能量散在全尺度 → 幂律拟合差); 光栅能量
+        集中在单一匹配尺度。边界处所有指标跳变。返回 (size,size)
+        float32。
         """
         noise = mx.random.normal(shape=(size, size), key=mx.random.key(42))
         noise = Utils.normalize(mx.clip(noise, -2.0, 2.0))
@@ -301,7 +256,7 @@ class Utils:
 
     @staticmethod
     def corrcoef(a: mx.array, b: mx.array) -> float:
-        """Pearson correlation coefficient between two 1-D arrays."""
+        """两个一维数组的 Pearson 相关系数。"""
         a_c = a - a.mean()
         b_c = b - b.mean()
         cov = (a_c * b_c).mean()
@@ -311,7 +266,7 @@ class Utils:
 
     @staticmethod
     def make_step_edge(shape: tuple[int, int]) -> mx.array:
-        """Vertical step edge: left half 0, right half 1."""
+        """竖直阶跃边缘: 左半 0, 右半 1。"""
         _, W = shape
         arr = mx.zeros(shape, dtype=mx.float32)
         arr[:, W // 2 :] = 1.0
@@ -328,7 +283,7 @@ class Utils:
 
     @staticmethod
     def make_smooth_patch(shape: tuple[int, int]) -> mx.array:
-        """Uniform mid-gray patch with tiny noise to avoid all-zeros."""
+        """中灰平坦块 + 微噪声 (防全零)。"""
         rng = mx.random.key(7)
         return mx.full(shape, 0.5, dtype=mx.float32) + (
             mx.random.normal(shape=shape, key=rng) * 1e-4
@@ -341,7 +296,7 @@ class Utils:
         angle_rad: float = 0.0,
         sat: float = 1.0,
     ) -> mx.array:
-        """Periodic hue variation (sinusoidal) at given wavelength and angle."""
+        """给定波长与角度的正弦色相周期变化 (复数表示 S·e^{iH})。"""
         H, W = shape
         Y, X = mx.meshgrid(
             mx.arange(H, dtype=mx.float32),
@@ -357,12 +312,12 @@ class Utils:
 
     @staticmethod
     def make_luminance_edge(shape: tuple[int, int]) -> mx.array:
-        """Luminance-only step edge: left half 0.3, right half 0.7."""
+        """仅亮度的阶跃边缘: 左半 0.3, 右半 0.7 (复数表示)。"""
         H, W = shape
         lum = mx.where(mx.arange(W).reshape(1, -1) < W // 2, 0.3, 0.7)
         lum = mx.broadcast_to(lum, (H, W)).astype(mx.float32)
         rgb = mx.stack([lum, lum, lum], axis=-1).astype(mx.float32)
-        from color import Color  # lazy — avoids circular import
+        from color import Color  # 惰性导入 —— 防循环依赖
 
         hsl = Color.rgb_to_hsl(mx.array(rgb))
         return Color.hsl_to_complex(hsl)
@@ -374,7 +329,7 @@ class Utils:
         hue2_deg: float = 180,
         sat: float = 1.0,
     ) -> mx.array:
-        """Vertical step edge: left half hue1, right half hue2."""
+        """竖直色相阶跃: 左半 hue1, 右半 hue2 (度), 复数表示。"""
         H, W = shape
         hue1_rad = math.radians(hue1_deg)
         hue2_rad = math.radians(hue2_deg)
@@ -387,7 +342,7 @@ class Utils:
     def make_uniform_hsl(
         shape: tuple[int, int], hue_deg: float = 0, sat: float = 0.5
     ) -> mx.array:
-        """Uniform hue–saturation patch with tiny noise to avoid all-zeros."""
+        """均匀色相-饱和度块 (度) + 微噪声 (防全零), 复数表示。"""
         rng = mx.random.key(13)
         hue_rad = math.radians(hue_deg)
         hue = mx.full(shape, hue_rad, dtype=mx.float32)

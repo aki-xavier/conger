@@ -41,6 +41,7 @@ class Point(Multivector):
     __slots__ = ()
 
     def __init__(self, x: float, y: float, z: float):
+        """由欧氏坐标构造 (p·p = 0 自动满足)。"""
         r2 = x * x + y * y + z * z
         super().__init__(Multivector.vector(x, y, z, 1.0, 0.5 * r2).values)
 
@@ -73,6 +74,7 @@ class PointPair(Multivector):
     __slots__ = ()
 
     def __init__(self, p1: Multivector, p2: Multivector):
+        """由两个共形点构造: Pp = p1 ∧ p2。"""
         super().__init__(p1.op(p2).values)
 
 
@@ -82,6 +84,7 @@ class Line(Multivector):
     __slots__ = ()
 
     def __init__(self, p1: Multivector, p2: Multivector):
+        """由两个共形点构造: L = p1 ∧ p2 ∧ e∞。"""
         super().__init__(p1.op(p2).op(EINF).values)
 
 
@@ -91,6 +94,7 @@ class Plane(Multivector):
     __slots__ = ()
 
     def __init__(self, normal_vec: tuple[float, float, float], distance: float):
+        """法向自动归一化; 零法向抛 ValueError。"""
         nx, ny, nz = normal_vec
         nl = math.sqrt(nx * nx + ny * ny + nz * nz)
         if nl <= 1e-12:
@@ -120,6 +124,7 @@ class Sphere(Multivector):
     __slots__ = ()
 
     def __init__(self, center: tuple[float, float, float], radius: float):
+        """由球心与半径构造。"""
         cx, cy, cz = center
         half_r2 = 0.5 * radius * radius
         s = Point(cx, cy, cz) - Multivector.vector(0, 0, 0, 0, half_r2)
@@ -131,7 +136,7 @@ class Sphere(Multivector):
         对偶球 s = w·(up(c) − ½ρ²e∞): 球心 c = v/w, ρ² = |c|² − 2f/w
         (v = 欧氏部分, w = e0 系数, f = e∞ 系数)。
         """
-        w = float(self.values[4])  # e0 coefficient
+        w = float(self.values[4])  # e0 系数
         if abs(w) < 1e-12:
             raise ValueError("sphere multivector has no e0 component")
         v1, v2, v3 = (
@@ -159,6 +164,7 @@ class Circle(Multivector):
         radius: float,
         normal: tuple[float, float, float],
     ):
+        """由球心/半径/所在平面法向构造 (球 ∧ 平面的交)。"""
         s = Sphere(center, radius)
         d = center[0] * normal[0] + center[1] * normal[1] + center[2] * normal[2]
         p = Plane(normal, d)  # Plane 负责法向归一化与退化检查

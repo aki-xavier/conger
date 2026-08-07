@@ -1,10 +1,9 @@
-"""Conformal Geometric Algebra (CGA) core.
+"""共形几何代数 (CGA) 核心包。
 
-CGA in 5D embeds Euclidean 3D space into a conformal space with basis
-{e1, e2, e3, e0, einf} where e0 is the origin and einf is the point at infinity.
+5D CGA 把欧氏 3D 空间嵌入共形空间, 基为 {e1, e2, e3, e0, e∞},
+其中 e0 是原点, e∞ 是无穷远点。
 
-This enables unified representation of points, lines, planes, circles, spheres,
-and rigid-body transformations (motors).
+由此点/线/面/圆/球与刚体变换 (motor) 得以统一表示。
 
 OOP 表面:
   - Multivector: 32 分量多重向量, 代数运算全是方法
