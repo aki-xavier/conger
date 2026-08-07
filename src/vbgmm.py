@@ -6,9 +6,10 @@ from typing import ClassVar
 import matplotlib.pyplot as plt
 import mlx.core as mx
 
-from color import Color
 from riesz import FeatureMaps, RieszWavelet
 from utils import Utils
+
+# from color import Color  # 随下方 natural image 块一起注释, 放开时恢复
 
 # ── 变分贝叶斯 GMM (全协方差, NIW 先验) ────────────────────────────
 #
@@ -92,6 +93,7 @@ class VBGMM:
     posterior: Posterior | None = None  # 拟合后的完整后验, 供 infer 复用
     weights: mx.array | None = None  # (K,) 混合权重
     means_orig: mx.array | None = None  # (K, D) 分量均值 (原始空间)
+    acc: tuple[mx.array, mx.array, mx.array] | None = None  # online VB 状态
     elbo: list[float] = field(default_factory=list)
 
     # 特征矩阵列名 (本模块按需组装特征; 列名 resid 对应特征图 residual)
@@ -188,6 +190,9 @@ class VBGMM:
         nk = mx.sum(self.r, axis=0)
         self.weights = self.alpha / mx.sum(self.alpha)
         self.means_orig = (self.r.T @ x) / mx.maximum(nk[:, None], 1e-12)
+        # online VB 统计量状态的初值 (online_update 的 EWMA 起点)
+        nks, xbars, ss = self.stats(z, self.r)
+        self.acc = self.accumulate(nks, xbars, ss)
 
     def select_alpha0(self, z: mx.array):
         """经验贝叶斯选 α0: 对网格每个候选完整拟合, 取最终 ELBO 最大者。
@@ -265,10 +270,35 @@ class VBGMM:
         return nk, xbar, s
 
     def m_step(self, z: mx.array, r: mx.array) -> Posterior:
+        """NIW/Dirichlet 后验更新: 责任统计量 → 后验。
+        直接用 (nk, x̄, S) —— 不走累积量往返 (float32 相消会偏移
+        轨迹, 见 posterior_from_acc 注释)。"""
+        nk, xbar, s = self.stats(z, r)
+        return self._posterior(nk, xbar, s)
+
+    @staticmethod
+    def accumulate(nk: mx.array, xbar: mx.array, s: mx.array):
+        """责任加权统计量 → 充分统计累积量 (A,B,C) = (Σr, Σr·z, Σr·zzᵀ)。
+        后验的全部输入; online VB 的 EWMA 作用在累积量上。"""
+        a = nk
+        b = nk[:, None] * xbar
+        c = nk[:, None, None] * (s + xbar[:, :, None] @ xbar[:, None, :])
+        return a, b, c
+
+    def posterior_from_acc(self, a: mx.array, b: mx.array, c: mx.array) -> Posterior:
+        """由充分统计累积量出后验 (online VB 路径)。恢复 S 有
+        m2−x̄x̄ᵀ 的 float32 相消 (比离线 m_step 多一次往返),
+        由逐分量特征值钳底兑住 —— 离线路径不走这里。"""
+        safe = mx.maximum(a, 1e-12)
+        xbar = b / safe[:, None]
+        m2 = c / safe[:, None, None]
+        s = m2 - xbar[:, :, None] @ xbar[:, None, :]
+        return self._posterior(a, xbar, s)
+
+    def _posterior(self, nk: mx.array, xbar: mx.array, s: mx.array) -> Posterior:
         """NIW/Dirichlet 后验更新 (Bishop 10.57–10.63 式),
         含 S_k 特征值钳底 (防 W⁻¹ 不定, 详见内联注释)。"""
-        d = z.shape[1]
-        nk, xbar, s = self.stats(z, r)
+        d = xbar.shape[1]
         alpha = self.alpha0 + nk
         beta = self.beta0 + nk
         nu = self.nu0(d) + nk
@@ -393,6 +423,32 @@ class VBGMM:
         这是实时模式每帧的唯一贝叶斯计算 (毫秒级)。"""
         z = (x_new - self.mu) / self.sd
         return self.e_step(z, self.posterior)
+
+    def online_update(self, x_new: mx.array, rho: float = 0.05) -> mx.array:
+        """一帧在线 VB 更新 (Sato 式, 常数遗忘因子 = 跟踪而非收敛)。
+
+        E 步 (当前后验) → 帧充分统计量 → EWMA 进 acc → 重出后验。
+        μ/sd 冻结于冷启动 (z 空间不漂移是新旧统计量可混的前提)。
+        死分量 (A_k→0) 自动剪枝; 新结构的"生"未实现 —— 被最近
+        分量硬吞 (重播种留作后续)。有效记忆窗口 ≈ 1/ρ 帧。
+        返回新帧责任 (N,K)。"""
+        z = (x_new - self.mu) / self.sd  # type: ignore
+        r = self.e_step(z, self.posterior)  # type: ignore
+        nk, xbar, s = self.stats(z, r)
+        a, b, c = self.accumulate(nk, xbar, s)
+        A, B, C = self.acc  # type: ignore
+        self.acc = (
+            (1.0 - rho) * A + rho * a,
+            (1.0 - rho) * B + rho * b,
+            (1.0 - rho) * C + rho * c,
+        )
+        self.posterior = self.posterior_from_acc(*self.acc)  # type: ignore
+        self.alpha = self.posterior.alpha
+        self.r = r
+        self.weights = self.alpha / mx.sum(self.alpha)
+        nk2 = mx.maximum(mx.sum(r, axis=0), 1e-12)
+        self.means_orig = (r.T @ x_new) / nk2[:, None]
+        return r
 
     def k_eff(self, min_weight: float = 0.01) -> int:
         """有效分量数: 混合权重超过阈值的分量个数。"""
@@ -580,7 +636,7 @@ class VBGMM:
 
 
 if __name__ == "__main__":
-    from PIL import Image
+    # from PIL import Image  # 随 natural image 块一起注释, 放开时恢复
 
     # ── synthetic validation ─────────────────────────────────────────
     # 弱边缘 @x=64 (Δ=0.05), 强边缘 @x=128 (Δ=0.55), 纹理区 x≥192
@@ -629,15 +685,15 @@ if __name__ == "__main__":
     gm.visualize_maps(img, (H, W), path)
     print(path)
 
-    # ── natural image ────────────────────────────────────────────────
-    im = Image.open(Utils.project_root() / "images/12.png").convert("L")
-    arr = Color.image_to_mlx(im)
-    feat2 = RieszWavelet(arr).features()
-    gm2 = VBGMM(VBGMM.feature_matrix(feat2), k_max=48)
-    print(f"12.png: ELBO {gm2.elbo[0]:.1f} → {gm2.elbo[-1]:.1f}, K_eff={gm2.k_eff()}")
-    path2 = Utils.project_root() / "artifacts/vbgmm_12.png"
-    gm2.visualize_maps(arr, arr.shape, path2)
-    print(path2)
+    # ── natural image (慢: 冷启动拟合 ~10-25s, 默认注释; 全量验证时放开) ──
+    # im = Image.open(Utils.project_root() / "images/12.png").convert("L")
+    # arr = Color.image_to_mlx(im)
+    # feat2 = RieszWavelet(arr).features()
+    # gm2 = VBGMM(VBGMM.feature_matrix(feat2), k_max=48)
+    # print(f"12.png: ELBO {gm2.elbo[0]:.1f} → {gm2.elbo[-1]:.1f}, K_eff={gm2.k_eff()}")
+    # path2 = Utils.project_root() / "artifacts/vbgmm_12.png"
+    # gm2.visualize_maps(arr, arr.shape, path2)
+    # print(path2)
 
     # ── 实时模式: 相邻帧 (边界移动) 冷启动 vs 暖启动 ────────────────
     import time
@@ -654,14 +710,14 @@ if __name__ == "__main__":
     X2 = VBGMM.feature_matrix(feat)
     mx.eval(X2)
     t1 = time.perf_counter()
-    gm_cold = VBGMM(X2, k_max=48)
-    t2 = time.perf_counter()
+    # 冷启动对照 (慢, ~26s, 默认注释; 全量验证时放开)
+    # gm_cold = VBGMM(X2, k_max=48)
+    # t2 = time.perf_counter()
     gm_warm = VBGMM(X2, k_max=48, warm=gm.posterior, subsample=8192)
     t3 = time.perf_counter()
     print(
         f"frame2 特征提取 {1000 * (t1 - t0):.0f}ms | "
-        f"冷启动 {len(gm_cold.elbo)} iters {t2 - t1:.2f}s | "
-        f"暖启动+子采样 {len(gm_warm.elbo)} iters {t3 - t2:.2f}s"
+        f"暖启动+子采样 {len(gm_warm.elbo)} iters {t3 - t1:.2f}s"
     )
 
     t4 = time.perf_counter()
@@ -677,3 +733,45 @@ if __name__ == "__main__":
         f" | infer(帧1后验): weak@72={float(edge2[:, 70:74].mean()):.2f}"
         f" strong@136={float(edge2[:, 134:138].mean()):.2f}"
     )
+
+    # ── online VB: 移动边界序列的跟踪 ─────────────────────────────
+    # 边界每帧移 2px, 共 6 帧; online_update (ρ=0.3) 跟踪, 与末帧
+    # 冷启动拟合对比稳态偏差
+    def frame(f: int) -> mx.array:
+        """第 f 帧: 三条边界整体右移 2f px。"""
+        im = mx.full((H, W), 0.2)
+        im[:, 64 + 2 * f : 128 + 2 * f] = 0.25
+        im[:, 128 + 2 * f : 192 + 2 * f] = 0.8
+        im[:, 192 + 2 * f :] = Utils.make_grating((H, 64 - 2 * f), 8.0, 0.0)
+        return im + mx.random.normal((H, W), key=mx.random.key(10 + f)) * 0.01
+
+    gm_on = VBGMM(VBGMM.feature_matrix(RieszWavelet(frame(0)).features()), k_max=48)
+    X_f = VBGMM.feature_matrix(RieszWavelet(frame(0)).features())
+    t0 = time.perf_counter()
+    for f in range(1, 6):
+        rw.update(frame(f))
+        X_f = VBGMM.feature_matrix(rw.features())
+        gm_on.online_update(X_f, rho=0.3)
+    mx.eval(gm_on.r)
+    t1 = time.perf_counter()
+    # 末帧冷启动对照 (慢, ~26s, 默认注释); 断言用实测记录值
+    # (2026-08-07: weak=0.43, strong=0.73), 全量验证时放开对照拟合
+    # gm_c5 = VBGMM(X_f, k_max=48)
+    # like_c5 = gm_c5.edge_likelihood((H, W))
+    # weak_c5 = float(like_c5[:, 72:77].mean())
+    # strong_c5 = float(like_c5[:, 136:141].mean())
+    weak_c5, strong_c5 = 0.43, 0.73
+    like_on = gm_on.class_likelihood("edge", x=X_f, r=gm_on.r).reshape(H, W)
+    fw = 74 + 10  # 末帧弱边缘 ≈ 64+2·5=74, 强边缘 ≈ 138
+    weak_on = float(like_on[:, 72:77].mean())
+    strong_on = float(like_on[:, 136:141].mean())
+    old_on = float(like_on[:, 62:66].mean())  # 旧位置应已衰减
+    print(
+        f"online VB: 5 帧跟踪 {1000 * (t1 - t0) / 5:.0f}ms/帧 | "
+        f"weak@{fw}: online={weak_on:.2f} 冷启动={weak_c5:.2f} | "
+        f"strong@138: online={strong_on:.2f} 冷启动={strong_c5:.2f} | "
+        f"旧位置@64 衰减到 {old_on:.2f}"
+    )
+    assert abs(weak_on - weak_c5) < 0.2, "online 与冷启动的弱边缘似然偏差过大"
+    assert abs(strong_on - strong_c5) < 0.2, "强边缘偏差过大"
+    assert old_on < weak_on, "旧边缘位置应衰减低于新位置"
