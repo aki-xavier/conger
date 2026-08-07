@@ -8,7 +8,7 @@ A multivector in 5D CGA has 32 components organized by grade:
   Grade 4: 5 quadvectors
   Grade 5: 1 pseudoscalar
 
-基取 null 基 {e1, e2, e3, e0, e∞} (与 simu.cga 一致): e0² = e∞² = 0,
+基取 null 基 {e1, e2, e3, e0, e∞}: e0² = e∞² = 0,
 e0·e∞ = -1。e0 与 e∞ 非正交, 故 blade 的几何积不能用正交基的递归
 公式——积表构建时对 blade_b 的全排列做反对称化 (见 _compute_gp)。
 代价是建表稍慢 (一次性), 收益是 conformal 权重 (e0 系数) 显式存储,
@@ -21,9 +21,10 @@ import mlx.core as mx
 
 # ── Basis blade definitions ────────────────────────────────────────────────
 
-# Canonical ordering of the 32 basis blades
-# Each blade is a tuple of basis vector indices: 0=e1, 1=e2, 2=e3, 3=e+, 4=e-
-_BASIS_BLADES: list[tuple[int, ...]] = [
+# Canonical ordering of the 32 basis blades (公开: 互操作/工具脚本
+# 的合法元数据, 如 compare_clifford.py 的基变换)
+# Each blade is a tuple of basis vector indices: 0=e1, 1=e2, 2=e3, 3=e0, 4=e∞
+BASIS_BLADES: list[tuple[int, ...]] = [
     # Grade 0 (1)
     (),
     # Grade 1 (5)
@@ -68,10 +69,10 @@ NUM_COMPONENTS = 32
 NUM_GRADES = 6
 
 # Map blade tuple -> index for fast lookup
-_BLADE_TO_IDX = {blade: i for i, blade in enumerate(_BASIS_BLADES)}
+_BLADE_TO_IDX = {blade: i for i, blade in enumerate(BASIS_BLADES)}
 
 # Grade of each blade index
-_BLADE_GRADE = [len(blade) for blade in _BASIS_BLADES]
+_BLADE_GRADE = [len(blade) for blade in BASIS_BLADES]
 
 # Indices grouped by grade
 GRADE_INDICES: list[list[int]] = [[] for _ in range(NUM_GRADES)]
@@ -209,7 +210,7 @@ def _build_gp_table() -> list[list[list[tuple[int, int]]]]:
 
     for i in range(NUM_COMPONENTS):
         for j in range(NUM_COMPONENTS):
-            gp_table[i][j] = _compute_gp(_BASIS_BLADES[i], _BASIS_BLADES[j])
+            gp_table[i][j] = _compute_gp(BASIS_BLADES[i], BASIS_BLADES[j])
 
     return gp_table
 
@@ -440,22 +441,26 @@ class Multivector:
         return Multivector((mask_rows * prod[:, None]).sum(axis=0))
 
     def ip(self, other: Multivector) -> Multivector:
-        """左收缩 (inner product) self ⌋ other。
+        """内积 (fat dot / Hestenes, 与 clifford 库的 | 算子一致)。
 
         blade 规则对全 grade 对的线性扩张:
-            a ⌋ b = Σ_{r<=s} < <a>_r * <b>_s >_{s-r}
-        对一般混合 grade multivector 正确。"""
+            A|B = Σ_{r,s≥1} ⟨ ⟨A⟩_r * ⟨B⟩_s ⟩_|r−s|
+        含标量 (grade 0) 的项为零 (Hestenes 规则, 与 clifford 实测
+        一致: 1|e12 = 0)。r>s 时非零 (对称内积, 与左收缩的区别);
+        向量与 blade 间 (r=1≤s) 与左收缩相同, 故关联判据
+        p.ip(X) = 0 的行为不受影响。对一般混合 grade multivector
+        正确。"""
         result = mx.zeros(NUM_COMPONENTS, dtype=mx.float32)
-        for ga in range(NUM_GRADES):
+        for ga in range(1, NUM_GRADES):
             a_g = self.values * GRADE_MASKS[ga]
             if not bool(mx.any(a_g != 0).item()):
                 continue
-            for gb in range(ga, NUM_GRADES):
+            for gb in range(1, NUM_GRADES):
                 b_g = other.values * GRADE_MASKS[gb]
                 if not bool(mx.any(b_g != 0).item()):
                     continue
                 prod = Multivector(a_g).gp(Multivector(b_g))
-                result = result + prod.values * GRADE_MASKS[gb - ga]
+                result = result + prod.values * GRADE_MASKS[abs(gb - ga)]
         return Multivector(result)
 
     def op(self, other: Multivector) -> Multivector:
@@ -542,7 +547,7 @@ class Multivector:
 
 
 def _blade_name(idx: int) -> str:
-    blade = _BASIS_BLADES[idx]
+    blade = BASIS_BLADES[idx]
     if not blade:
         return "1"
     names = {0: "e1", 1: "e2", 2: "e3", 3: "e0", 4: "e∞"}

@@ -1,6 +1,6 @@
 """CGA package self-check: python -m cga
 
-验证核心代数与原语/versor 的正确性 (OOP API)。约定 (与 simu.cga 一致):
+验证核心代数与原语/versor 的正确性 (OOP API)。约定:
 点/点对/线为直接形式, 关联判据 p.op(X) = 0; 平面/球/圆为对偶
 形式, 关联判据 p.ip(X) = 0; versor 作用 M.apply(obj);
 meet 接受直接形式输入。
@@ -184,13 +184,14 @@ def main() -> None:
 
     # extract_velocity: 纯平移幅值 + 纯旋转符号 (body frame)
     dt = 0.1
-    I = Motor.identity()
-    (w_v, v_v) = Motor.extract_velocity(Motor.translator((0.03, 0.0, 0.0)).gp(I), I, dt)
+    ID = Motor.identity()
+    Mv = Motor.translator((0.03, 0.0, 0.0))
+    (w_v, v_v) = Motor.extract_velocity(Mv.gp(ID), ID, dt)
     check(
         "extract_velocity translation",
         close(v_v[0], 0.3) and close(v_v[1], 0.0) and close(w_v[2], 0.0),
     )
-    (w_r, v_r) = Motor.extract_velocity(Motor.rotor((0, 0, 1), 0.2).gp(I), I, dt)
+    (w_r, v_r) = Motor.extract_velocity(Motor.rotor((0, 0, 1), 0.2).gp(ID), ID, dt)
     check("extract_velocity rotation sign", close(w_r[2], 2.0))
 
     print(f"\nall {_ok} checks passed")
