@@ -9,6 +9,38 @@ import mlx.core as mx
 from color import Color
 from utils import Utils
 
+# ── Riesz (单演) 小波特征前端 ──────────────────────────────────────
+#
+# 模块流程:
+#
+#   RieszWavelet(img)
+#     __post_init__ (一次性, 只依赖形状与核参数):
+#        lams 对数等距波长; 自适应 pad; 频域网格 xgrid/ygrid/radius
+#        dc_kernel 高斯低通; kernels 逐尺度径向高斯带通
+#        k2/n_freq 缓存 (增益控制① Parseval 噪声 floor 用)
+#        m1/m2 = −j·ω/|ω| Riesz 乘子 (2D Hilbert)
+#        ▼
+#     update(img) (逐帧只重算图像相关部分, 形状须同初始化):
+#        pad → fft2 → 剥 DC → 逐尺度: spec×kernel → ifft2 得 b0,
+#        spec×m1 / ×m2 → ifft2 得 b1/b2 → RieszScale
+#        ▼
+#   RieszScale.__post_init__ (per scale):
+#        energy = b0²+b1²+b2²; amp; phase = atan2(|R|, b0);
+#        ori = atan2(b2, b1) (结构法向); steer(θ) 任意方向免卷积
+#        ▼
+#     features(gain_control=True): 逐像素把 e_s 当尺度轴分布取统计
+#        ① Wiener 噪声收缩 e·e/(e+floor) (floor 由最细尺度 MAD 估)
+#        log_mag = log Σe_s ③ 减邻域盒均值 (Retinex 式局部对比度)
+#        幂律拟合 log e ~ octave: slope / residual / bump
+#        谱矩: centroid / spread / skew / kurt
+#        跨尺度 2θ 圆统计: ori_R / mean_ori
+#        跨尺度相位一致: phase_coh
+#        ② 相干特征扣白噪底线 (coherence_floor 类级缓存标定)
+#        ▼
+#     FeatureMaps (11 张 (H,W) + log_e (H,W,S), 不可变)
+#        → vbgmm.feature_matrix() 选列组装 (统计融合)
+#        → edgemap.EdgePrior 用 mean_ori/ori_R/energy (空间几何)
+
 
 @dataclass(slots=True)
 class RieszScale:

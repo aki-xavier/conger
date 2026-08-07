@@ -8,6 +8,30 @@ import mlx.core as mx
 from color import Color
 from utils import Utils
 
+# ── Gabor 多方向小波 (频域核族) ────────────────────────────────────
+# 注: 本模块目前不在主管线上 (管线走 riesz.py; Riesz 乘子与多方向
+# 核互为对偶, steer() 注释), 仅自验/备参。
+#
+# 模块流程:
+#
+#   GaborWavelet(img)
+#     __post_init__ (一次性, 与图像内容弱相关):
+#        calc_lams():   lam_max→lam_min 对数等距波长序列
+#        calc_thetas(): [0,π) 均布 ori_size 个方向
+#        calc_freqs():  自适应 edge pad (防 FFT 回绕) → fft2
+#                       → 高斯低通剥 DC (dc 留存, fft 为无直流谱)
+#        calc_ffts():   各向同性径向高斯核按 1/λ 分带 (低频→高频)
+#        calc_scales(): 频带 × 纯角度高斯权重 (尺度不变角选择性,
+#                       单边核 → 解析信号) → GaborScale per scale
+#        ▼
+#   GaborScale.__post_init__ (per scale, per orientation):
+#        ifft2 + 裁 pad → |resp|² 平滑包络能量 (无载波振荡)
+#        Σori → sum_e
+#        圆统计 (θ∈[0,π) 角度翻倍): m₁ → mean_dir/resultant
+#        (主方向与强度), m₂ → r2 (正交方向对 = 角点/十字)
+#        ▼
+#   visualize(): 原图/DC/逐尺度 sum_e·mean_dir·R 拼图
+
 
 @dataclass(slots=True)
 class GaborScale:

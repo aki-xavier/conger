@@ -19,6 +19,29 @@ from vbgmm import VBGMM
 # 本模块把这个各向异性空域先验作用在似然图上, 得到完整后验。
 # 顺序必须先在特征空间聚类出似然, 再做空间传播 —— 反过来先平滑
 # 特征会稀释弱边缘证据, 污染似然本身。
+#
+# 模块流程:
+#
+#   like (VBGMM.edge_likelihood) + feat (mean_ori/ori_R) + rw (能量/λ)
+#        │
+#        ├─ scale(): dir_smooth/hops 按 λ_min/3 绑定最细波长
+#        ▼
+#   enhance():
+#        smooth_normal(): 2θ 向量场按 ori_R 加权各向同性扩散
+#           (缺口继承方向 → 允许桥接; 交叉处抵消 → 不混方向)
+#        propagate(): 切向 ±多跳距 (1/2/4/8px·尺度) 双线性采样
+#           (precomp_gather 索引/权重只算一次)
+#           支撑 = max(双侧几何均值, 单侧半价), 方向门控 cos²(2Δθ)
+#           更新只升不降 (L+gain·S·(1−L)), max|Δ|<eps 定点早停
+#        ▼   enh ─(虚线反馈)→ VBGMM.feedback_round (见 vbgmm.py)
+#   nms(): 法向 ±1px 软 NMS, 门控信号 = 总能量 Σe_s
+#        (似然是簇级平台, 脊线位置只在原始能量剖面里;
+#         先抬线再瘦线, 必须在 enhance 之后)
+#        ▼
+#   细化边缘图 (软 NMS 输出仅相对有意义, 显示时需归一)
+#
+#   旁路: enhance_per_scale() 逐尺度通道 (H,W,S) —— ori_R 低处
+#   多结构竞争的诊断通路, 不含 GMM 似然, 非逐帧管线
 
 
 @dataclass(slots=True)
@@ -310,6 +333,33 @@ if __name__ == "__main__":
     width = int(mx.sum(row > 0.5 * mx.max(row)))
     peak = int(mx.argmax(row)) + 118
     print(f"strong edge 脊线宽={width}px, 峰位@{peak} (期望 128±1)")
+
+    # ── EdgePrior → VBGMM 阻尼反馈 (虚线边, flow.md 迭代协议) ──────
+    # 分歧回注软聚类做不确定度门控的微调; frac 锚定在前馈 r 上
+    frac = gm.class_fraction("edge")
+    r_fb = gm.feedback_round(enh)
+    s = mx.sum(r_fb, axis=1)
+    assert float(mx.max(mx.abs(s - 1.0))) < 1e-3, "反馈后责任仍须归一"
+    like_fb = (r_fb @ frac).reshape(H, W)
+    enh_fb = prior.enhance(like_fb, feat, rw)
+    margin = 1.0 - mx.max(gm.r, axis=1)
+    print(
+        f"反馈衬底: max margin = {float(mx.max(margin)):.4f} "
+        f"(VB 后验近 one-hot → 反馈调整量≈0, 见 feedback_round docstring)"
+    )
+    print("反馈后 (like_fb / enh_fb):")
+    for name, rs, cs in regions:
+        print(
+            f"{name}: {float(like_fb[rs, cs].mean()):.4f}  "
+            f"{float(enh_fb[rs, cs].mean()):.4f}"
+        )
+    # 机制断言: 反馈自限有界; gap 桥接留在 enh, 不伪造进似然;
+    # 孤立亮斑不被放大 —— 这是本轮探索的正面结论 (分歧保留), 不是失败
+    gap = (slice(57, 65), slice(62, 66))
+    blob = (slice(99, 104), slice(89, 94))
+    assert float(mx.max(mx.abs(like_fb - like))) < 0.1, "反馈应自限有界"
+    assert float(like_fb[gap].mean()) < 0.05, "gap 桥接在 enh, 不进似然"
+    assert float(like_fb[blob].mean()) < 0.05, "孤立亮斑不应被反馈放大"
 
     path = Utils.project_root() / "artifacts/edgemap_synth.png"
     EdgePrior.visualize(img, like, enh, thin, path)

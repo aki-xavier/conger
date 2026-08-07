@@ -11,6 +11,35 @@ blade 输出与残差验证走 cga 的 float64 标量通道; 向量化成对几�
 只涉及局部小量差 (≤ link_radius), 无远原点抵消, 用 float32。
 残差 (d²−ρ²)/(2ρ) 即归一化对偶球 ip 残差, 近圆处 ≈ 径向距离;
 CGA blade 只承载输出图元 (稀疏通用语), 不进逐对循环。
+
+模块流程 (run() 总装):
+
+  L_e (边缘似然, 不硬阈值) + mean_ori (法向场)
+       │  ① extract_edgels: 法向 NMS (复用 EdgePrior 预计算
+       │     gather) + 抛物线亚像素顶点 → edgel 集 (pos/normal/
+       │     tangent/strength); near_pairs 网格桶去重 (强者留)
+       ▼
+  ② affinity: near_pairs 候选对 (≤ link_radius) → 候选共圆
+     (两法向线交点为圆心) / 平行退化切向线残差, res_max 钳顶,
+     res_floor 吸收定位噪声 → w = 邻近性 × exp(−κ·共圆残差)
+       ▼
+  ③ group: 每 edgel 沿切向前/后各取最高亲和伙伴连边 (度≤2 →
+     链必为路径; 不要求互选) → 度1端点起走出有序链 (闭环二轮
+     兜底), ≥ min_chain 留链
+       ▼
+  ④ 每链两端点提升 CGA 点 → line blade (p1∧p2∧e∞)
+       ▼
+  ⑤ complete: 异链端点两两 (≤ gap_max) 复用同一套邻近×共圆
+     残差 → p(连续) 排序输出 (不硬连接); ≥ complete_thr 的弧段
+     额外拟合 circle blade
+       ▼
+  ⑥ detect_t_junctions: 折线相交 + 链端点延长线两类候选 →
+     局部切向 ±臂支撑统计 (带内·死区外: 数量+延伸) → 一侧通过
+     一侧中断 = T 结 (front≻behind 偏序); 双臂皆通 = X, 不出偏序;
+     dedupe 3px 去重
+       ▼
+  GroupingResult (edgels / chains / lines / completions /
+  circles / t_junctions)
 """
 
 import math

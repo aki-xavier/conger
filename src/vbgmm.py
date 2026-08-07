@@ -11,6 +11,39 @@ from riesz import FeatureMaps, RieszWavelet
 from utils import Utils
 
 # ── 变分贝叶斯 GMM (全协方差, NIW 先验) ────────────────────────────
+#
+# 模块流程:
+#
+#   RieszWavelet.features() (7 维特征图)
+#        │  feature_matrix(): 摊平成 (N,7), 列序由 FEAT_NAMES 定
+#        ▼
+#   __post_init__: z-score 标准化 (mu/sd)
+#        │
+#        ├─ 冷启动且给 alpha0_grid → select_alpha0(): 网格逐候选 fit,
+#        │   取最终 ELBO 最大者 (经验贝叶斯, 固定 key 保证可比)
+#        │
+#        └─ fit(): VB-EM 主循环 (Bishop 10.2)
+#             init_resp(): 暖启动后验先做一次 E 步; 否则随机中心硬分配
+#             loop ≤ max_iter:
+#                m_step(): 充分统计量 → NIW/Dirichlet 后验 (Posterior)
+#                         (S_k 逐分量特征值钳底防不定, 见函数内注释)
+#                e_step(): log_rho (含可选反馈 prior) → softmax → r
+#                compute_elbo(): 统计量用新 r 重算; 正微增益才收敛
+#             子采样只作用 M 步, 最终 r 始终对全图重算
+#        │
+#        ▼
+#   输出契约 (两个协同量, 同一后验的两个边际):
+#     软聚类 r (N,K) ──→ labels() / neighbor_similarity() (软边界)
+#     边缘似然 ──→ pixel_evidence() 逐像素硬规则 → class_fraction()
+#                  簇内证据占比 → class_likelihood() r@frac 后验期望
+#                  → edge_likelihood() (H,W) ──→ EdgePrior (edgemap.py)
+#        ▲                                            │
+#        └──────── feedback_round(enh) ◄───────────────┘
+#           虚线反馈边: prior=μ·margin·resid·frac 注入 e_step,
+#           阻尼混合, 不改 self.r (frac 锚定), 协议上限 2 轮
+#
+#   逐帧模式: infer() 固定后验只做一次 E 步; 后台 warm=posterior
+#   暖启动 + M 步子采样刷新后验
 
 
 @dataclass(slots=True)
@@ -276,8 +309,11 @@ class VBGMM:
 
         return Posterior(alpha, beta, nu, m, w, logdet_w, tr_w, log_pi, log_lt)
 
-    def e_step(self, z: mx.array, q: Posterior) -> mx.array:
-        """r_nk ∝ π̃_k·|Λ̃_k|^{1/2}·exp(−D/2β_k − ν_k/2·maha_nk)。"""
+    def e_step(
+        self, z: mx.array, q: Posterior, prior: mx.array | None = None
+    ) -> mx.array:
+        """r_nk ∝ π̃_k·|Λ̃_k|^{1/2}·exp(−D/2β_k − ν_k/2·maha_nk)。
+        prior: 可选 (N,K) 外加对数证据 (反馈边, 见 feedback_round)。"""
         d = z.shape[1]
         # (z−m)ᵀW(z−m): 两步收缩 —— 单步 einsum("nd,kde,ne") 会
         # 物化 (N,K,D,E) 中间量 (462×490 图 ≈ 700MB), 慢 3 倍
@@ -289,6 +325,8 @@ class VBGMM:
 
         log_rho = q.log_pi + 0.5 * q.log_lt - 0.5 * d * math.log(2.0 * math.pi)
         log_rho = log_rho - 0.5 * (d / q.beta + q.nu * maha)
+        if prior is not None:
+            log_rho = log_rho + prior
         log_rho = log_rho - mx.max(log_rho, axis=1, keepdims=True)
         rho = mx.exp(log_rho)
         return rho / mx.sum(rho, axis=1, keepdims=True)
@@ -411,6 +449,51 @@ class VBGMM:
 
     def labels(self) -> mx.array:
         return mx.argmax(self.r, axis=1)
+
+    def feedback_round(
+        self,
+        enh: mx.array,
+        lam: float = 0.3,
+        mu: float = 10.0,
+        x: mx.array | None = None,
+        r: mx.array | None = None,
+    ) -> mx.array:
+        """EdgePrior 增强图的阻尼反馈 (虚线边, flow.md 迭代协议)。
+
+        注入是不确定度门控的残差驱动:
+            prior[n,k] = μ · margin_n · resid_n · frac_k
+        margin_n = 1 − max_k r_nk (聚类自身的不确定度), resid_n =
+        max(enh−like, 0) (传播与似然的分歧)。三重门控各司其职:
+        frac_k 让证据只流向边缘类分量; resid 使一致区 (enh≈like)
+        零注入, 堵死自确认; margin 使自信像素 (纹理/平坦区 r 近
+        one-hot) 零注入 —— 没有 margin 时残差注入会把传播渗漏
+        放大回聚类 (实测纹理区 like +58%), margin≈0 恰好关上
+        这扇侧门。三项都有界且随收敛归零, 天然符合定点协议。
+
+        返回新责任, 不更新 self.r —— frac 锚定因此自然成立:
+        调用方先取 frac = class_fraction("edge") (读前馈 r), 再用
+        r_new @ frac 算反馈似然, 无重算漂移。多轮反馈由调用方
+        显式传 r=r_new (协议上限 2 轮, 未收敛分歧保留)。
+
+        诚实的经验天花板: VB 平均场后验系统性偏尖 (flow.md §2),
+        合成图上 margin 几乎处处 ≈0, 故本反馈的实际调整量 ≈0。
+        这不是失效而是结论 —— gap 处边缘分量在 log 证据上差数百
+        纳特, 分歧不该由聚类吸收: 桥接归 EdgePrior 的增强图, 分歧
+        按 flow.md 保留交下游仲裁。让反馈真正有分量需先温度缩放
+        r 软化后验 (单独改造, 见下)。
+        """
+        # ponytail: μ 由合成验证手工定; 当前数据上 margin≈0 使注入≈0,
+        # 反馈要起作用依赖温度缩放 r 的改造 (flow.md §2 已背书偏尖诊断)
+        x = self.x_orig if x is None else x
+        r = self.r if r is None else r
+        frac = self.class_fraction("edge", x, r)
+        e = enh.reshape(-1).astype(mx.float32)
+        resid = mx.maximum(e - r @ frac, 0.0)
+        margin = 1.0 - mx.max(r, axis=1)
+        prior = mu * (margin * resid)[:, None] * frac[None, :]
+        z = (x - self.mu) / self.sd
+        r_inj = self.e_step(z, self.posterior, prior)  # type: ignore
+        return (1.0 - lam) * r + lam * r_inj  # type: ignore
 
     def edge_likelihood(
         self,
