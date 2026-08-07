@@ -289,6 +289,20 @@ for i in range(NUM_COMPONENTS):
 GP_NONZERO_I = mx.array(_nz_i, dtype=mx.int32)
 GP_NONZERO_J = mx.array(_nz_j, dtype=mx.int32)
 
+# 模块级数组全部物化: 未求值的懒图携带创建线程的流, 后台线程
+# (GroupingTracker worker) 使用它们会报 no Stream in current thread
+mx.eval(
+    GP_SIGNS,
+    GP_INDICES,
+    GP_COUNTS,
+    GP_MASK,
+    GP_NONZERO_I,
+    GP_NONZERO_J,
+    *GRADE_MASKS,
+    _REVERSE_MASK,
+    _INVOLUTION_MASK,
+)
+
 
 # ── Multivector 类 ─────────────────────────────────────────────────
 

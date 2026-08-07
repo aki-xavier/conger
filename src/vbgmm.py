@@ -639,6 +639,84 @@ class VBGMM:
         b = pick([p, p, t, v, v, q])
         return mx.stack([r, g, b], axis=-1)
 
+    def macro_labels(self, k_macro: int = 8) -> mx.array:
+        """分量级凝聚合并 → 宏簇标签 (K,) int。
+
+        距离用 Bhattacharyya (z 空间, 含协方差 —— 椭球形状参与合并
+        判决, 取代纯均值欧氏; 曾用均值二级 VBGMM, 已弃):
+            d_B = ⅛·ΔμᵀΣ̄⁻¹Δμ + ½·ln(detΣ̄ / √(detΣᵢ·detΣⱼ))
+        每轮合并质量加权的池化高斯, 直到剩 k_macro 个。死分量
+        (weight ≤ 1e-3) 按 d_B 归入最近宏簇。不改变 like = r@frac
+        主管线; 用途: 去碎片化显示 / 分割层的语义先验。"""
+        z = (self.x_orig - self.mu) / self.sd  # type: ignore
+        nk, xbar, s = self.stats(z, self.r)  # type: ignore
+        w = nk / mx.sum(nk)
+        alive = self.nonzero(w > 1e-3).tolist()
+
+        # 活跃分量的 (μ, Σ, 质量) —— z 空间
+        mus = [xbar[j] for j in alive]
+        covs = [s[j] for j in alive]
+        mass = [float(nk[j]) for j in alive]
+        groups = [[i] for i in range(len(alive))]  # 宏簇 → 活跃下标
+
+        def bhatt(m1, c1, m2, c2) -> float:
+            """两高斯的 Bhattacharyya 距离。"""
+            cb = (c1 + c2) * 0.5
+            dm = (m1 - m2)[:, None]
+            t1 = float(dm.T @ mx.linalg.inv(cb, stream=mx.cpu) @ dm) / 8.0
+            t2 = 0.5 * (
+                self.logdet_spd(cb)
+                - 0.5 * (self.logdet_spd(c1) + self.logdet_spd(c2))
+            )
+            return t1 + t2
+
+        while len(groups) > k_macro:
+            # 找 d_B 最小的一对
+            best, bp = math.inf, (0, 1)
+            for i in range(len(groups)):
+                for j in range(i + 1, len(groups)):
+                    d = bhatt(mus[i], covs[i], mus[j], covs[j])
+                    if d < best:
+                        best, bp = d, (i, j)
+            i, j = bp
+            # 质量加权池化: μ, Σ 合并 (Σ 经二阶矩合成)
+            mi, mj = mass[i], mass[j]
+            m12 = mi + mj
+            mu = (mus[i] * mi + mus[j] * mj) / m12
+            m2i = covs[i] + mus[i][:, None] @ mus[i][None, :]
+            m2j = covs[j] + mus[j][:, None] @ mus[j][None, :]
+            cov = (m2i * mi + m2j * mj) / m12 - mu[:, None] @ mu[None, :]
+            merged = groups[i] + groups[j]
+            for k in sorted(bp, reverse=True):
+                del groups[k], mus[k], covs[k], mass[k]
+            groups.append(merged)
+            mus.append(mu)
+            covs.append(cov)
+            mass.append(m12)
+
+        # 活跃分量按成员关系打标, 死分量按 d_B 归入最近宏簇
+        alive_set = set(alive)
+        out = [0] * self.k_max
+        for g_id, members in enumerate(groups):
+            for t in members:
+                out[alive[t]] = g_id
+        for j in range(self.k_max):
+            if j in alive_set:
+                continue
+            out[j] = min(
+                range(len(groups)),
+                key=lambda g: bhatt(xbar[j], s[j], mus[g], covs[g]),
+            )
+        return mx.array(out, dtype=mx.int32)
+
+    @staticmethod
+    def nonzero(sel: mx.array) -> mx.array:
+        """布尔掩码 → 扁平索引 (MLX 无布尔索引, argsort 技巧)。"""
+        flat = sel.reshape(-1)
+        k = int(mx.sum(flat))
+        key = mx.where(flat, mx.arange(flat.shape[0]), flat.shape[0])
+        return mx.argsort(key)[:k]
+
     def soft_colors(self, shape: tuple[int, int]):
         """软聚类混色图 (H,W,3): 每个分量一个黄金比散色 (相邻下标
         色相不相邻, K 大时仍可辨), 像素色 = Σ_k r_nk·color_k ——

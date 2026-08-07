@@ -18,6 +18,8 @@
 
 import math
 
+import mlx.core as mx
+
 from cga.multivector import Multivector
 
 # ── 基向量 ────────────────────────────────────────────────────────
@@ -27,6 +29,9 @@ E2 = Multivector.vector(0, 1, 0, 0, 0)
 E3 = Multivector.vector(0, 0, 1, 0, 0)
 E0 = Multivector.vector(0, 0, 0, 1, 0)
 EINF = Multivector.vector(0, 0, 0, 0, 1)
+
+# 基向量常量物化 (后台线程使用安全, 见 multivector.py 末尾注)
+mx.eval(E1.values, E2.values, E3.values, E0.values, EINF.values)
 
 
 # ── 图元类 ────────────────────────────────────────────────────────

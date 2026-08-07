@@ -390,10 +390,18 @@ class PixelLabelLayer:
         return q / q.sum(axis=-1, keepdims=True)
 
     def run(
-        self, like_edge: mx.array, like_tex: mx.array, sublabels: mx.array
+        self,
+        like_edge: mx.array,
+        like_tex: mx.array,
+        sublabels: mx.array,
+        macro: mx.array | None = None,
+        w_macro: float = 0.3,
     ) -> tuple[mx.array, mx.array]:
         """两路类似然 + 子区域标签 → (软标签 (H,W,3), 硬标签 (H,W))。
-        通道序: edge / texture / flat。"""
+        通道序: edge / texture / flat。
+        macro: 可选宏簇图 (H,W) int (vbgmm.macro_labels) —— 语义先验
+        π_macro (簇内 p̃ 均值), q ∝ π_sub^(1−λ) · p̃^λ · π_macro^w_macro;
+        S 层先验管空间, 宏簇先验管语义, 乘性独立注入。"""
         flat = mx.maximum(1.0 - like_edge - like_tex, 0.0)
         p = self.soften(mx.stack([like_edge, like_tex, flat], axis=-1))
         h, w = like_edge.shape
@@ -409,6 +417,18 @@ class PixelLabelLayer:
         pi = pi / mx.maximum(cnt, 1.0)[:, None]
         pi_pix = pi[lab].reshape(h, w, 3)
         q = mx.power(pi_pix, 1.0 - self.lam) * mx.power(p, self.lam)
+        if macro is not None:
+            # 宏簇语义先验: 簇内 p̃ 均值 (同一套 scatter 批算)
+            lab_m = macro.reshape(-1)
+            m = int(mx.max(macro)) + 1
+            cols_m = [
+                mx.zeros((m,)).at[lab_m].add(p[..., c].reshape(-1))
+                for c in range(3)
+            ]
+            pi_m = mx.stack(cols_m, axis=-1)
+            cnt_m = mx.zeros((m,)).at[lab_m].add(mx.ones((int(lab_m.shape[0]),)))
+            pi_m = pi_m / mx.maximum(cnt_m, 1.0)[:, None]
+            q = q * mx.power(pi_m[lab_m].reshape(h, w, 3), w_macro)
         q = q / mx.maximum(q.sum(axis=-1, keepdims=True), 1e-12)
         return q, mx.argmax(q, axis=-1).astype(mx.int32)
 
@@ -435,10 +455,7 @@ def grouping_contours(res) -> tuple[list[mx.array], list]:
 
 @dataclass(slots=True)
 class SceneSegmenter:
-    """分割层门面: enh + 类似然 (+ 可选轮廓) → SegmentResult。
-
-    深度反馈 D (flow.md 虚线边, 第二轮起) 留 prior_map 钩子, 未接。
-    """
+    """分割层门面: enh + 类似然 (+ 可选轮廓/宏簇/深度反馈) → SegmentResult。"""
 
     tau: float = 0.3  # R 层切割高度
     min_len: float = 10.0  # 轮廓参与切割的最短长度 (px)
@@ -452,14 +469,24 @@ class SceneSegmenter:
         like_tex: mx.array,
         polylines: list[mx.array] = (),
         circles: list[tuple[tuple[float, float], float]] = (),
+        macro: mx.array | None = None,
+        prior_map: mx.array | None = None,
+        w_prior: float = 0.5,
     ) -> SegmentResult:
-        """边界强度 + 类似然 (+ 轮廓折线/圆) → 完整分割结果。"""
+        """边界强度 + 类似然 (+ 轮廓/宏簇/深度反馈) → 完整分割结果。
+
+        prior_map: 深度融合层的深度不连续反馈 D (flow.md §2 虚线边,
+        第二轮起) —— 以概率或注入边界强度 E' = 1−(1−E)(1−w·D):
+        D 提升边界处的高层级概率, 对已有强边界无副作用 (并集语义)。
+        """
+        if prior_map is not None:
+            enh = 1.0 - (1.0 - enh) * (1.0 - w_prior * prior_map)
         rm = RegionLayer().run(enh)
         regions = rm.hierarchy.cut(self.tau)
         mask = ContourCut.rasterize(enh.shape, polylines, circles, self.min_len)
         sub = SubregionLayer.run(regions, mask)
         soft, hard = PixelLabelLayer(self.temperature, self.lam).run(
-            like_edge, like_tex, sub
+            like_edge, like_tex, sub, macro
         )
         return SegmentResult(regions, sub, soft, hard, rm.hierarchy.ucm)
 
@@ -549,6 +576,42 @@ if __name__ == "__main__":
     for y, x in spikes:
         assert hard_l[y][x] == 2, f"孤立尖峰 ({y},{x}) 应被区域先验吸收为 flat"
     print("Y 层: 孤立像素翻转被区域先验吸收 (硬标签跟随区域多数)")
+
+    # ── Y 层 × 宏簇先验: 宏簇语义注入与权重 ────────────────────────
+    one_region = mx.ones((HY, WY), dtype=mx.int32)  # 单一子区域
+    macro_map = mx.zeros((HY, WY), dtype=mx.int32)
+    macro_map[:, 64:] = 1  # 左右两个宏簇
+    le2 = mx.full((HY, WY), 0.1)
+    le2[:, 64:] = 0.9  # 左宏簇多 flat, 右宏簇多 edge
+    le2[30, 100] = 0.1  # 右宏簇里的少数派 flat 像素
+    le2[30, 30] = 0.9  # 左宏簇里的少数派 edge 像素
+    _, hard_m = PixelLabelLayer().run(le2, lt, one_region, macro=macro_map)
+    hard_ml = hard_m.tolist()
+    assert hard_ml[30][100] == 0, "右宏簇少数派应被宏簇先验判为 edge"
+    # 反向 (判回 flat) 需更强权重: 像素证据与 S 先验都偏向 edge 时,
+    # w_macro 要 >0.6 才能翻盘 —— 这是先验强度的预期行为, 不是 bug
+    _, hard_m2 = PixelLabelLayer().run(
+        le2, lt, one_region, macro=macro_map, w_macro=0.8
+    )
+    assert hard_m2.tolist()[30][30] == 2, "强宏簇先验下左区少数派应判回 flat"
+    print("Y 层×宏簇: 语义先验生效 (默认权重翻转弱证据侧, w=0.8 翻转强证据侧)")
+
+    # ── 深度反馈钩子 (prior_map): 填补缺口边界 ─────────────────────
+    # E2 的 16px 缺口边界: τ=0.5 时两区已合并; 注入 D 填补缺口后
+    # 弧强度恢复, 两区应保持分离
+    zero_like = mx.zeros((64, 128))
+    seg_no = SceneSegmenter(tau=0.5).run(E2, zero_like, zero_like)
+    D = mx.zeros((64, 128))
+    D[24:40, 64] = 1.0  # 深度不连续恰好覆盖缺口
+    seg_fb = SceneSegmenter(tau=0.5).run(
+        E2, zero_like, zero_like, prior_map=D, w_prior=0.8
+    )
+    pt_l, pt_r = (32, 32), (32, 96)
+    same_no = int(seg_no.regions[pt_l]) == int(seg_no.regions[pt_r])
+    same_fb = int(seg_fb.regions[pt_l]) == int(seg_fb.regions[pt_r])
+    assert same_no, "缺口弧 0.36 < τ=0.5, 无反馈应合并"
+    assert not same_fb, "深度反馈填补缺口后两区应保持分离"
+    print("深度反馈: prior_map 填补缺口边界, 区域分离保持 (虚线边接通)")
 
     # ── grouping → segment 接线验证: 轮廓硬切恢复欠分割区域 ──────
     # T 形轮廓场: 分水岭在 τ=1 全并为一个区域, S 层轮廓应切出

@@ -43,6 +43,8 @@ CGA blade 只承载输出图元 (稀疏通用语), 不进逐对循环。
 """
 
 import math
+import threading
+import time
 from dataclasses import dataclass
 from pathlib import Path
 from typing import NamedTuple
@@ -53,6 +55,7 @@ import mlx.core as mx
 from cga import Circle, Line, Point
 from cga.multivector import Multivector
 from edgemap import EdgePrior
+from segment import SegmentResult
 from utils import Utils
 
 
@@ -740,6 +743,185 @@ class PerceptualGrouping:
         plt.close(fig)
 
 
+# ── 后台增量追踪: 实时架构 ────────────────────────────────────────
+
+
+class TrackedResult(NamedTuple):
+    """后台一帧的追踪输出: 全量 grouping 结果 + 跨帧稳定 id。"""
+
+    result: GroupingResult
+    tids: list[int]  # 与 result.chains 平行, 同一物理链跨帧同 id
+    ages: list[int]  # 各链连续被追踪的帧数 (1 = 新出现)
+    version: int  # 完成序号
+    tj_tids: list[int] = []  # 与 result.t_junctions 平行, 稳定 T 结 id
+    tj_ages: list[int] = []  # 各 T 结连续帧数
+    segment: SegmentResult | None = None  # 接分割层时的分割结果
+
+
+class GroupingTracker:
+    """grouping 的后台增量架构 (flow.md 层间节奏: 实时管线止于
+    edgemap, 组织层后台低频刷新, 帧间链 id 增量对应)。
+
+    逐帧 submit() 只登记最新输入, 立即返回 (中间帧直接丢弃 ——
+    永远处理最新帧, 不排队); 后台线程全量重跑 grouping; 完成后
+    用链质心近邻匹配分配稳定 tid。结果延迟 = 一次全量 grouping
+    的时间, 但逐帧路径为零开销。"""
+
+    def __init__(
+        self,
+        pg: PerceptualGrouping | None = None,
+        match_radius: float = 8.0,
+        segmenter=None,
+    ):
+        """match_radius: 帧间链/T 结对应的距离阈值 (px), 应大于
+        帧间最大位移。segmenter: 可选 SceneSegmenter —— 给则后台
+        链路延伸为 grouping → 分割 (结果进 TrackedResult.segment)。"""
+        self.pg = pg if pg is not None else PerceptualGrouping()
+        self.segmenter = segmenter
+        self.match_radius = match_radius
+        self._cond = threading.Condition()
+        self._pending: tuple | None = None
+        self._result: TrackedResult | None = None
+        self._version = 0
+        self._prev: list[tuple[float, float, int, int]] = []  # (r,c,tid,age)
+        self._prev_tj: list[tuple[int, int, float, float, int, int]] = []
+        # (front_tid, behind_tid, r, c, tj_id, age)
+        self._next_tid = 0
+        self._next_tj = 0
+        self._stop = False
+        self._thread = threading.Thread(target=self._worker, daemon=True)
+        self._thread.start()
+
+    def submit(
+        self,
+        enh: mx.array,
+        mean_ori: mx.array,
+        like_edge: mx.array | None = None,
+        like_tex: mx.array | None = None,
+    ) -> None:
+        """登记一帧输入 (非阻塞, 毫秒级); 只保留最新帧。
+        输入在此物化: 未求值的懒图携带提交线程的流, 工作线程
+        访问会报 no Stream in current thread (MLX 流按线程注册)。
+        配置 segmenter 时须同时给两路类似然 (Y 层输入)。"""
+        mx.eval(enh, mean_ori)
+        if like_edge is not None:
+            mx.eval(like_edge, like_tex)
+        with self._cond:
+            self._pending = (enh, mean_ori, like_edge, like_tex)
+            self._cond.notify()
+
+    def latest(self) -> TrackedResult | None:
+        """最新完成的后台结果 (未完成过则为 None)。"""
+        with self._cond:
+            return self._result
+
+    def wait_next(self, timeout: float | None = None) -> TrackedResult | None:
+        """阻塞到下一个后台结果完成 (同步消费/测试用)。"""
+        with self._cond:
+            seen = self._version
+            while self._version == seen and not self._stop:
+                self._cond.wait(timeout)
+                if timeout is not None and self._version == seen:
+                    return self._result
+            return self._result
+
+    def close(self) -> None:
+        """停止后台线程。"""
+        with self._cond:
+            self._stop = True
+            self._cond.notify_all()
+        self._thread.join(timeout=5.0)
+
+    def _worker(self) -> None:
+        """后台循环: 取最新帧 → 全量 grouping → 链 id 对应。
+        MLX 的 stream 是线程局部的: 工作线程须先建线程局部流
+        (mx.stream(mx.gpu) 不够 —— 默认流注册表按线程查)。"""
+        with mx.stream(mx.new_thread_local_stream(mx.gpu)):
+            while True:
+                with self._cond:
+                    while self._pending is None and not self._stop:
+                        self._cond.wait()
+                    if self._stop:
+                        return
+                    job = self._pending
+                    self._pending = None
+                assert job is not None
+                res = self.pg.run(job[0], job[1])
+                tracked = self._match(res)
+                if self.segmenter is not None and job[2] is not None:
+                    from segment import grouping_contours
+
+                    polys, circs = grouping_contours(res)
+                    seg = self.segmenter.run(
+                        job[0], job[2], job[3], polys, circs
+                    )
+                    tracked = tracked._replace(segment=seg)
+                with self._cond:
+                    self._result = tracked
+                    self._version += 1
+                    self._cond.notify_all()
+
+    def _match(self, res: GroupingResult) -> TrackedResult:
+        """质心近邻匹配: 新链 → 上一帧最近质心的 tid (一对一贪心),
+        未命中分配新 tid。链数百量级, 逐链贪心足够。"""
+        cents = []
+        for ch in res.chains:
+            c = mx.mean(res.edgels.pos[ch], axis=0)
+            cents.append((float(c[0]), float(c[1])))
+        prev = list(self._prev)
+        used: set[int] = set()
+        tids, ages = [], []
+        new_prev = []
+        for cr, cc in cents:
+            best, bi = self.match_radius**2, -1
+            for pi, (pr, pc, tid, age) in enumerate(prev):
+                d2 = (cr - pr) ** 2 + (cc - pc) ** 2
+                if d2 < best and pi not in used:
+                    best, bi = d2, pi
+            if bi >= 0:
+                used.add(bi)
+                tid, age = prev[bi][2], prev[bi][3] + 1
+            else:
+                tid, age = self._next_tid, 1
+                self._next_tid += 1
+            tids.append(tid)
+            ages.append(age)
+            new_prev.append((cr, cc, tid, age))
+        self._prev = new_prev
+        tj_tids, tj_ages = self._match_tjunctions(res, tids)
+        return TrackedResult(res, tids, ages, self._version + 1, tj_tids, tj_ages)
+
+    def _match_tjunctions(
+        self, res: GroupingResult, tids: list[int]
+    ) -> tuple[list[int], list[int]]:
+        """T 结跨帧对应: 以 (front_tid, behind_tid) 对 + 位置近邻
+        (≤ match_radius) 一对一匹配, 未命中分配新 id。"""
+        prev = list(self._prev_tj)
+        used: set[int] = set()
+        out_ids, out_ages = [], []
+        new_prev = []
+        for t in res.t_junctions:
+            ft, bt = tids[t.front], tids[t.behind]
+            best, bi = self.match_radius**2, -1
+            for pi, (pf, pb, pr, pc, tid, age) in enumerate(prev):
+                if (pf, pb) != (ft, bt) or pi in used:
+                    continue
+                d2 = (t.pos[0] - pr) ** 2 + (t.pos[1] - pc) ** 2
+                if d2 < best:
+                    best, bi = d2, pi
+            if bi >= 0:
+                used.add(bi)
+                tid, age = prev[bi][4], prev[bi][5] + 1
+            else:
+                tid, age = self._next_tj, 1
+                self._next_tj += 1
+            out_ids.append(tid)
+            out_ages.append(age)
+            new_prev.append((ft, bt, t.pos[0], t.pos[1], tid, age))
+        self._prev_tj = new_prev
+        return out_ids, out_ages
+
+
 if __name__ == "__main__":
     # ── 合成真值验证 (不经过前端管线, 直接构造 L_e / mean_ori) ─────
     # 场构造: 折线/弧段栅格化为 σ=1 的高斯脊 (强度 0.9), 法向已知。
@@ -858,3 +1040,60 @@ if __name__ == "__main__":
     path2 = Utils.project_root() / "artifacts/grouping_T.png"
     pg.visualize(enh, res, path2)
     print(path2)
+
+    # ── GroupingTracker: 后台增量架构验证 ──────────────────────────
+    # 竖杠每帧右移 3px, 共 4 帧; submit 立即返回, 后台全量重跑;
+    # 断言: 同一物理链的 tid 跨全部 4 帧稳定
+    def bar_field(c0: float) -> tuple[mx.array, mx.array]:
+        """竝直脊线场: 列 c0 处 σ=1 高斯脊 (强度 0.9), 法向水平。"""
+        yy, xx = mx.meshgrid(
+            mx.arange(96, dtype=mx.float32),
+            mx.arange(128, dtype=mx.float32),
+            indexing="ij",
+        )
+        like = 0.9 * mx.exp(-((xx - c0) ** 2) / 2.0)
+        ori = mx.zeros((96, 128), dtype=mx.float32)  # 法向 (0,1) → atan2=0
+        return like, ori
+
+    tracker = GroupingTracker(match_radius=8.0)
+    tid_seq = []
+    tr: TrackedResult | None = None
+    t0 = time.perf_counter()
+    for f in range(4):
+        like, ori = bar_field(30.0 + 3.0 * f)
+        ts = time.perf_counter()
+        tracker.submit(like, ori)
+        submit_ms = 1000 * (time.perf_counter() - ts)
+        tr = tracker.wait_next(timeout=60.0)
+        assert tr is not None and len(tr.tids) >= 1, f"帧 {f} 无链"
+        tid_seq.append(tr.tids)
+        if f == 0:
+            print(f"  submit 耗时 {submit_ms:.2f}ms (非阻塞)")
+    t1 = time.perf_counter()
+    tracker.close()
+    first = set(tid_seq[0])
+    stable = [t for t in first if all(t in ts for ts in tid_seq[1:])]
+    assert stable, f"无跨帧稳定链: {tid_seq}"
+    ages_final = max(tr.ages) if tr else 0
+    assert ages_final == 4, f"最老链 age 应为 4: {ages_final}"
+    print(
+        f"GroupingTracker: 4 帧 {t1 - t0:.1f}s, "
+        f"稳定 tid {stable} (age={ages_final}), tid 序列 {tid_seq}"
+    )
+
+    # ── T 结跨帧对应: T 形竖杠每帧右移 2px ────────────────────────
+    tracker2 = GroupingTracker(match_radius=8.0)
+    tj_seq = []
+    for f in range(4):
+        lt, mt = ridge_field(
+            [hline(48, 16, 112), vline(64 + 2 * f, 50, 88)]
+        )
+        tracker2.submit(lt, mt)
+        tr2 = tracker2.wait_next(timeout=60.0)
+        assert tr2 is not None and tr2.tj_tids, f"帧 {f} 无 T 结"
+        tj_seq.append(tr2.tj_tids)
+    tracker2.close()
+    first_tj = set(tj_seq[0])
+    stable_tj = [t for t in first_tj if all(t in ts for ts in tj_seq[1:])]
+    assert stable_tj, f"无跨帧稳定 T 结: {tj_seq}"
+    print(f"T 结对应: 稳定 tj_id {stable_tj}, 序列 {tj_seq}")
