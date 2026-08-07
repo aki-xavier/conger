@@ -25,11 +25,9 @@ from utils import Utils
 #        │
 #        └─ fit(): VB-EM 主循环 (Bishop 10.2)
 #             init_resp(): 暖启动后验先做一次 E 步; 否则随机中心硬分配
-#             loop ≤ max_iter:
-#                m_step(): 充分统计量 → NIW/Dirichlet 后验 (Posterior)
-#                         (S_k 逐分量特征值钳底防不定, 见函数内注释)
-#                e_step(): log_rho (含可选反馈 prior) → softmax → r
-#                compute_elbo(): 统计量用新 r 重算; 正微增益才收敛
+#             loop ≤ max_iter: online_update(ρ=1) —— 一次调用即经典
+#                VB-EM 一次迭代 (E 步 → 记 bound → 累积量出后验)
+#                冷启动: 随机中心 → 一次 M 步; 暖启动: 旧后验直入
 #             子采样只作用 M 步, 最终 r 始终对全图重算
 #        │
 #        ▼
@@ -43,8 +41,8 @@ from utils import Utils
 #           虚线反馈边: prior=μ·margin·resid·frac 注入 e_step,
 #           阻尼混合, 不改 self.r (frac 锚定), 协议上限 2 轮
 #
-#   逐帧模式: infer() 固定后验只做一次 E 步; 后台 warm=posterior
-#   暖启动 + M 步子采样刷新后验
+#   逐帧模式: infer() 固定后验只做一次 E 步; online_update() 每帧
+#   一次 E 步 + 统计量 EWMA (常数 ρ 跟踪; monitor=True 记 ELBO)
 
 
 @dataclass(slots=True)
@@ -85,6 +83,7 @@ class VBGMM:
     subsample: int = 0  # >0: M 步子采样数; <0: 自动按 subsample_cap 封顶 (E 步始终全图)
     subsample_cap: int = 8192  # 自动子采样的预算上限 (调度器接管前的默认形态)
     warm: Posterior | None = None  # 暖启动: 上一帧的后验 (online VB 简化版)
+    restarts: int = 1  # 冷启动多起点数 (>1: 固定 key 0..restarts-1, 取最优 ELBO)
     elbo_every: int = 1  # 每几轮算一次 ELBO (标量同步是固定开销)
     mu: mx.array | None = None  # 特征均值 (标准化用)
     sd: mx.array | None = None
@@ -184,9 +183,20 @@ class VBGMM:
         self.sd = mx.maximum(mx.sqrt(mx.var(x, axis=0)), 1e-6)
         z = (x - self.mu) / self.sd
         if self.alpha0_grid is not None and self.warm is None:
-            self.select_alpha0(z)
+            self.select_alpha0(x)
+        elif self.warm is None and self.restarts > 1:
+            # 多起点重启: 多个固定 key 冷启动, 取最终 ELBO 最大者
+            # (防单起点撞上差的局部最优; key 固定, 结果可复现)
+            best_elbo, saved = -math.inf, None
+            for key in range(self.restarts):
+                self.elbo = []
+                self.fit(x, key)
+                if self.elbo[-1] > best_elbo:
+                    best_elbo = self.elbo[-1]
+                    saved = (self.r, self.alpha, self.posterior, list(self.elbo))
+            self.r, self.alpha, self.posterior, self.elbo = saved  # type: ignore
         else:
-            self.fit(z)
+            self.fit(x, 0)
         nk = mx.sum(self.r, axis=0)
         self.weights = self.alpha / mx.sum(self.alpha)
         self.means_orig = (self.r.T @ x) / mx.maximum(nk[:, None], 1e-12)
@@ -194,7 +204,7 @@ class VBGMM:
         nks, xbars, ss = self.stats(z, self.r)
         self.acc = self.accumulate(nks, xbars, ss)
 
-    def select_alpha0(self, z: mx.array):
+    def select_alpha0(self, x: mx.array):
         """经验贝叶斯选 α0: 对网格每个候选完整拟合, 取最终 ELBO 最大者。
         冷启动 init_resp 用固定 key, 各候选初始责任一致, ELBO 可比。
         只有冷启动时启用 (暖启动应延续上一帧的先验, 不重新选)。"""
@@ -204,7 +214,7 @@ class VBGMM:
         for a in self.alpha0_grid:
             self.alpha0 = a
             self.elbo = []
-            self.fit(z)
+            self.fit(x)
             if self.elbo[-1] > best[0]:
                 best = (self.elbo[-1], a)
                 saved = (self.r, self.alpha, self.posterior, list(self.elbo))
@@ -213,46 +223,64 @@ class VBGMM:
 
     # ── VB-EM 主循环 ──────────────────────────────────────────────
 
-    def fit(self, z: mx.array):
-        """VB-EM 主循环: M 步→E 步→ELBO, 正微增益判收敛。
-        子采样只作用 M 步, 最终责任始终对全图重算。"""
-        # M 步拟合可以只用子采样 (聚类统计量对子采样稳健),
-        # 最终责任始终对全图重算。subsample < 0: 自动按 subsample_cap 封顶。
+    def fit(self, x: mx.array, key: int = 0):
+        """离线拟合 = 同一数据上的 online_update(ρ=1) 迭代至 ELBO 收敛。
+
+        ρ=1 时 EWMA 退化为全量替换, online_update 的一次调用精确等于
+        经典 VB-EM 的一次迭代 (E 步 → 记 bound → M 步), 故离线/在线
+        共享同一条代码路径。子采样只作用迭代过程, 最终责任对全图重算。
+        """
+        z = (x - self.mu) / self.sd  # type: ignore
         sub = self.subsample
         if sub < 0:
             sub = min(z.shape[0], self.subsample_cap)
         if 0 < sub < z.shape[0]:
             idx = mx.random.permutation(z.shape[0], key=mx.random.key(1))
+            x_fit = x[idx[:sub]]
             z_fit = z[idx[:sub]]
         else:
-            z_fit = z
+            x_fit, z_fit = x, z
 
-        r = self.init_resp(z_fit)
-        q = None
+        if self.warm is not None:
+            self.posterior = self.warm  # 暖启动: 以上帧后验进入循环
+        else:
+            # 冷启动: 随机中心硬分配的初始责任直接做一次 M 步
+            # (后验直出, 不走累积量往返 —— float32 相消会偏移轨迹)
+            r0 = self.init_resp(z_fit, key)
+            nk, xbar, s = self.stats(z_fit, r0)
+            self.acc = self.accumulate(nk, xbar, s)
+            self.posterior = self._posterior(nk, xbar, s)
+
         prev = -math.inf
-        for it in range(self.max_iter):
-            q = self.m_step(z_fit, r)
-            r = self.e_step(z_fit, q)
-            if it % self.elbo_every == 0:
-                bound = self.compute_elbo(z_fit, r, q)
-                self.elbo.append(bound)
+        # 记录点对齐经典 VB-EM (q_i, r_i 紧致 bound): 冷启动 q1 在循环
+        # 外, 循环少跑一轮; 暖启动第一次调用只 E+M 不记 (old 不记录
+        # 入口 bound); 收尾补最后一步 E + 记录 (未收敛时)
+        n_iter = self.max_iter if self.warm is not None else self.max_iter - 1
+        done = False
+        for it in range(n_iter):
+            mon = it % self.elbo_every == 0 and (it > 0 or self.warm is None)
+            r = self.online_update(x_fit, rho=1.0, monitor=mon)
+            if mon:
+                bound = self.elbo[-1]
                 # 只在正的微小增益时收敛; ELBO 下降是 bug 信号, 不能当收敛
                 gain = bound - prev
-                if it > 0 and 0.0 <= gain < self.tol * max(abs(prev), 1.0):
+                if prev > -math.inf and 0.0 <= gain < self.tol * max(abs(prev), 1.0):
+                    done = True
                     break
                 prev = bound
-        self.posterior = q
-        self.r = r if z_fit is z else self.e_step(z, q)
-        self.alpha = q.alpha
+        if not done:
+            r = self.e_step(z_fit, self.posterior)  # type: ignore
+            self.elbo.append(self.compute_elbo(z_fit, r, self.posterior))  # type: ignore
+        self.r = r if z_fit is z else self.e_step(z, self.posterior)  # type: ignore
+        self.alpha = self.posterior.alpha  # type: ignore
 
-    def init_resp(self, z: mx.array) -> mx.array:
-        """初始责任: 有暖启动后验则先做一次 E 步 (跟踪模式只需
-        再迭代 1–5 轮), 否则随机中心硬分配 + 平滑。"""
-        if self.warm is not None:
-            return self.e_step(z, self.warm)
+    def init_resp(self, z: mx.array, key: int = 0) -> mx.array:
+        """冷启动初始责任: 随机中心硬分配 + 平滑 (key 固定 → 可复现;
+        多起点重启见 __post_init__ 的 restarts)。暖启动不需要 ——
+        直接以旧后验进入 EM 循环。"""
         n, _ = z.shape
         k = self.k_max
-        idx = mx.random.permutation(n, key=mx.random.key(0))[:k]
+        idx = mx.random.permutation(n, key=mx.random.key(key))[:k]
         centers = z[idx]
         d2 = mx.sum(z**2, axis=1)[:, None] + mx.sum(centers**2, axis=1)[None, :]
         d2 = d2 - 2.0 * (z @ centers.T)
@@ -269,13 +297,6 @@ class VBGMM:
         s = m2 - xbar[:, :, None] @ xbar[:, None, :]
         return nk, xbar, s
 
-    def m_step(self, z: mx.array, r: mx.array) -> Posterior:
-        """NIW/Dirichlet 后验更新: 责任统计量 → 后验。
-        直接用 (nk, x̄, S) —— 不走累积量往返 (float32 相消会偏移
-        轨迹, 见 posterior_from_acc 注释)。"""
-        nk, xbar, s = self.stats(z, r)
-        return self._posterior(nk, xbar, s)
-
     @staticmethod
     def accumulate(nk: mx.array, xbar: mx.array, s: mx.array):
         """责任加权统计量 → 充分统计累积量 (A,B,C) = (Σr, Σr·z, Σr·zzᵀ)。
@@ -287,7 +308,7 @@ class VBGMM:
 
     def posterior_from_acc(self, a: mx.array, b: mx.array, c: mx.array) -> Posterior:
         """由充分统计累积量出后验 (online VB 路径)。恢复 S 有
-        m2−x̄x̄ᵀ 的 float32 相消 (比离线 m_step 多一次往返),
+        m2−x̄x̄ᵀ 的 float32 相消 (比 _posterior 直出多一次往返),
         由逐分量特征值钳底兑住 —— 离线路径不走这里。"""
         safe = mx.maximum(a, 1e-12)
         xbar = b / safe[:, None]
@@ -424,25 +445,37 @@ class VBGMM:
         z = (x_new - self.mu) / self.sd
         return self.e_step(z, self.posterior)
 
-    def online_update(self, x_new: mx.array, rho: float = 0.05) -> mx.array:
+    def online_update(
+        self, x_new: mx.array, rho: float = 0.05, monitor: bool = False
+    ) -> mx.array:
         """一帧在线 VB 更新 (Sato 式, 常数遗忘因子 = 跟踪而非收敛)。
 
-        E 步 (当前后验) → 帧充分统计量 → EWMA 进 acc → 重出后验。
-        μ/sd 冻结于冷启动 (z 空间不漂移是新旧统计量可混的前提)。
-        死分量 (A_k→0) 自动剪枝; 新结构的"生"未实现 —— 被最近
-        分量硬吞 (重播种留作后续)。有效记忆窗口 ≈ 1/ρ 帧。
-        返回新帧责任 (N,K)。"""
+        E 步 (当前后验) → monitor 时记该后验的紧致 ELBO → 帧充分
+        统计量 → EWMA 进 acc → 重出后验。μ/sd 冻结于冷启动 (z 空间
+        不漂移是新旧统计量可混的前提)。死分量 (A_k→0) 自动剪枝;
+        新结构的"生"未实现 —— 被最近分量硬吞 (重播种留作后续)。
+        ρ=1 时就是经典 VB-EM 的一次迭代 (离线 fit 即反复调此)。
+        有效记忆窗口 ≈ 1/ρ 帧。返回新帧责任 (N,K)。"""
         z = (x_new - self.mu) / self.sd  # type: ignore
         r = self.e_step(z, self.posterior)  # type: ignore
+        if monitor:
+            # E 步刚结束, r 对当前后验紧致 —— 这是收敛判据的正确取点
+            self.elbo.append(self.compute_elbo(z, r, self.posterior))  # type: ignore
         nk, xbar, s = self.stats(z, r)
         a, b, c = self.accumulate(nk, xbar, s)
-        A, B, C = self.acc  # type: ignore
-        self.acc = (
-            (1.0 - rho) * A + rho * a,
-            (1.0 - rho) * B + rho * b,
-            (1.0 - rho) * C + rho * c,
-        )
-        self.posterior = self.posterior_from_acc(*self.acc)  # type: ignore
+        if rho >= 1.0 or self.acc is None:
+            # ρ=1: 全量替换 (离线 EM 语义), 旧 acc 无关; 后验直出,
+            # 不走累积量往返 (float32 相消会偏移轨迹, 见 posterior_from_acc)
+            self.acc = (a, b, c)
+            self.posterior = self._posterior(nk, xbar, s)
+        else:
+            A, B, C = self.acc
+            self.acc = (
+                (1.0 - rho) * A + rho * a,
+                (1.0 - rho) * B + rho * b,
+                (1.0 - rho) * C + rho * c,
+            )
+            self.posterior = self.posterior_from_acc(*self.acc)
         self.alpha = self.posterior.alpha
         self.r = r
         self.weights = self.alpha / mx.sum(self.alpha)
