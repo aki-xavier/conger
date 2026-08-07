@@ -19,10 +19,10 @@ class RieszScale:
     b0: mx.array  # 带通响应 (偶)
     b1: mx.array  # Riesz-x 响应 (沿 x 奇)
     b2: mx.array  # Riesz-y 响应 (沿 y 奇)
-    amp: mx.array | None = None  # A = sqrt(b0²+b1²+b2²): 局部幅值
-    phase: mx.array | None = None  # φ = atan2(|R|, b0): 局部相位 ∈ [0, π]
-    ori: mx.array | None = None  # atan2(b2, b1): 结构法向 ∈ (−π, π]
-    energy: mx.array | None = None  # A²
+    amp: mx.array = field(init=False)  # A = sqrt(b0²+b1²+b2²): 局部幅值
+    phase: mx.array = field(init=False)  # φ = atan2(|R|, b0): 局部相位 ∈ [0, π]
+    ori: mx.array = field(init=False)  # atan2(b2, b1): 结构法向 ∈ (−π, π]
+    energy: mx.array = field(init=False)  # A²
 
     def __post_init__(self):
         r2 = self.b1**2 + self.b2**2

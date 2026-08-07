@@ -98,6 +98,30 @@ class PerceptualGrouping:
         key = mx.where(flat, mx.arange(flat.shape[0]), flat.shape[0])
         return mx.argsort(key)[:k]
 
+    @staticmethod
+    def near_pairs(pos: mx.array, radius: float) -> list[tuple[int, int]]:
+        """网格桶找距离 ≤ radius 的候选对 (i<j), 避免 N×N 距离矩阵
+        (自然图 edgel N≈1e4, N² float32 即数百 MB)。桶边长 = radius,
+        检查 3×3 邻桶, 逐对精算距离。"""
+        pl = pos.tolist()
+        buckets: dict[tuple[int, int], list[int]] = {}
+        for a, (r, c) in enumerate(pl):
+            buckets.setdefault((int(r // radius), int(c // radius)), []).append(a)
+        pairs: set[tuple[int, int]] = set()
+        r2 = radius * radius
+        for (br, bc), members in buckets.items():
+            for dr in (-1, 0, 1):
+                for dc in (-1, 0, 1):
+                    for a in members:
+                        ra, ca = pl[a]
+                        for b in buckets.get((br + dr, bc + dc), ()):
+                            if (
+                                b > a
+                                and (ra - pl[b][0]) ** 2 + (ca - pl[b][1]) ** 2 <= r2
+                            ):
+                                pairs.add((a, b))
+        return sorted(pairs)
+
     def extract_edgels(self, like: mx.array, mean_ori: mx.array) -> Edgels:
         """沿法向对 L_e 做 NMS + 抛物线亚像素插值 (flow.md §1.1)。
         采样复用 EdgePrior 的预计算双线性 gather。"""
@@ -124,14 +148,12 @@ class PerceptualGrouping:
 
         # 去重: NMS 只沿法向比较, 切向相邻像素的亚像素顶点可能落在
         # 几乎同一位置 → 近距离重复对保留强度大者 (强度相同保留下标小者)
-        n = pos.shape[0]
-        d2 = mx.sum((pos[:, None, :] - pos[None, :, :]) ** 2, axis=-1)
-        close = d2 < self.edgel_min_dist**2
-        stronger = (strg[None, :] > strg[:, None]) | (
-            (strg[None, :] == strg[:, None])
-            & (mx.arange(n)[None, :] < mx.arange(n)[:, None])
-        )
-        keep = self.nonzero(~mx.sum(close & stronger, axis=-1).astype(mx.bool_))
+        sl = strg.tolist()
+        drop = [False] * pos.shape[0]
+        for a, b in self.near_pairs(pos, self.edgel_min_dist):
+            # b > a: b 出局 ⇔ 不强于 a (等强度时大下标出局)
+            drop[b if sl[b] <= sl[a] else a] = True
+        keep = mx.array([a for a in range(pos.shape[0]) if not drop[a]], dtype=mx.int32)
         return Edgels(
             pos=pos[keep],
             normal=nrm[keep],
@@ -151,11 +173,10 @@ class PerceptualGrouping:
 
         返回 (i, j, w) 三个 (P,) 数组, i<j。"""
         pos, nrm = ed.pos, ed.normal
-        n = pos.shape[0]
-        d2 = mx.sum((pos[:, None, :] - pos[None, :, :]) ** 2, axis=-1)
-        iu, ju = mx.meshgrid(mx.arange(n), mx.arange(n), indexing="ij")
-        idx = self.nonzero((ju > iu) & (d2 <= self.link_radius**2))
-        i, j = idx // n, idx % n  # (N,N) ij 序扁平化 → 还原 (i,j)
+        pairs = self.near_pairs(pos, self.link_radius)
+        i = mx.array([p[0] for p in pairs], dtype=mx.int32)
+        j = mx.array([p[1] for p in pairs], dtype=mx.int32)
+        d2 = mx.sum((pos[j] - pos[i]) ** 2, axis=-1)  # (P,) 逐对平方距离
 
         xi, xj = pos[i], pos[j]
         ni, nj = nrm[i], nrm[j]
@@ -182,7 +203,7 @@ class PerceptualGrouping:
         # 地板以下的残差视为定位噪声, 不惩罚
         res = mx.maximum(res - self.res_floor, 0.0)
 
-        w = mx.exp(-d2[i, j] / (2.0 * self.sigma_d**2)) * mx.exp(-self.kappa * res)
+        w = mx.exp(-d2 / (2.0 * self.sigma_d**2)) * mx.exp(-self.kappa * res)
         return i, j, w
 
     # ── 3. 轮廓编组: 高亲和链 ──────────────────────────────────────
@@ -216,9 +237,13 @@ class PerceptualGrouping:
             adj.setdefault(a, []).append(b)
             adj.setdefault(b, []).append(a)
 
+        # 从度 1 端点起走: 度 ≤2 的图上单向走法覆盖整条路径, 一条轮廓
+        # 一条链 (从内部节点起走只会走一个方向, 另一臂被拆成第二条链);
+        # 闭环无端点, 第二轮任意起点兜底
         chains: list[mx.array] = []
         seen: set[int] = set()
-        for start in sorted(adj):
+        starts = sorted(n for n in adj if len(adj[n]) == 1)
+        for start in starts + sorted(adj):
             if start in seen:
                 continue
             walk = [start]
