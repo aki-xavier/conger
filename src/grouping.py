@@ -82,13 +82,16 @@ class TJunction(NamedTuple):
 
 
 class GroupingResult(NamedTuple):
-    """组织层输出 (flow.md §1): 2D CGA 直接形式图元 + 偏序约束。"""
+    """组织层输出 (flow.md §1): 2D CGA 直接形式图元 + 偏序约束。
+    circle_params 与 circles 一一对应 ((x,y) 圆心, ρ), 供分割层
+    栅格化用 (blade 本身不反投影)。"""
 
     edgels: Edgels
     chains: list[mx.array]  # 每条链: (L,) int edgel 索引, 沿轮廓有序
     lines: list[Multivector]  # 每链一条 line blade (p1∧p2∧e∞)
     completions: list[tuple[int, int, float]]  # (端点i, 端点j, p(连续))
     circles: list[Multivector]  # 高置信补全弧段的 circle blade (对偶)
+    circle_params: list[tuple[tuple[float, float], float]]  # ((x,y), ρ)
     t_junctions: list[TJunction]  # T 结集合 (遮挡偏序 front≻behind)
 
 
@@ -244,13 +247,19 @@ class PerceptualGrouping:
         路径, 从端点起走出有序序列。"""
         i, j, w = self.affinity(ed)
         # best[side][a] = (b, w_ab): a 沿切向前(0)/后(1)的最佳伙伴
+        # 切向侧判据向量化 (逐对 float 同步是大图瓶颈): 一次批算
+        keep = self.nonzero(w >= self.link_thr)  # MLX 无布尔索引
+        ii, jj = i[keep], j[keep]
+        ww = w[keep]
+        side_a = mx.sum(ed.tangent[ii] * (ed.pos[jj] - ed.pos[ii]), axis=-1)
+        side_b = mx.sum(ed.tangent[jj] * (ed.pos[ii] - ed.pos[jj]), axis=-1)
+        pairs = zip(
+            ii.tolist(), jj.tolist(), ww.tolist(),
+            side_a.tolist(), side_b.tolist(),
+        )
         best: list[dict[int, tuple[int, float]]] = [{}, {}]
-        for a, b, wab in zip(i.tolist(), j.tolist(), w.tolist()):
-            if wab < self.link_thr:
-                continue
-            side_a = float(mx.sum(ed.tangent[a] * (ed.pos[b] - ed.pos[a])))
-            side_b = float(mx.sum(ed.tangent[b] * (ed.pos[a] - ed.pos[b])))
-            for src, dst, side in ((a, b, side_a), (b, a, side_b)):
+        for a, b, wab, sa, sb in pairs:
+            for src, dst, side in ((a, b, sa), (b, a, sb)):
                 s = 0 if side >= 0 else 1
                 cur = best[s].get(src)
                 if cur is None or wab > cur[1]:
@@ -294,35 +303,85 @@ class PerceptualGrouping:
 
     def complete(
         self, ed: Edgels, chains: list[mx.array]
-    ) -> tuple[list[tuple[int, int, float]], list[Multivector]]:
+    ) -> tuple[list[tuple[int, int, float]], list[Multivector], list]:
         """不同链端点两两评估 p(连续|两端几何) —— 同一套邻近性 ×
         共圆残差 (臆造边缘会制造假深度不连续, 故只给概率)。
-        p ≥ complete_thr 的弧段额外输出拟合圆 blade (编组中间产物)。"""
+        p ≥ complete_thr 的弧段额外输出拟合圆 blade 与其参数。"""
         owner = {}
         for cid, ch in enumerate(chains):
             for idx in ch.tolist():
                 owner[idx] = cid
         ends = [int(ch[0]) for ch in chains] + [int(ch[-1]) for ch in chains]
 
+        # 端点对预筛 (MLX 距离矩阵): 只有距离 ≤ gap_max 且异链的对
+        # 才值得做共圆几何 (大图端点上千, 全对 O(E²) 纯 Python 太慢)
+        E_ = len(ends)
+        pts = ed.pos[mx.array(ends)]  # (E,2)
+        d2m = mx.sum((pts[:, None, :] - pts[None, :, :]) ** 2, axis=-1)
+        own = [owner[i] for i in ends]
+        cand: list[tuple[int, int]] = []
+        near = self.nonzero(d2m <= self.gap_max**2)
+        for k in near.tolist():
+            ia, ib = divmod(k, E_)
+            if ia < ib and own[ia] != own[ib]:
+                cand.append((ia, ib))
+
         completions: list[tuple[int, int, float]] = []
         circles: list[Multivector] = []
-        for ia in range(len(ends)):
-            for ib in range(ia + 1, len(ends)):
+        circle_params: list[tuple[tuple[float, float], float]] = []
+        if cand:
+            # 共圆几何批量化 (逐对 pair_geometry 的 MLX 同步是大图瓶颈);
+            # 语义与 pair_geometry 逐字一致 (三分支: 平行/退化/共圆)
+            ia_l = [p[0] for p in cand]
+            ib_l = [p[1] for p in cand]
+            ea = mx.array([ends[k] for k in ia_l])
+            eb = mx.array([ends[k] for k in ib_l])
+            xa, xb = ed.pos[ea], ed.pos[eb]
+            na, nb = ed.normal[ea], ed.normal[eb]
+            d = xb - xa
+            det = na[:, 0] * nb[:, 1] - na[:, 1] * nb[:, 0]
+            safe = mx.where(mx.abs(det) > 1e-9, det, 1.0)
+            t = (d[:, 0] * nb[:, 1] - d[:, 1] * nb[:, 0]) / safe
+            c = xa + t[:, None] * na
+            rho_a = mx.sqrt(mx.sum((c - xa) ** 2, axis=-1))
+            rho_b = mx.sqrt(mx.sum((c - xb) ** 2, axis=-1))
+            sa_ = mx.maximum(rho_a, 1e-9)
+            sj_ = mx.maximum(rho_b, 1e-9)
+            res_c = mx.abs((rho_b**2 - rho_a**2) / (2 * sa_)) + mx.abs(
+                (rho_a**2 - rho_b**2) / (2 * sj_)
+            )
+            res_l = mx.abs(mx.sum(d * na, axis=-1)) + mx.abs(
+                mx.sum(d * nb, axis=-1)
+            )
+            det_ok = mx.abs(det) >= self.det_eps
+            circ_ok = det_ok & (rho_a >= self.rho_min)
+            res_lin = mx.maximum(
+                mx.minimum(res_l, self.res_max) - self.res_floor, 0.0
+            )
+            res_cir = mx.maximum(
+                mx.minimum(res_c, self.res_max) - self.res_floor, 0.0
+            )
+            res_v = mx.where(
+                circ_ok,
+                res_cir,
+                mx.where(det_ok, mx.full_like(res_l, self.res_max), res_lin),
+            )
+            d2_v = d2m[mx.array(ia_l), mx.array(ib_l)]
+            mx.eval(res_v, d2_v, c, rho_a, circ_ok)
+            res_l_ = res_v.tolist()
+            d2_l = d2_v.tolist()
+            circ_l = circ_ok.tolist()
+            for k, (ia, ib) in enumerate(cand):
                 a, b = ends[ia], ends[ib]
-                if owner[a] == owner[b]:
-                    continue
-                d2 = float(mx.sum((ed.pos[b] - ed.pos[a]) ** 2))
-                if d2 > self.gap_max**2:
-                    continue
-                res, circ = self.pair_geometry(ed, a, b)
-                prob = math.exp(-d2 / (2.0 * self.sigma_d**2))
-                prob *= math.exp(-self.kappa * res)
+                prob = math.exp(-d2_l[k] / (2.0 * self.sigma_d**2))
+                prob *= math.exp(-self.kappa * res_l_[k])
                 completions.append((a, b, prob))
-                if prob >= self.complete_thr and circ is not None:
-                    (cx, cy), rho = circ
+                if prob >= self.complete_thr and circ_l[k]:
+                    cx, cy, rho = float(c[k, 1]), float(c[k, 0]), float(rho_a[k])
                     circles.append(Circle((cx, cy, 0.0), rho, (0, 0, 1)))
+                    circle_params.append(((cx, cy), rho))
         completions.sort(key=lambda t: -t[2])
-        return completions, circles
+        return completions, circles, circle_params
 
     def pair_geometry(
         self, ed: Edgels, a: int, b: int
@@ -356,20 +415,89 @@ class PerceptualGrouping:
         候选两个来源 —— 折线直接相交; 链端点沿末端切向的延长线
         (≤ t_radius) 与其他链相交 (真实 T 的竖杠止于遮挡边,
         折线本身不相交)。交叉点处被遮线一侧有支撑一侧无支撑 →
-        T 结与偏序; 两侧皆有支撑 → X 交叉, 不产生偏序。"""
+        T 结与偏序; 两侧皆有支撑 → X 交叉, 不产生偏序。
+
+        全批量实现 (大图实时化): 链对包围盒预筛 / 折线求交 / 支撑
+        统计各为一次 MLX 广播, 无逐对 Python+MLX 同步。
+        精确链长过滤 (按角色): 交点在链上时 (折线求交的两侧 + 射线
+        的 through 侧), stub 需弧长 ≥ t_arm_min+t_span (投影 span ≤
+        弧长, 差值为死区), 短链在数学上不可能出线; 射线的 stub 侧
+        q 在链外 (延长线上), 短链仍可能出线, 不过滤。"""
+        # 弧长 (scatter 一次批算)
+        lens, owns = [], []
+        for cid, ch in enumerate(chains):
+            p = ed.pos[ch]
+            dd = p[1:] - p[:-1]
+            lens.append(mx.sqrt(mx.sum(dd * dd, axis=-1)))
+            owns.append(mx.full((p.shape[0] - 1,), cid, dtype=mx.int32))
+        arc = mx.zeros((len(chains),)).at[mx.concatenate(owns)].add(
+            mx.concatenate(lens)
+        )
+        min_arc = self.t_arm_min + self.t_span
+        active = {i for i, arc_i in enumerate(arc.tolist()) if arc_i >= min_arc}
+
         polylines = [ed.pos[ch] for ch in chains]
+        bboxes = self.chain_bboxes(polylines)
+
+        # 链对预筛 (向量化): 包围盒 (C,4) 广播比较, 上三角提取
+        bb = mx.array(bboxes)
+        n_ch = len(chains)
+        overlap = (
+            (bb[:, None, 2] >= bb[None, :, 0])
+            & (bb[None, :, 2] >= bb[:, None, 0])
+            & (bb[:, None, 3] >= bb[None, :, 1])
+            & (bb[None, :, 3] >= bb[:, None, 1])
+        )
+        pairs = []
+        for k in self.nonzero(overlap).tolist():
+            a, b = divmod(k, n_ch)
+            # 直接相交: q 在两链上, 两侧都须过弧长过滤 (精确)
+            if a < b and a in active and b in active:
+                pairs.append((a, b))
+
+        # 折线求交: 全链段表 + 候选对段索引拼成一次大广播,
+        # 段对顺序 = (链对顺序, 对内 ia 主序) —— 与逐对循环一致
+        off = [0]
+        p1s, d1s = [], []
+        for p in polylines:
+            p1s.append(p[:-1])
+            d1s.append(p[1:] - p[:-1])
+            off.append(off[-1] + p.shape[0] - 1)
+        ia_l, ib_l, pair_of = [], [], []
+        for pi, (a, b) in enumerate(pairs):
+            ma = off[a + 1] - off[a]
+            nb_ = off[b + 1] - off[b]
+            for t in range(ma):
+                ia_l.extend([off[a] + t] * nb_)
+                ib_l.extend(range(off[b], off[b] + nb_))
+                pair_of.extend([pi] * nb_)
         cands: list[tuple[int, int, mx.array]] = []
-        for a in range(len(chains)):
-            for b in range(a + 1, len(chains)):
-                cands += self.polyline_intersections(a, polylines[a], b, polylines[b])
-        cands += self.endpoint_ray_candidates(ed, chains)
+        if ia_l:
+            P1 = mx.concatenate(p1s)
+            D1 = mx.concatenate(d1s)
+            ia_a, ib_a = mx.array(ia_l), mx.array(ib_l)
+            p1, d1 = P1[ia_a], D1[ia_a]
+            p3, d2 = P1[ib_a], D1[ib_a]
+            det = d1[:, 0] * d2[:, 1] - d1[:, 1] * d2[:, 0]
+            safe = mx.where(mx.abs(det) > 1e-9, det, 1.0)
+            d3 = p3 - p1
+            t = (d3[:, 0] * d2[:, 1] - d3[:, 1] * d2[:, 0]) / safe
+            u = (d3[:, 0] * d1[:, 1] - d3[:, 1] * d1[:, 0]) / safe
+            hit = (
+                (mx.abs(det) > 1e-9)
+                & (t >= 0.0)
+                & (t <= 1.0)
+                & (u >= 0.0)
+                & (u <= 1.0)
+            )
+            for k in self.nonzero(hit).tolist():
+                a, b = pairs[pair_of[k]]
+                cands.append((a, b, p1[k] + t[k] * d1[k]))
+        cands += self.endpoint_ray_candidates(ed, chains, bboxes, active)
 
         out: list[TJunction] = []
-        for a, b, q in cands:
-            ta = self.local_tangent(ed, chains[a], q)
-            tb = self.local_tangent(ed, chains[b], q)
-            sa = self.arms(ed, q, ta, chains[a])
-            sb = self.arms(ed, q, tb, chains[b])
+        stats = self._batch_arm_stats(ed, chains, cands)
+        for (a, b, q), (sa, sb) in zip(cands, stats):
             # 通过 = 两臂都有连续支撑 (数量够且延伸够长); 竖杠 =
             # 一侧有真实支撑 (防碎链伪 T), 一侧无支撑
             a_through = all(c >= self.t_support and s >= self.t_span for c, s in sa)
@@ -387,12 +515,120 @@ class PerceptualGrouping:
             # 其余 = X 交叉或伪交叉, 不产生偏序
         return self.dedupe(out)
 
+    def _batch_arm_stats(
+        self, ed: Edgels, chains: list[mx.array], cands: list[tuple[int, int, mx.array]]
+    ) -> list:
+        """逐候选的 (链a双臂, 链b双臂) 支撑统计, 一次批算。
+
+        语义: 切向 = 链上离交点最近 edgel 的切向; 每臂 = (带内·死区
+        外·半径内 edgel 数, 最大延伸)。链点列表零填充对齐 (有效性
+        掩码), (候选 × 链点) 二维广播。"""
+        if not cands:
+            return []
+        lmax = max(int(ch.shape[0]) for ch in chains)
+
+        def pad2(m: mx.array) -> mx.array:
+            """链点/切向列表零填充到 (C, lmax, 2)。"""
+            return mx.stack(
+                [
+                    mx.pad(m[ch], [(0, lmax - int(ch.shape[0])), (0, 0)])
+                    for ch in chains
+                ]
+            )
+
+        pad_pos = pad2(ed.pos)
+        pad_tan = pad2(ed.tangent)
+        valid = mx.stack(
+            [
+                mx.pad(mx.ones((int(ch.shape[0]),)), (0, lmax - int(ch.shape[0])))
+                for ch in chains
+            ]
+        ) > 0.5  # (C, L)
+
+        ca = mx.array([a for a, _, _ in cands])
+        cb = mx.array([b for _, b, _ in cands])
+        q = mx.stack([qq for _, _, qq in cands])  # (K,2)
+        k = len(cands)
+        arange_k = mx.arange(k)
+
+        def side_stats(cc: mx.array):
+            """一侧链的双臂统计: (K,) 链索引 → 每候选 ((c+,s+),(c−,s−))。"""
+            pts = pad_pos[cc]  # (K, L, 2)
+            val = valid[cc]  # (K, L)
+            d2 = mx.sum((pts - q[:, None, :]) ** 2, axis=-1)
+            d2 = mx.where(val, d2, mx.inf)
+            ni = mx.argmin(d2, axis=1)  # 最近 edgel
+            tan = pad_tan[cc][arange_k, ni]  # (K,2)
+            v = pts - q[:, None, :]
+            along = mx.sum(v * tan[:, None, :], axis=-1)  # (K, L)
+            perp = v - along[..., None] * tan[:, None, :]
+            perp = mx.sqrt(mx.sum(perp**2, axis=-1))
+            sel = (perp <= self.t_band) & val
+            sel = sel & (mx.abs(along) >= self.t_arm_min)
+            sel = sel & (mx.abs(along) <= self.t_radius)
+            hit_p = sel & (along > 0)
+            hit_m = sel & (along < 0)
+            a_abs = mx.abs(along)
+            cp = mx.sum(hit_p, axis=1)
+            sp = mx.max(mx.where(hit_p, a_abs, 0.0), axis=1)
+            cm = mx.sum(hit_m, axis=1)
+            sm = mx.max(mx.where(hit_m, a_abs, 0.0), axis=1)
+            return (
+                cp.tolist(),
+                sp.tolist(),
+                cm.tolist(),
+                sm.tolist(),
+            )
+
+        sa_l = side_stats(ca)
+        sb_l = side_stats(cb)
+        return [
+            (
+                ((sa_l[0][i], sa_l[1][i]), (sa_l[2][i], sa_l[3][i])),
+                ((sb_l[0][i], sb_l[1][i]), (sb_l[2][i], sb_l[3][i])),
+            )
+            for i in range(k)
+        ]
+
+    @staticmethod
+    def chain_bboxes(polylines: list[mx.array]) -> list[tuple[float, ...]]:
+        """每条链的包围盒 (rmin, cmin, rmax, cmax), 候选预筛用。"""
+        out = []
+        for p in polylines:
+            lo = mx.min(p, axis=0)
+            hi = mx.max(p, axis=0)
+            out.append((float(lo[0]), float(lo[1]), float(hi[0]), float(hi[1])))
+        return out
+
     def endpoint_ray_candidates(
-        self, ed: Edgels, chains: list[mx.array]
+        self,
+        ed: Edgels,
+        chains: list[mx.array],
+        bboxes: list[tuple[float, ...]],
+        targets: set[int] | None = None,
     ) -> list[tuple[int, int, mx.array]]:
         """链端点延长线候选: 竖杠链端点沿末端段方向延长, 命中其他
-        链的最近交点 (延长 ≤ t_radius) → (遮挡链, 竖杠链, 交点)。"""
+        链的最近交点 (延长 ≤ t_radius) → (遮挡链, 竖杠链, 交点)。
+        全部段打表 (MLX), 全端点一次批算; 包围盒预筛候选段。
+        targets: 可作为命中目标的链 (through 侧需过弧长过滤);
+        stub 侧遍历全部链 (q 在链外, 短链仍可能出线)。"""
+        # 段表: P1 (M,2), D1 (M,2), OWN (M,) 段所属链 (原始 id)
+        p1s, d1s, owners = [], [], []
+        for cid, ch in enumerate(chains):
+            if targets is not None and cid not in targets:
+                continue
+            pa = ed.pos[ch]
+            p1s.append(pa[:-1])
+            d1s.append(pa[1:] - pa[:-1])
+            owners.append(mx.full((pa.shape[0] - 1,), cid, dtype=mx.int32))
+        P1 = mx.concatenate(p1s)
+        D1 = mx.concatenate(d1s)
+        OWN = mx.concatenate(owners)
+        bb = mx.array(bboxes)  # (C,4)
+
         out: list[tuple[int, int, mx.array]] = []
+        # 端点表: 每链两个端点的位置/外指切向/归属链
+        es, ts, es_own = [], [], []
         for b, ch in enumerate(chains):
             ends = (
                 (ed.pos[ch[0]], ed.pos[ch[0]] - ed.pos[ch[1]]),
@@ -402,75 +638,43 @@ class PerceptualGrouping:
                 norm = float(mx.sqrt(mx.sum(d_out**2)))
                 if norm < 1e-9:
                     continue
-                t_out = d_out / norm
-                hit: tuple[float, int, mx.array] | None = None
-                for a, other in enumerate(chains):
-                    if a == b:
-                        continue
-                    pa = ed.pos[other]
-                    for ia in range(pa.shape[0] - 1):
-                        p1, p2 = pa[ia], pa[ia + 1]
-                        d1 = p2 - p1
-                        det = float(t_out[0] * d1[1] - t_out[1] * d1[0])
-                        if abs(det) < 1e-9:
-                            continue
-                        de = p1 - e
-                        s = float(de[0] * d1[1] - de[1] * d1[0]) / det
-                        u = float(de[0] * t_out[1] - de[1] * t_out[0]) / det
-                        if 0.0 <= s <= self.t_radius and 0.0 <= u <= 1.0:
-                            if hit is None or s < hit[0]:
-                                hit = (s, a, e + s * t_out)
-                if hit is not None:
-                    out.append((hit[1], b, hit[2]))
+                es.append(e)
+                ts.append(d_out / norm)
+                es_own.append(b)
+        if not es:
+            return out
+        Ee = mx.stack(es)  # (E,2)
+        T = mx.stack(ts)  # (E,2)
+        EO = mx.array(es_own)  # (E,)
+        # 全端点 × 全段 一次批算 (大图下逐端点批算的启动开销是瓶颈)
+        R = self.t_radius
+        det = T[:, None, 0] * D1[None, :, 1] - T[:, None, 1] * D1[None, :, 0]
+        safe = mx.where(mx.abs(det) > 1e-9, det, 1.0)
+        de = P1[None, :, :] - Ee[:, None, :]  # (E,M,2)
+        s = (de[..., 0] * D1[None, :, 1] - de[..., 1] * D1[None, :, 0]) / safe
+        u = (de[..., 0] * T[:, None, 1] - de[..., 1] * T[:, None, 0]) / safe
+        cand = (
+            (OWN[None, :] != EO[:, None])
+            & (bb[OWN, 0][None, :] <= Ee[:, None, 0] + R)
+            & (bb[OWN, 2][None, :] >= Ee[:, None, 0] - R)
+            & (bb[OWN, 1][None, :] <= Ee[:, None, 1] + R)
+            & (bb[OWN, 3][None, :] >= Ee[:, None, 1] - R)
+        )
+        hit = (
+            cand
+            & (mx.abs(det) > 1e-9)
+            & (s >= 0.0)
+            & (s <= R)
+            & (u >= 0.0)
+            & (u <= 1.0)
+        )
+        smin = mx.where(hit, s, mx.inf).min(axis=1)  # (E,) 最近命中
+        kmin = mx.where(hit, s, mx.inf).argmin(axis=1)
+        for ei in range(len(es)):
+            if not bool(mx.isinf(smin[ei])):
+                k = int(kmin[ei])
+                out.append((int(OWN[k]), es_own[ei], Ee[ei] + s[ei, k] * T[ei]))
         return out
-
-    def polyline_intersections(
-        self, a: int, pa: mx.array, b: int, pb: mx.array
-    ) -> list[tuple[int, int, mx.array]]:
-        """两折线的线段求交 (参数式 t,u ∈ [0,1])。"""
-        out = []
-        for ia in range(pa.shape[0] - 1):
-            p1, p2 = pa[ia], pa[ia + 1]
-            d1 = p2 - p1
-            for ib in range(pb.shape[0] - 1):
-                p3, p4 = pb[ib], pb[ib + 1]
-                d2 = p4 - p3
-                det = float(d1[0] * d2[1] - d1[1] * d2[0])
-                if abs(det) < 1e-9:
-                    continue
-                d3 = p3 - p1
-                t = float(d3[0] * d2[1] - d3[1] * d2[0]) / det
-                u = float(d3[0] * d1[1] - d3[1] * d1[0]) / det
-                if 0.0 <= t <= 1.0 and 0.0 <= u <= 1.0:
-                    out.append((a, b, p1 + t * d1))
-        return out
-
-    @staticmethod
-    def local_tangent(ed: Edgels, chain: mx.array, q: mx.array) -> mx.array:
-        """链上离 q 最近的 edgel 的切向。"""
-        d = mx.sum((ed.pos[chain] - q) ** 2, axis=-1)
-        return ed.tangent[chain[int(mx.argmin(d))]]
-
-    def arms(
-        self, ed: Edgels, q: mx.array, direction: mx.array, chain: mx.array
-    ) -> tuple[tuple[int, float], tuple[int, float]]:
-        """链 edgel 在 ±臂的支撑 (带内, 死区外): 每臂 (数量, 最大延伸)。"""
-        v = ed.pos[chain] - q
-        along = mx.sum(v * direction, axis=-1)
-        perp = v - along[:, None] * direction
-        perp = mx.sqrt(mx.sum(perp**2, axis=-1))
-        band = perp <= self.t_band
-        far = mx.abs(along) >= self.t_arm_min
-        near = mx.abs(along) <= self.t_radius
-
-        def stat(sel: mx.array) -> tuple[int, float]:
-            """单臂支撑统计: (带内 edgel 数, 最大延伸)。"""
-            hit = band & far & near & sel
-            n = int(mx.sum(hit))
-            span = float(mx.max(mx.where(hit, mx.abs(along), 0.0)))
-            return n, span
-
-        return stat(along > 0), stat(along < 0)
 
     @staticmethod
     def dedupe(junctions: list[TJunction], radius: float = 3.0) -> list[TJunction]:
@@ -495,7 +699,7 @@ class PerceptualGrouping:
         for ch in chains:
             p1, p2 = ed.cga_point(int(ch[0])), ed.cga_point(int(ch[-1]))
             lines.append(Line(p1, p2))
-        completions, circles = self.complete(ed, chains)
+        completions, circles, circle_params = self.complete(ed, chains)
         t_junctions = self.detect_t_junctions(ed, chains)
         return GroupingResult(
             edgels=ed,
@@ -503,6 +707,7 @@ class PerceptualGrouping:
             lines=lines,
             completions=completions,
             circles=circles,
+            circle_params=circle_params,
             t_junctions=t_junctions,
         )
 

@@ -526,18 +526,52 @@ class VBGMM:
         sim = sim.at[:-1].add(down).at[1:].add(down)
         return sim / 4.0
 
+    @staticmethod
+    def _hsv_palette(k: int, s: float = 0.75, v: float = 0.95) -> mx.array:
+        """黄金比散色调色板 (K,3): h = (i·φ)%1, HSV→RGB 标准分段。"""
+        h = (mx.arange(k, dtype=mx.float32) * 0.6180339887) % 1.0
+        f = h * 6.0 % 1.0
+        sec = (h * 6.0).astype(mx.int32) % 6
+        p = v * (1.0 - s)
+        q = v * (1.0 - s * f)
+        t = v * (1.0 - s * (1.0 - f))
+
+        def pick(vals: list) -> mx.array:
+            """按扇区从 6 个候选值中选择 (标量广播, 数组逐像素)。"""
+            out = mx.full_like(h, vals[0]) if isinstance(vals[0], float) else vals[0]
+            for si in range(1, 6):
+                vi = vals[si]
+                vi = mx.full_like(h, vi) if isinstance(vi, float) else vi
+                out = mx.where(sec == si, vi, out)
+            return out
+
+        r = pick([v, q, p, p, t, v])
+        g = pick([t, v, v, q, p, p])
+        b = pick([p, p, t, v, v, q])
+        return mx.stack([r, g, b], axis=-1)
+
+    def soft_colors(self, shape: tuple[int, int]):
+        """软聚类混色图 (H,W,3): 每个分量一个黄金比散色 (相邻下标
+        色相不相邻, K 大时仍可辨), 像素色 = Σ_k r_nk·color_k ——
+        r 混合处 (边缘/边界像素) 自然呈现多簇颜色的混合。"""
+        pal = self._hsv_palette(self.k_max)  # (K,3)
+        rgb = self.r @ pal  # type: ignore  # (N,3)
+        return rgb.reshape(shape[0], shape[1], 3)
+
     def visualize_maps(self, img, shape, out_path: str | Path):
-        """原图/边缘似然/纹理似然/硬标签/软边界 五联图保存。"""
+        """原图/边缘似然/纹理似然/硬标签/软聚类混色/软边界 六联图保存。"""
         h, w = shape
         edge = self.class_likelihood("edge").reshape(h, w)
         tex = self.class_likelihood("texture").reshape(h, w)
         labs = self.labels().reshape(h, w).astype(mx.float32)
+        soft = self.soft_colors(shape)
         bnd = 1.0 - self.neighbor_similarity(self.r, shape)
         plots = [
             ("original", "gray", img),
             ("edge likelihood", "gray", edge),
             ("texture likelihood", "gray", tex),
             ("labels", "tab10", labs),
+            ("soft clusters (r@palette)", None, soft),
             ("1 − neighbor sim", "gray", bnd),
         ]
         fig = Utils.visualize(plots)

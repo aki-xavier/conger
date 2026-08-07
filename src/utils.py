@@ -60,8 +60,9 @@ class Utils:
         return best
 
     @staticmethod
-    def visualize(plots: list[tuple[str, str, mx.array]]):
-        """多面板拼图: (标题, colormap, 数据) 列表 → matplotlib fig。"""
+    def visualize(plots: list[tuple[str, str | None, mx.array]]):
+        """多面板拼图: (标题, colormap, 数据) 列表 → matplotlib fig。
+        cmap=None 表示 RGB 图 (不配 colorbar)。"""
         rows, cols = Utils.grid_shape(len(plots))
         fig, axes = plt.subplots(
             rows, cols, squeeze=False, figsize=(cols * 2.2, rows * 2.2)
@@ -78,7 +79,8 @@ class Utils:
                 title, cmap, data = plots[idx]
                 im = ax.imshow(data, cmap=cmap)
                 ax.set_title(title, fontsize=9)
-                fig.colorbar(im, ax=ax, fraction=0.046, pad=0.04)
+                if cmap is not None:  # RGB 图 (cmap=None) 不配 colorbar
+                    fig.colorbar(im, ax=ax, fraction=0.046, pad=0.04)
 
         return fig
 
