@@ -81,14 +81,28 @@ class RealtimePipeline:
         with_segment: bool = True,
         loop: bool = False,
         depth0: mx.array | None = None,
+        hs0: mx.array | None = None,
     ):
         """首帧冷启动 (全量拟合) 并提交后台; ρ = online 遗忘因子。
         with_segment: 后台链路是否延伸到分割层 (SceneSegmenter)。
         loop: 是否接真闭环 (temporal/fusion/scenegraph 挂后台钩子);
-        depth0: 闭环的引导深度 (集成测试的离线勘测初值)。"""
+        depth0: 闭环的引导深度 (集成测试的离线勘测初值)。
+        hs0: (H,W) 复数色相通道 (Color.split_dual_path 的 HS 支路)
+        —— 双通路 = 分别建模: L/HS 各自 VBGMM, 似然级概率 OR 融合
+        (特征级合并会稀释色相反差且丢通路出身, 2026-08-08 实验定)。"""
         self.rw = RieszWavelet(img0)
         feat = self.rw.features()
+        self.hs = hs0
         self.gm = VBGMM(VBGMM.feature_matrix(feat), k_max=k_max)
+        self.gm_hs = (
+            VBGMM(
+                VBGMM.hs_feature_matrix(hs0).reshape(-1, 7),
+                k_max=min(k_max, 32),  # HS 分量数定边界带隔离 (实测
+                # k=8 稀释到 0.04, k=32 → 0.50; 色度场景通常比 L 简单)
+            )
+            if hs0 is not None
+            else None
+        )
         self.prior = EdgePrior()
         self.rho = rho
         self._ls = LoopState(img0.shape, depth0) if loop else None
@@ -228,19 +242,37 @@ class RealtimePipeline:
         app: [强度, 边缘似然, 纹理似然] 表观图 —— 链/区域匹配的
         不变性项 (prior.md 运动与时间先验)。"""
         enh = self.prior.enhance(like, feat, self.rw)
-        tex = self.gm.class_likelihood("texture").reshape(like.shape)
+        tex = self.gm.class_likelihood("texture")
+        if self.gm_hs is not None:
+            # 色度纹理同边缘一样概率 OR 融合 (否则色度光栅不进分割层)
+            tex_h = self.gm_hs.class_likelihood("texture")
+            tex = 1 - (1 - tex) * (1 - tex_h)
+        tex = tex.reshape(like.shape)
         app = mx.stack([self.rw.img, like, tex], axis=-1)
         self.tracker.submit(enh, feat.mean_ori, like, tex, app=app)
         return enh
 
-    def step(self, img: mx.array) -> FrameOut:
-        """一帧: 特征刷新 → online_update → 边缘似然 → 增强 → 提交后台。"""
+    def step(self, img: mx.array, hs: mx.array | None = None) -> FrameOut:
+        """一帧: 特征刷新 → online_update → 边缘似然 → 增强 → 提交后台。
+        hs: 本帧色相通道 (双通路; 首帧给了 hs0 则每帧都须给)。"""
         t0 = time.perf_counter()
         self.rw.update(img)
         feat = self.rw.features()
+        if hs is not None:
+            self.hs = hs
         x = VBGMM.feature_matrix(feat)
         r = self.gm.online_update(x, rho=self.rho)
-        like = self.gm.class_likelihood("edge", x=x, r=r).reshape(img.shape)
+        like = self.gm.class_likelihood("edge", x=x, r=r)
+        if self.gm_hs is not None:
+            # 分别建模: HS 独立 online, 似然级概率 OR 融合。
+            # 饱和度门控: S→0 处色相无意义 (灰区色度噪声被 riesz
+            # 放大成伪边, 实测 12.png T 结 256→113), 乘 |hs| 抑制
+            x_hs = VBGMM.hs_feature_matrix(self.hs).reshape(-1, 7)
+            r_h = self.gm_hs.online_update(x_hs, rho=self.rho)
+            like_h = self.gm_hs.class_likelihood("edge", x=x_hs, r=r_h)
+            like_h = like_h * mx.abs(self.hs).reshape(-1)
+            like = 1 - (1 - like) * (1 - like_h)
+        like = like.reshape(img.shape)
         enh = self._submit(like, feat)
         mx.eval(enh)
         return FrameOut(like, enh, 1000 * (time.perf_counter() - t0))
@@ -300,6 +332,24 @@ if __name__ == "__main__":
     stable = [t for t in first if all(t in ts for ts in tid_seq[1:])]
     assert stable, f"无跨帧稳定链: {tid_seq}"
     print(f"跟踪: 弱边缘新位置 {weak_new:.2f} > 旧位置 {weak_old:.2f} ✓")
+
+    # ── 双通路冒烟: 彩色帧管线端到端 (hs0/step(hs) 接线) ──────────
+    from color import Color
+
+    rgb0 = mx.zeros((64, 96, 3))
+    rgb0 = rgb0.at[:, :48].add(mx.array([1.0, 0.0, 0.0]))
+    rgb0 = rgb0.at[:, 48:].add(mx.array([0.0, 1.0, 0.0]))
+    rgb0 = rgb0 + mx.random.normal((64, 96, 3), key=mx.random.key(9)) * 0.01
+    lum0, hs_0 = Color.split_dual_path(mx.clip(rgb0, 0.0, 1.0))
+    pipe_c = RealtimePipeline(lum0, k_max=16, hs0=hs_0, with_segment=False)
+    rgb1 = mx.roll(rgb0, 2, axis=1)
+    lum1, hs_1 = Color.split_dual_path(mx.clip(rgb1, 0.0, 1.0))
+    out_c = pipe_c.step(lum1, hs=hs_1)
+    assert out_c.like.shape == (64, 96)
+    tr_c = pipe_c.tracker.wait_next(timeout=60.0)
+    assert tr_c is not None
+    pipe_c.close()
+    print("双通路冒烟: 彩色帧端到端 (separate 双模型 + OR 融合) ✓")
     print(f"链 id: 稳定 tid {stable}, tid 序列 {tid_seq}")
 
     # ── 真闭环: temporal/fusion/scenegraph 进管线 ───────────────────

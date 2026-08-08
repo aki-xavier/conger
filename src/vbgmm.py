@@ -16,7 +16,8 @@ from utils import Utils
 # 模块流程:
 #
 #   RieszWavelet.features() (7 维特征图)
-#        │  feature_matrix(): 摊平成 (N,7), 列序由 FEAT_NAMES 定
+#        │  feature_matrix(): 摊平成 (N,7), 列序由 FEAT_NAMES 定;
+#        │  双通路给 hs 复数色相通道 → 追加三列 (N,10)
 #        ▼
 #   __post_init__: z-score 标准化 (mu/sd)
 #        │
@@ -152,11 +153,39 @@ class VBGMM:
 
     # ── 特征图 → 特征矩阵 (本模块按需组装) ─────────────────────────
 
+    HS_FEAT_NAMES: ClassVar[list[str]] = list(
+        ["log_mag", "slope", "resid", "bump", "spread", "ori_R", "phase_coh"]
+    )  # HS 支路与 L 同构 (同名谱特征, 证据规则直接复用)
+
+    @staticmethod
+    def hs_feature_matrix(hs: mx.array) -> mx.array:
+        """HS 复数色相通道 → (H,W,7) 谱特征 (与 L 支路同构)。
+        Re/Im 各跑一遍 riesz, 逐特征图按通道能量加权合并 ——
+        判别实验 (2026-08-08): 原始值+梯度 3 列版把等亮度色度
+        光栅误报为边缘 (0.493) 且无纹理证据机制; 7 列谱特征版
+        纹理分类 1.000 / 边缘 0.000。色度支路需要同样的谱描述。
+        成本: 两次 riesz (色度分辨率本可降采样, 留作优化钩)。"""
+        f_re = RieszWavelet(mx.real(hs)).features()
+        f_im = RieszWavelet(mx.imag(hs)).features()
+        w_re = mx.exp(f_re.log_mag)
+        w_im = mx.exp(f_im.log_mag)
+        wsum = w_re + w_im + 1e-12
+        cols = []
+        for name in VBGMM.HS_FEAT_NAMES:
+            key = "residual" if name == "resid" else name
+            a = getattr(f_re, key)
+            b = getattr(f_im, key)
+            cols.append((a * w_re + b * w_im) / wsum)
+        return mx.stack(cols, axis=-1)
+
     @staticmethod
     def feature_matrix(feat: FeatureMaps) -> mx.array:
         """rw.features() 的逐像素特征图 → (N,7) 特征矩阵 (未标准化)。
         选哪几列、什么顺序由本模块按 FEAT_NAMES 决定; 列名 resid
-        对应特征图 residual。"""
+        对应特征图 residual。
+        HS 色度支路不并入此矩阵 (特征级合并稀释色相反差且丢通路
+        出身, 2026-08-08 实验定) —— 用 hs_feature_matrix 建独立
+        模型, 似然级融合。"""
         cols = [
             feat.log_mag,
             feat.slope,
@@ -166,7 +195,7 @@ class VBGMM:
             feat.ori_R,
             feat.phase_coh,
         ]
-        return mx.stack(cols, axis=-1).reshape(-1, 7)
+        return mx.stack(cols, axis=-1).reshape(feat.log_mag.size, 7)
 
     def __post_init__(self):
         """标准化并拟合 (冷启动可选 α0 网格), 再导出混合权重与
@@ -453,8 +482,10 @@ class VBGMM:
         bump 居中, spread 小)。注意 ori_R 不能用: 平坦区的能量是
         边缘泄漏, 方向天然相干, ori_R 分不开; phase_coh 在增益控制
         后才是最强判别 (边缘 ≈0.55, 平坦 ≈0.17, 纹理 ≈0.34)。
-        逐像素特征不会被责任混合稀释, 分量均值才会。"""
+        逐像素特征不会被责任混合稀释, 分量均值才会。
+        L/HS 两通路各自独立建模 (separate), 证据规则两模型通用。"""
         x = self.x_orig if x is None else x
+        assert x is not None, "未拟合且未传 x"
         f = {name: x[:, i] for i, name in enumerate(self.FEAT_NAMES)}  # type: ignore
         if cls == "edge":
             thr = self.phase_coh_thr(f["phase_coh"])
@@ -615,7 +646,7 @@ class VBGMM:
         z = (self.x_orig - self.mu) / self.sd  # type: ignore
         nk, xbar, s = self.stats(z, self.r)  # type: ignore
         w = nk / mx.sum(nk)
-        alive = self.nonzero(w > 1e-3).tolist()
+        alive = Utils.nonzero(w > 1e-3).tolist()
 
         # 活跃分量的 (μ, Σ, 质量) —— z 空间
         mus = [xbar[j] for j in alive]
@@ -624,15 +655,12 @@ class VBGMM:
         groups = [[i] for i in range(len(alive))]  # 宏簇 → 活跃下标
 
         def bhatt(m1, c1, m2, c2) -> float:
-            """两高斯的 Bhattacharyya 距离。"""
-            cb = (c1 + c2) * 0.5
-            dm = (m1 - m2)[:, None]
-            t1 = float(dm.T @ mx.linalg.inv(cb, stream=mx.cpu) @ dm) / 8.0
-            t2 = 0.5 * (
-                self.logdet_spd(cb)
-                - 0.5 * (self.logdet_spd(c1) + self.logdet_spd(c2))
+            """两高斯的 Bhattacharyya 距离 (utils 共享实现)。"""
+            return float(
+                Utils.bhatt(
+                    m1[None], c1[None], m2[None], c2[None]
+                )[0]
             )
-            return t1 + t2
 
         while len(groups) > k_macro:
             # 找 d_B 最小的一对
@@ -672,14 +700,6 @@ class VBGMM:
                 key=lambda g: bhatt(xbar[j], s[j], mus[g], covs[g]),
             )
         return mx.array(out, dtype=mx.int32)
-
-    @staticmethod
-    def nonzero(sel: mx.array) -> mx.array:
-        """布尔掩码 → 扁平索引 (MLX 无布尔索引, argsort 技巧)。"""
-        flat = sel.reshape(-1)
-        k = int(mx.sum(flat))
-        key = mx.where(flat, mx.arange(flat.shape[0]), flat.shape[0])
-        return mx.argsort(key)[:k]
 
     def soft_colors(self, shape: tuple[int, int]):
         """软聚类混色图 (H,W,3): 每个分量一个黄金比散色 (相邻下标
@@ -759,6 +779,61 @@ if __name__ == "__main__":
     path = Utils.project_root() / "artifacts/vbgmm_synth.png"
     gm.visualize_maps(img, (H, W), path)
     print(path)
+
+    # ── 双通路: 等亮度红绿边 (L 支路不可见, HS 支路检出) ──────────
+    from color import Color
+
+    red = mx.array([1.0, 0.0, 0.0])
+    grn = mx.array([0.0, 0.5094, 0.0])  # Rec601 亮度均 0.299 → 等亮度边
+    rgb_c = mx.concatenate(
+        [mx.broadcast_to(red, (H, W // 2, 3)),
+         mx.broadcast_to(grn, (H, W // 2, 3))],
+        axis=1,
+    )
+    lum, hs_c = Color.split_dual_path(rgb_c)
+    # 微噪声防奇异 (恒定特征 → 协方差奇异 → eigh C++ 层 terminate)
+    lum = lum + mx.random.normal((H, W), key=mx.random.key(5)) * 0.003
+    assert float(mx.max(mx.abs(lum - 0.299))) < 0.02, "等亮度前提"
+    feat_c = RieszWavelet(lum).features()
+    gm_g = VBGMM(VBGMM.feature_matrix(feat_c), k_max=8)
+    like_g = gm_g.edge_likelihood((H, W))
+    # separate 模式: HS 独立模型 + 似然级概率 OR 融合
+    gm_h = VBGMM(VBGMM.hs_feature_matrix(hs_c).reshape(-1, 7), k_max=32)
+    # k_max 不能小: 边界带只有 ~3% 质量, 分量不足会被红/绿簇
+    # 稀释 (k=8 → 0.04, k=32 → 0.50, 实测)
+    like_h = gm_h.edge_likelihood((H, W))
+    like_d = 1 - (1 - like_g) * (1 - like_h)
+    bnd_g = float(like_g[:, 126:130].mean())
+    bnd_d = float(like_d[:, 126:130].mean())
+    int_d = float(like_d[:, :100].mean())
+    assert bnd_g < 0.1, f"灰度支路应看不见等亮度边: {bnd_g:.3f}"
+    assert bnd_d > 5 * max(int_d, 1e-3) and bnd_d > 0.1, (
+        f"HS 支路应检出: 边界 {bnd_d:.3f} vs 内部 {int_d:.3f}"
+    )
+    print(f"双通路: 等亮度边 灰度={bnd_g:.3f}(盲) 双通路={bnd_d:.3f} "
+          f"(内部 {int_d:.3f}) ✓")
+
+    # ── 色度纹理: 等亮度色度光栅应被分类为纹理 (HS 谱特征的意义) ──
+    phase_g = 0.5 + 0.5 * mx.sin(2 * mx.pi * mx.arange(W)[None, :] / 8.0)
+    hue_g = phase_g * (1.0 / 3.0) * mx.ones((H, 1))
+    inb_g = ((mx.arange(W)[None, :] >= 64) & (mx.arange(W)[None, :] < 192))
+    sat_g = inb_g.astype(mx.float32) * 0.9 * mx.ones((H, 1))
+    hsl_g = mx.stack([hue_g, sat_g, mx.full((H, W), 0.5)], axis=-1)
+    rgb_g = Color.hsl_to_rgb(hsl_g)
+    rgb_g = mx.clip(
+        rgb_g + mx.random.normal((H, W, 3), key=mx.random.key(11)) * 0.005,
+        0.0, 1.0,
+    )
+    _, hs_g = Color.split_dual_path(rgb_g)
+    x7 = VBGMM.hs_feature_matrix(hs_g).reshape(-1, 7)
+    gm_7 = VBGMM(x7, k_max=16)
+    tex7 = float(gm_7.class_likelihood("texture").reshape(H, W)[:, 100:150].mean())
+    ed7 = float(gm_7.class_likelihood("edge").reshape(H, W)[:, 100:150].mean())
+    assert tex7 > 0.5 and ed7 < 0.2, (
+        f"色度光栅应判为纹理: tex={tex7:.2f} edge={ed7:.2f}"
+    )
+    print(f"色度纹理: 等亮度光栅 tex={tex7:.2f} edge={ed7:.2f} "
+          f"(3列原始值版曾误报 edge=0.49) ✓")
 
     # ── natural image (慢: 冷启动拟合 ~10-25s, 默认注释; 全量验证时放开) ──
     # im = Image.open(Utils.project_root() / "images/12.png").convert("L")

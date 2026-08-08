@@ -67,19 +67,6 @@ class EdgePrior:
     # ── 方向场采样与传播原语 ──────────────────────────────────────
 
     @staticmethod
-    def grid(shape: tuple[int, ...]) -> tuple[mx.array, mx.array]:
-        """(row, col) 坐标网格, 尾部维度广播。"""
-        yy, xx = mx.meshgrid(
-            mx.arange(shape[0], dtype=mx.float32),
-            mx.arange(shape[1], dtype=mx.float32),
-            indexing="ij",
-        )
-        while yy.ndim < len(shape):
-            yy = yy[..., None]
-            xx = xx[..., None]
-        return yy, xx
-
-    @staticmethod
     def precomp_gather(
         shape: tuple[int, ...],
         dy: mx.array,
@@ -175,7 +162,7 @@ class EdgePrior:
         本来就判非边缘), 传播不重复发明惩罚机制。
         max|Δout| < eps 时提前退出 (定点收敛, 通常末轮才触发)。
         """
-        yy, xx = EdgePrior.grid(like.shape)
+        yy, xx = Utils.grid(like.shape)
         ang = normal + math.pi / 2.0  # 切向
         dy, dx = mx.sin(ang), mx.cos(ang)
         sides = []
@@ -215,7 +202,7 @@ class EdgePrior:
         门控: 聚类回答 "是不是边缘", 能量剖面回答 "精确在哪"。
         必须在切向增强之后做 (先抬线再瘦线, 不会误杀弱边缘)。
         """
-        yy, xx = EdgePrior.grid(like.shape)
+        yy, xx = Utils.grid(like.shape)
         gp = EdgePrior.precomp_gather(
             like.shape, mx.sin(normal), mx.cos(normal), yy, xx
         )

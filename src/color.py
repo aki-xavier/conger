@@ -231,6 +231,20 @@ class Color:
         return sat * mx.exp(1j * hue)
 
     @staticmethod
+    def split_dual_path(rgb_image: mx.array) -> tuple[mx.array, mx.array]:
+        """双通路分解 (prior.md 色相线索的载体): RGB → (L, HS)。
+        L: 实数亮度通路 = Rec601 加权 (0.299/0.587/0.114, 与 PIL
+        convert("L") 一致 —— HSL 的 (max+min)/2 会压缩中间调对比度,
+        实测 12.png 在其下 τ=0.5 只剩 1 个区域);
+        HS: 复数色相通路 S·e^{iH·2π} (进 vbgmm 特征追加列)。"""
+        lum = (
+            0.299 * rgb_image[..., 0]
+            + 0.587 * rgb_image[..., 1]
+            + 0.114 * rgb_image[..., 2]
+        )
+        return lum, Color.hsl_to_complex(Color.rgb_to_hsl(rgb_image))
+
+    @staticmethod
     def gray_world_wb(rgb_image: mx.array) -> mx.array:
         """灰度世界白平衡 (prior.md 光学先验: 白平衡/光源颜色恒常性,
         Land & McCann Retinex 的工程形): 假设场景平均反射率为中性灰,

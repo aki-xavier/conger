@@ -27,6 +27,7 @@ import mlx.core as mx
 
 from cga import Motor
 from edgemap import EdgePrior
+from utils import Utils
 
 
 def xi_to_motor(xi: mx.array) -> Motor:
@@ -141,7 +142,7 @@ class MotionCompensation:
         t = [hm[0][3], hm[1][3], hm[2][3]]
         rt = [[r[j][i] for j in range(3)] for i in range(3)]
         tinv = [-sum(rt[i][j] * t[j] for j in range(3)) for i in range(3)]
-        yy, xx = EdgePrior.grid(field.shape)
+        yy, xx = Utils.grid(field.shape)
         z = depth
         # 源位置 = M⁻¹ · (x, y, depth)
         sx = rt[0][0] * xx + rt[0][1] * yy + rt[0][2] * z + tinv[0]

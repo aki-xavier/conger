@@ -17,6 +17,53 @@ class Utils:
         return Path(__file__).resolve().parent.parent
 
     @staticmethod
+    def nonzero(sel: mx.array) -> mx.array:
+        """布尔掩码 → 扁平索引 (MLX 无布尔索引, argsort 技巧:
+        选中位给原下标, 未选中给 N, 升序排序后前 k 个即索引)。"""
+        flat = sel.reshape(-1)
+        k = int(mx.sum(flat))
+        key = mx.where(flat, mx.arange(flat.shape[0]), flat.shape[0])
+        return mx.argsort(key)[:k]
+
+    @staticmethod
+    def grid(shape: tuple[int, ...]) -> tuple[mx.array, mx.array]:
+        """(row, col) 坐标网格, 尾部维度广播。"""
+        yy, xx = mx.meshgrid(
+            mx.arange(shape[0], dtype=mx.float32),
+            mx.arange(shape[1], dtype=mx.float32),
+            indexing="ij",
+        )
+        while yy.ndim < len(shape):
+            yy = yy[..., None]
+            xx = xx[..., None]
+        return yy, xx
+
+    @staticmethod
+    def logdet_spd(a: mx.array) -> mx.array:
+        """ln|A|, 对称正定 (eigh 路径; 支持 (...,d,d) 批量 → (...))。
+        特征值钳底 1e-12, 返回非精确值。"""
+        ev = mx.linalg.eigh(a, stream=mx.cpu)[0]
+        return mx.sum(mx.log(mx.maximum(ev, 1e-12)), axis=-1)
+
+    @staticmethod
+    def bhatt(
+        m1: mx.array, c1: mx.array, m2: mx.array, c2: mx.array
+    ) -> mx.array:
+        """K 组 (μ,Σ) 对单候选的 Bhattacharyya 距离 (批量):
+        d_B = ⅛ΔμᵀΣ̄⁻¹Δμ + ½ln(detΣ̄/√(detΣᵢ·detΣⱼ))。
+        m1 (K,P), c1 (K,P,P), m2 (P,), c2 (P,P) → (K,)。"""
+        dim = c1.shape[-1]
+        cb = (c1 + c2) * 0.5
+        inv = mx.linalg.inv(cb + 1e-9 * mx.eye(dim), stream=mx.cpu)
+        dm = (m1 - m2)[:, :, None]  # (K,P,1)
+        t1 = (dm.transpose(0, 2, 1) @ inv @ dm)[:, 0, 0] / 8.0
+        t2 = 0.5 * (
+            Utils.logdet_spd(cb)
+            - 0.5 * (Utils.logdet_spd(c1) + Utils.logdet_spd(c2))
+        )
+        return t1 + t2
+
+    @staticmethod
     def fftfreq(n: int) -> mx.array:
         """np.fft.fftfreq(n) 的 MLX 版, 单位 cycles/sample (Nyquist = 0.5)。"""
         k = mx.arange(n, dtype=mx.float32)

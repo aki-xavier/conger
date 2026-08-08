@@ -47,7 +47,7 @@ import threading
 import time
 from dataclasses import dataclass
 from pathlib import Path
-from typing import NamedTuple
+from typing import TYPE_CHECKING, NamedTuple
 
 import matplotlib.pyplot as plt
 import mlx.core as mx
@@ -55,8 +55,10 @@ import mlx.core as mx
 from cga import Circle
 from cga.multivector import Multivector
 from edgemap import EdgePrior
-from segment import SegmentResult
 from utils import Utils
+
+if TYPE_CHECKING:
+    from segment import SegmentResult  # 仅类型注解, 运行时零依赖
 
 
 class Edgels(NamedTuple):
@@ -133,14 +135,6 @@ class PerceptualGrouping:
     # ── 1. edgel 提取与提升 ────────────────────────────────────────
 
     @staticmethod
-    def nonzero(sel: mx.array) -> mx.array:
-        """布尔掩码 → 扁平索引 (MLX 无布尔索引, argsort 技巧:
-        选中位给原下标, 未选中给 N, 升序排序后前 k 个即索引)。"""
-        flat = sel.reshape(-1)
-        k = int(mx.sum(flat))
-        key = mx.where(flat, mx.arange(flat.shape[0]), flat.shape[0])
-        return mx.argsort(key)[:k]
-
     @staticmethod
     def near_pairs(pos: mx.array, radius: float) -> list[tuple[int, int]]:
         """网格桶找距离 ≤ radius 的候选对 (i<j), 避免 N×N 距离矩阵
@@ -168,7 +162,7 @@ class PerceptualGrouping:
     def extract_edgels(self, like: mx.array, mean_ori: mx.array) -> Edgels:
         """沿法向对 L_e 做 NMS + 抛物线亚像素插值 (flow.md §1.1)。
         采样复用 EdgePrior 的预计算双线性 gather。"""
-        yy, xx = EdgePrior.grid(like.shape)
+        yy, xx = Utils.grid(like.shape)
         n_row, n_col = mx.sin(mean_ori), mx.cos(mean_ori)
         gp = EdgePrior.precomp_gather(like.shape, n_row, n_col, yy, xx)
         gm = EdgePrior.precomp_gather(like.shape, -n_row, -n_col, yy, xx)
@@ -181,7 +175,7 @@ class PerceptualGrouping:
         t = mx.clip(t, -1.0, 1.0)
         t = mx.where(mx.abs(denom) > 1e-6, t, 0.0)
 
-        idx = self.nonzero(mask)
+        idx = Utils.nonzero(mask)
         pos = mx.stack(
             [(yy + t * n_row).reshape(-1)[idx], (xx + t * n_col).reshape(-1)[idx]],
             axis=-1,
@@ -259,7 +253,7 @@ class PerceptualGrouping:
         i, j, w = self.affinity(ed)
         # best[side][a] = (b, w_ab): a 沿切向前(0)/后(1)的最佳伙伴
         # 切向侧判据向量化 (逐对 float 同步是大图瓶颈): 一次批算
-        keep = self.nonzero(w >= self.link_thr)  # MLX 无布尔索引
+        keep = Utils.nonzero(w >= self.link_thr)  # MLX 无布尔索引
         ii, jj = i[keep], j[keep]
         ww = w[keep]
         side_a = mx.sum(ed.tangent[ii] * (ed.pos[jj] - ed.pos[ii]), axis=-1)
@@ -337,7 +331,7 @@ class PerceptualGrouping:
         d2m = mx.sum((pts[:, None, :] - pts[None, :, :]) ** 2, axis=-1)
         own = [owner[i] for i in ends]
         cand: list[tuple[int, int]] = []
-        near = self.nonzero(d2m <= self.gap_max**2)
+        near = Utils.nonzero(d2m <= self.gap_max**2)
         for k in near.tolist():
             ia, ib = divmod(k, E_)
             if ia < ib and own[ia] != own[ib]:
@@ -446,7 +440,7 @@ class PerceptualGrouping:
             & (bb[None, :, 3] >= bb[:, None, 1])
         )
         pairs = []
-        for k in self.nonzero(overlap).tolist():
+        for k in Utils.nonzero(overlap).tolist():
             a, b = divmod(k, n_ch)
             # 直接相交: q 在两链上, 两侧都须过弧长过滤 (精确)
             if a < b and a in active and b in active:
@@ -487,7 +481,7 @@ class PerceptualGrouping:
                 & (u >= 0.0)
                 & (u <= 1.0)
             )
-            for k in self.nonzero(hit).tolist():
+            for k in Utils.nonzero(hit).tolist():
                 a, b = pairs[pair_of[k]]
                 cands.append((a, b, p1[k] + t[k] * d1[k]))
         cands += self.endpoint_ray_candidates(ed, chains, active)

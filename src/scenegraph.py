@@ -31,6 +31,7 @@ import mlx.core as mx
 
 from cga import Motor, Multivector, Plane, Sphere
 from fusion import DepthCue, FusionResult, PrimFit
+from utils import Utils
 
 
 @dataclass(slots=True)
@@ -76,27 +77,12 @@ class SceneGraph:
     # ── 匹配: 同空间 Bhattacharyya ─────────────────────────────────
 
     @staticmethod
-    def _logdet_batch(a: mx.array) -> mx.array:
-        """批量 logdet (特征值和, (K,P,P) → (K,))。"""
-        ev = mx.linalg.eigh(a, stream=mx.cpu)[0]
-        return mx.sum(mx.log(mx.maximum(ev, 1e-12)), axis=-1)
-
     def _bhatt_batch(
-        self, m1: mx.array, c1: mx.array, m2: mx.array, c2: mx.array
+        m1: mx.array, c1: mx.array, m2: mx.array, c2: mx.array
     ) -> mx.array:
-        """K 组 (μ,Σ) 对单候选的 Bhattacharyya 距离 (向量化一批算):
-        d_B = ⅛ΔμᵀΣ̄⁻¹Δμ + ½ln(detΣ̄/√(detΣᵢ·detΣⱼ))。
-        m1 (K,P), c1 (K,P,P), m2 (P,), c2 (P,P) → (K,)。"""
-        dim = c1.shape[-1]
-        cb = (c1 + c2) * 0.5
-        inv = mx.linalg.inv(cb + 1e-9 * mx.eye(dim), stream=mx.cpu)
-        dm = (m1 - m2)[:, :, None]  # (K,P,1)
-        t1 = (dm.transpose(0, 2, 1) @ inv @ dm)[:, 0, 0] / 8.0
-        t2 = 0.5 * (
-            self._logdet_batch(cb)
-            - 0.5 * (self._logdet_batch(c1) + self._logdet_batch(c2[None]))
-        )
-        return t1 + t2
+        """K 组 (μ,Σ) 对单候选的 Bhattacharyya 距离 —— 共享实现
+        在 Utils.bhatt (内聚收编, 2026-08-08 架构审计)。"""
+        return Utils.bhatt(m1, c1, m2, c2)
 
     def _match(self, fit: PrimFit) -> int:
         """找同品节点 (kind 相同且 d_B < 阈值), 返回节点下标或 −1。
