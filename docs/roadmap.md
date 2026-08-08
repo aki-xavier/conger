@@ -69,5 +69,5 @@ Phase 1 三项彼此独立可并行；开工顺序：T 结序数约束 → 表�
 - [x] Phase 2.2 对称面检测 —— `scenegraph.detect_symmetry(rid_map)`：角平分面闭式候选（(n₁∓n₂)·x=d₁∓d₂，d 须预除 |nm|——Plane 构造只归一法向不缩放 d）+ **支撑城重叠真门**（定理：任意两平面关于角平分面精确镜像，blade 验证恒真无鉴别力）；球-球对称留钩；scenegraph 测试 6
 - [x] Phase 2.3 显式低速先验 —— `MotorEKF.r_slow`（零速度伪观测，信息形式 +I/r_slow、残差 −ξ/r_slow）：噪声下收缩、干净对应偏置可略；默认关（无双义场景不付代价），孔径/低纹理场景开启
 - [x] Phase 3.1 X 结 + Metelli 门 —— `grouping.XJunction`（双臂皆通的交叉，detect_t_junctions 顺带产出，含切向）+ `MetelliGate.validate`（四扇区采样，混合定律两检验：压缩比 r∈(0,1) + 层反照率 t 合法；**固有歧义**：多归属可同合法 → 全收集按裸侧对比度降序）。12.png 基线 T=78 不动并检出 1 个真实 X 结；消费者是 3.2 分层解耦（接线留到 3.2）
-- [x] Phase 3.2 C6 分层表示（第一片）—— `grouping.LayerSeparator`：MetelliX → 结点局部解耦 I=L₁+L₂，遮层区背景闭式恢复 B=(P−αt)/(1−α)（遮侧区域由遮向采样 rid 确定）。**剩余**：像素级多层后验（segment 多层 Y 层 + fusion 分层渲染联动改造，另立项）
+- [x] Phase 3.2 C6 分层表示 —— 第一片 `grouping.LayerSeparator`（结点局部解耦）+ 完整版 `layers.LayeredPosterior`（**像素级多层后验**：逐像素覆盖度 α(p)=(I−B̂)/(t−B̂)，B̂ 独立于锚点参数由裸区内绘估计——锚点恢复是循环论证，实测 α≡ᾱ；消费者：base 去遮替代图 + suppress 遮层边界抑制）。渐变遮层恢复：相关 1.00、偏差 0.010。已知限制：渐变背景的内绘偏差（纯扩散抹平梯度）。**剩余**：fusion 分层渲染/scenegraph 多层节点（消费端形状改造）
 - [x] Phase 3.3 光学先验包 —— `Color.gray_world_wb`（灰度世界白平衡，保总亮度）+ `Color.log_chromaticity`（log(R/G),log(B/G) 光照不变特征，强度缩放在对数域相消）；color.py 补自检（暖色偏校正散布 0.0000、强度不变 1e-7、表面可分）。接入主流水线需彩色入口（当前管线灰度），留待有彩色需求时
