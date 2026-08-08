@@ -38,7 +38,7 @@ CGA blade 只承载输出图元 (稀疏通用语), 不进逐对循环。
      一侧中断 = T 结 (front≻behind 偏序); 双臂皆通 = X, 不出偏序;
      dedupe 3px 去重
        ▼
-  GroupingResult (edgels / chains / lines / completions /
+  GroupingResult (edgels / chains / completions /
   circles / t_junctions)
 """
 
@@ -84,18 +84,32 @@ class TJunction(NamedTuple):
     support: tuple[int, int]  # 被遮线两臂 edgel 支撑 (+侧, −侧)
 
 
+class XJunction(NamedTuple):
+    """X 结: 两链交叉且双臂皆有支撑 —— 透明叠加/纹理交界候选
+    (无遮挡偏序; prior.md 半透明先验的 X 结, Metelli 门见
+    MetelliGate)。切向供四扇区采样用。"""
+
+    pos: tuple[float, float]  # (row, col)
+    chain_a: int
+    chain_b: int
+    tan_a: tuple[float, float]  # 交叉点处链 a 单位切向 (row, col)
+    tan_b: tuple[float, float]
+
+
 class GroupingResult(NamedTuple):
     """组织层输出 (flow.md §1): 2D CGA 直接形式图元 + 偏序约束。
     circle_params 与 circles 一一对应 ((x,y) 圆心, ρ), 供分割层
-    栅格化用 (blade 本身不反投影)。"""
+    栅格化用 (blade 本身不反投影)。
+    lines 惰性化: 逐链 cga 积在大图上耗时 2s+, 无人消费即不建 ——
+    需要时用 PerceptualGrouping.line_blades(res) 现取。"""
 
     edgels: Edgels
     chains: list[mx.array]  # 每条链: (L,) int edgel 索引, 沿轮廓有序
-    lines: list[Multivector]  # 每链一条 line blade (p1∧p2∧e∞)
     completions: list[tuple[int, int, float]]  # (端点i, 端点j, p(连续))
     circles: list[Multivector]  # 高置信补全弧段的 circle blade (对偶)
     circle_params: list[tuple[tuple[float, float], float]]  # ((x,y), ρ)
     t_junctions: list[TJunction]  # T 结集合 (遮挡偏序 front≻behind)
+    x_junctions: list[XJunction]  # X 结集合 (双臂皆通, 透明候选)
 
 
 @dataclass(slots=True)
@@ -413,7 +427,9 @@ class PerceptualGrouping:
 
     # ── 5. T 结检测: 交叉几何 + 竖杠中断证据 ───────────────────────
 
-    def detect_t_junctions(self, ed: Edgels, chains: list[mx.array]) -> list[TJunction]:
+    def detect_t_junctions(
+        self, ed: Edgels, chains: list[mx.array]
+    ) -> tuple[list[TJunction], list[XJunction]]:
         """线线求交给候选, 竖杠中断统计判 T (flow.md §1.4):
         候选两个来源 —— 折线直接相交; 链端点沿末端切向的延长线
         (≤ t_radius) 与其他链相交 (真实 T 的竖杠止于遮挡边,
@@ -499,6 +515,7 @@ class PerceptualGrouping:
         cands += self.endpoint_ray_candidates(ed, chains, bboxes, active)
 
         out: list[TJunction] = []
+        xout: list[XJunction] = []
         stats = self._batch_arm_stats(ed, chains, cands)
         for (a, b, q), (sa, sb) in zip(cands, stats):
             # 通过 = 两臂都有连续支撑 (数量够且延伸够长); 竖杠 =
@@ -507,16 +524,35 @@ class PerceptualGrouping:
             b_through = all(c >= self.t_support and s >= self.t_span for c, s in sb)
             a_stub = any(c >= self.t_support and s >= self.t_span for c, s in sa)
             b_stub = any(c >= self.t_support and s >= self.t_span for c, s in sb)
-            if a_through and not b_through and b_stub:
+            if a_through and b_through:
+                # 双臂皆通 → X 交叉 (透明/纹理交界候选, 无偏序)
+                xout.append(
+                    XJunction(
+                        (float(q[0]), float(q[1])), a, b,
+                        self._tangent_at(ed, chains[a], q),
+                        self._tangent_at(ed, chains[b], q),
+                    )
+                )
+            elif a_through and b_stub:
                 out.append(
                     TJunction((float(q[0]), float(q[1])), a, b, tuple(c for c, _ in sb))
                 )
-            elif b_through and not a_through and a_stub:
+            elif b_through and a_stub:
                 out.append(
                     TJunction((float(q[0]), float(q[1])), b, a, tuple(c for c, _ in sa))
                 )
-            # 其余 = X 交叉或伪交叉, 不产生偏序
-        return self.dedupe(out)
+            # 其余 = 伪交叉, 丢弃
+        return self.dedupe(out), self.dedupe(xout)
+
+    @staticmethod
+    def _tangent_at(
+        ed: Edgels, chain: mx.array, q: mx.array
+    ) -> tuple[float, float]:
+        """链上离 q 最近 edgel 的单位切向 (row, col)。"""
+        pts = ed.pos[chain]
+        i = int(mx.argmin(mx.sum((pts - q[None, :]) ** 2, axis=-1)))
+        t = ed.tangent[chain[i]]
+        return float(t[0]), float(t[1])
 
     def _batch_arm_stats(
         self, ed: Edgels, chains: list[mx.array], cands: list[tuple[int, int, mx.array]]
@@ -595,13 +631,30 @@ class PerceptualGrouping:
 
     @staticmethod
     def chain_bboxes(polylines: list[mx.array]) -> list[tuple[float, ...]]:
-        """每条链的包围盒 (rmin, cmin, rmax, cmax), 候选预筛用。"""
-        out = []
-        for p in polylines:
-            lo = mx.min(p, axis=0)
-            hi = mx.max(p, axis=0)
-            out.append((float(lo[0]), float(lo[1]), float(hi[0]), float(hi[1])))
-        return out
+        """每条链的包围盒 (rmin, cmin, rmax, cmax), 候选预筛用。
+        一次性补零矩阵批量 min/max —— 逐链 mx.min/mx.max 同步
+        在大图上 (数百链) 是主要开销 (实测 0.3s+)。"""
+        lmax = max(int(p.shape[0]) for p in polylines)
+        big = 1e30
+        lo = mx.stack(
+            [
+                mx.pad(p, [(0, lmax - int(p.shape[0])), (0, 0)], constant_values=big)
+                for p in polylines
+            ]
+        )
+        hi = mx.stack(
+            [
+                mx.pad(p, [(0, lmax - int(p.shape[0])), (0, 0)], constant_values=-big)
+                for p in polylines
+            ]
+        )
+        mn = lo.min(axis=1)  # (C,2)
+        mx_ = hi.max(axis=1)
+        mn_l, mx_l = mn.tolist(), mx_.tolist()
+        return [
+            (mn_l[c][0], mn_l[c][1], mx_l[c][0], mx_l[c][1])
+            for c in range(len(polylines))
+        ]
 
     def endpoint_ray_candidates(
         self,
@@ -627,7 +680,6 @@ class PerceptualGrouping:
         P1 = mx.concatenate(p1s)
         D1 = mx.concatenate(d1s)
         OWN = mx.concatenate(owners)
-        bb = mx.array(bboxes)  # (C,4)
 
         out: list[tuple[int, int, mx.array]] = []
         # 端点表: 每链两个端点的位置/外指切向/归属链
@@ -648,40 +700,57 @@ class PerceptualGrouping:
             return out
         Ee = mx.stack(es)  # (E,2)
         T = mx.stack(ts)  # (E,2)
-        EO = mx.array(es_own)  # (E,)
-        # 全端点 × 全段 一次批算 (大图下逐端点批算的启动开销是瓶颈)
         R = self.t_radius
-        det = T[:, None, 0] * D1[None, :, 1] - T[:, None, 1] * D1[None, :, 0]
+        # 段中点网格桶预筛: 命中的必要条件是段中点落在端点
+        # (R + 最大段长) 邻域 (射线长 R, 段半长在侧) —— 桶内收集
+        # 候选对即可精确覆盖, 替代全 (E,M) 广播 (实测 6M 对里
+        # 99% 不可能命中, 0.6s)
+        mid = P1 + D1 * 0.5
+        seg_len = mx.sqrt(mx.sum(D1 * D1, axis=-1))
+        cell = R + float(mx.max(seg_len))
+        mids_l = mid.tolist()
+        buckets: dict[tuple[int, int], list[int]] = {}
+        for si, (mr, mc) in enumerate(mids_l):
+            buckets.setdefault((int(mr // cell), int(mc // cell)), []).append(si)
+        own_l = OWN.tolist()
+        pe: list[int] = []
+        ps: list[int] = []
+        for ei, (er, ec) in enumerate(Ee.tolist()):
+            cr, cc = int(er // cell), int(ec // cell)
+            for dr in (-1, 0, 1):
+                for dc in (-1, 0, 1):
+                    for si in buckets.get((cr + dr, cc + dc), ()):
+                        if own_l[si] != es_own[ei]:
+                            pe.append(ei)
+                            ps.append(si)
+        out: list[tuple[int, int, mx.array]] = []
+        if not pe:
+            return out
+        pe_a, ps_a = mx.array(pe), mx.array(ps)
+        det = T[pe_a, 0] * D1[ps_a, 1] - T[pe_a, 1] * D1[ps_a, 0]
         safe = mx.where(mx.abs(det) > 1e-9, det, 1.0)
-        de = P1[None, :, :] - Ee[:, None, :]  # (E,M,2)
-        s = (de[..., 0] * D1[None, :, 1] - de[..., 1] * D1[None, :, 0]) / safe
-        u = (de[..., 0] * T[:, None, 1] - de[..., 1] * T[:, None, 0]) / safe
-        cand = (
-            (OWN[None, :] != EO[:, None])
-            & (bb[OWN, 0][None, :] <= Ee[:, None, 0] + R)
-            & (bb[OWN, 2][None, :] >= Ee[:, None, 0] - R)
-            & (bb[OWN, 1][None, :] <= Ee[:, None, 1] + R)
-            & (bb[OWN, 3][None, :] >= Ee[:, None, 1] - R)
-        )
-        hit = (
-            cand
-            & (mx.abs(det) > 1e-9)
-            & (s >= 0.0)
-            & (s <= R)
-            & (u >= 0.0)
-            & (u <= 1.0)
-        )
-        smin = mx.where(hit, s, mx.inf).min(axis=1)  # (E,) 最近命中
-        kmin = mx.where(hit, s, mx.inf).argmin(axis=1)
-        for ei in range(len(es)):
-            if not bool(mx.isinf(smin[ei])):
-                k = int(kmin[ei])
-                out.append((int(OWN[k]), es_own[ei], Ee[ei] + s[ei, k] * T[ei]))
+        de = P1[ps_a] - Ee[pe_a]
+        s = (de[:, 0] * D1[ps_a, 1] - de[:, 1] * D1[ps_a, 0]) / safe
+        u = (de[:, 0] * T[pe_a, 1] - de[:, 1] * T[pe_a, 0]) / safe
+        hit = (mx.abs(det) > 1e-9) & (s >= 0.0) & (s <= R) & (u >= 0.0) & (u <= 1.0)
+        hit_l = hit.tolist()
+        s_l = s.tolist()
+        # 逐端点取最近命中 (候选数小, 字典即可)
+        best: dict[int, tuple[float, int]] = {}
+        for k in range(len(pe)):
+            if not hit_l[k]:
+                continue
+            cur = best.get(pe[k])
+            if cur is None or s_l[k] < cur[0]:
+                best[pe[k]] = (s_l[k], ps[k])
+        for ei in sorted(best):
+            sv, si = best[ei]
+            out.append((own_l[si], es_own[ei], Ee[ei] + sv * T[ei]))
         return out
 
     @staticmethod
-    def dedupe(junctions: list[TJunction], radius: float = 3.0) -> list[TJunction]:
-        """3px 内的重复候选只留第一个。"""
+    def dedupe(junctions: list, radius: float = 3.0) -> list:
+        """3px 内的重复候选只留第一个 (T/X 通用, 只用 .pos)。"""
         kept: list[TJunction] = []
         for t in junctions:
             dup = any(
@@ -695,24 +764,30 @@ class PerceptualGrouping:
     # ── 总装 ───────────────────────────────────────────────────────
 
     def run(self, like: mx.array, mean_ori: mx.array) -> GroupingResult:
-        """L_e + 法向场 → edgel/链/line/补全/circle/T 结。"""
+        """L_e + 法向场 → edgel/链/补全/circle/T 结。"""
         ed = self.extract_edgels(like, mean_ori)
         chains = self.group(ed)
-        lines = []
-        for ch in chains:
-            p1, p2 = ed.cga_point(int(ch[0])), ed.cga_point(int(ch[-1]))
-            lines.append(Line(p1, p2))
         completions, circles, circle_params = self.complete(ed, chains)
-        t_junctions = self.detect_t_junctions(ed, chains)
+        t_junctions, x_junctions = self.detect_t_junctions(ed, chains)
         return GroupingResult(
             edgels=ed,
             chains=chains,
-            lines=lines,
             completions=completions,
             circles=circles,
             circle_params=circle_params,
             t_junctions=t_junctions,
+            x_junctions=x_junctions,
         )
+
+    def line_blades(self, res: GroupingResult) -> list[Multivector]:
+        """按需构造 line blade (p1∧p2∧e∞, 直接形式)。
+        逐链 cga 积在大图上 2s+, 故从 run() 的热路径移出 ——
+        需要 CGA 线图元的消费者 (如场景图关联) 现取。"""
+        out = []
+        for ch in res.chains:
+            p1, p2 = res.edgels.cga_point(int(ch[0])), res.edgels.cga_point(int(ch[-1]))
+            out.append(Line(p1, p2))
+        return out
 
     def visualize(self, like: mx.array, res: GroupingResult, out_path: str | Path):
         """链按 id 着色, edgel 带切向刻度, 补全画虚线, T 结画叉。"""
@@ -758,6 +833,157 @@ class TrackedResult(NamedTuple):
     segment: SegmentResult | None = None  # 接分割层时的分割结果
 
 
+class MetelliX(NamedTuple):
+    """通过 Metelli 门的 X 结: 透明叠加成立 + 物理解参数。"""
+
+    pos: tuple[float, float]  # (row, col)
+    transmittance: float  # 背景透过率 1−α = (P1−P2)/(B1−B2)
+    albedo: float  # 层反照率 t
+    veil_chain: int  # 遮层边界链 id
+    veil_sign: float  # 遮层在该链法向的哪一侧 (+1/−1, 2D 叉积符号)
+
+
+@dataclass(slots=True)
+class MetelliGate:
+    """X 结的 Metelli 混合定律门 (prior.md 半透明先验: 只有当交叉点
+    亮度变化符合物理混合定律时才产生透明感, Metelli 1974)。
+
+    模型: 遮层区 P = α·t + (1−α)·B (层反照率 t, 背景 B, 覆盖率 α)。
+    X 结四扇区采样: 遮层边一侧的裸区 B1,B2 (被背景边分开) 与另侧
+    的遮区 P1,P2 → (P1−P2) = (1−α)(B1−B2), 可检验:
+      ① r = (P1−P2)/(B1−B2) ∈ (r_min, 1−r_min): 对比度被遮层压缩,
+         不反向、不消失、不放大
+      ② t = (P1 − r·B1)/(1−r) ∈ [−t_tol, 1+t_tol]: 层反照率物理合法
+      (P2 侧的 t 由 ① 的定义自动一致, 无需独立检)
+    四种归属 (遮层边 = 链 a/b × ±侧) 可能多个合法 (单点混合定律
+    的固有歧义) —— 全收集, 按裸侧对比度降序 (对比度越强估计越
+    可靠), 最佳在前。"""
+
+    delta: float = 6.0  # 扇区采样距离 (px)
+    r_min: float = 0.05  # 压缩比离 0/1 的最小间隔
+    t_tol: float = 0.05  # 层反照率出界容忍
+    min_contrast: float = 0.02  # 裸侧对比度下限 (退化扇区拒判)
+
+    def validate(
+        self, xjs: list[XJunction], img: mx.array
+    ) -> list[MetelliX]:
+        """X 结列 + 灰度图 → 通过混合定律的 MetelliX 列。"""
+        h, w = img.shape
+        out: list[MetelliX] = []
+        for x in xjs:
+            qr, qc = x.pos
+            ta, tb = x.tan_a, x.tan_b
+            u = (ta[0] + tb[0], ta[1] + tb[1])
+            v = (ta[0] - tb[0], ta[1] - tb[1])
+            dirs = []
+            for d in (u, v, (-u[0], -u[1]), (-v[0], -v[1])):
+                nl = math.hypot(d[0], d[1])
+                if nl < 1e-9:
+                    break  # 切向共线 → 退化交叉, 弃
+                dirs.append((d[0] / nl, d[1] / nl))
+            if len(dirs) < 4:
+                continue
+            vals = []
+            for dr, dc in dirs:
+                rr = min(max(int(round(qr + self.delta * dr)), 0), h - 1)
+                cc = min(max(int(round(qc + self.delta * dc)), 0), w - 1)
+                vals.append(float(img[rr, cc]))
+            # 扇区归属: 各采样方向对两链的 2D 叉积符号
+            def sgn_of(d: tuple[float, float], t: tuple[float, float]) -> float:
+                """dir × tangent 的符号 (哪一侧)。"""
+                cr = d[0] * t[1] - d[1] * t[0]
+                return 1.0 if cr >= 0 else -1.0
+
+            sec: dict[tuple[float, float], float] = {}
+            for d, val in zip(dirs, vals):
+                sec[(sgn_of(d, ta), sgn_of(d, tb))] = val
+            # 四种归属: 遮层边 ∈ {a, b}, 遮层侧 ∈ {+, −}; 全收集,
+            # 按裸侧对比度排序 (固有歧义下的可靠性排序)
+            cands_mx: list[tuple[float, MetelliX]] = []
+            for veil_t, chain_id in ((ta, x.chain_a), (tb, x.chain_b)):
+                for side in (1.0, -1.0):
+                    def key(sv: float, so: float) -> tuple[float, float]:
+                        return (sv, so) if veil_t is ta else (so, sv)
+
+                    b1 = sec[key(-side, 1.0)]
+                    b2 = sec[key(-side, -1.0)]
+                    p1 = sec[key(side, 1.0)]
+                    p2 = sec[key(side, -1.0)]
+                    denom = b1 - b2
+                    if abs(denom) < self.min_contrast:
+                        continue
+                    r = (p1 - p2) / denom
+                    if not (self.r_min < r < 1.0 - self.r_min):
+                        continue
+                    alpha = 1.0 - r
+                    t = (p1 - r * b1) / alpha
+                    if -self.t_tol <= t <= 1.0 + self.t_tol:
+                        cands_mx.append(
+                            (abs(denom), MetelliX(x.pos, r, t, chain_id, side))
+                        )
+            cands_mx.sort(key=lambda c: -c[0])
+            if cands_mx:
+                out.append(cands_mx[0][1])
+        return out
+
+
+class LayerSplit(NamedTuple):
+    """X 结局部解耦产物 (C6 第一步): 透明层剥离后的两层。"""
+
+    base: mx.array  # (H,W) 背景层 (遮层区已恢复 B = (P−αt)/(1−α))
+    veil: mx.array  # (H,W) 遮层反照率 t (遮层区), 其余 0
+    mask: mx.array  # (H,W) bool 遮层区域 (结点遮侧所在 rid)
+
+
+@dataclass(slots=True)
+class LayerSeparator:
+    """MetelliX → I = L₁ + L₂ 局部解耦 (prior.md 分层先验, C6 第一步:
+    结点局部解耦; 像素级多层后验是第二步, 未做)。
+
+    遮层参数 (α,t) 由 Metelli 门给出时, 遮层区每像素的背景可
+    闭式解出: B = (P − α·t)/(1−α)。遮层区域 = 结点遮侧采样点
+    所在的 rid 区域 (遮侧方向 = 遮层链切向旋转 90° 按 veil_sign
+    定向)。恢复值裁剪到 [0,1] (模型外推的保守处理)。"""
+
+    sample_dist: float = 6.0  # 遮侧采样距离 (px, 与 MetelliGate.delta 一致)
+
+    def recover(
+        self,
+        mxs: list[MetelliX],
+        xjs: list[XJunction],
+        img: mx.array,
+        rid_map: mx.array,
+    ) -> list[LayerSplit]:
+        """MetelliX 列 (+ 对应 XJunction, 取切向) + 图 + rid 图 →
+        逐结点的两层解耦。mxs 与 xjs 平行。"""
+        h, w = img.shape
+        out: list[LayerSplit] = []
+        for mx_, xj in zip(mxs, xjs):
+            # 遮层链切向 → 遮侧方向: n = ±(t_r, −t_c) 按 veil_sign 定向
+            t = xj.tan_a if xj.chain_a == mx_.veil_chain else xj.tan_b
+            n = (t[1] * mx_.veil_sign, -t[0] * mx_.veil_sign)
+            rr = min(
+                max(int(round(mx_.pos[0] + self.sample_dist * n[0])), 0), h - 1
+            )
+            cc = min(
+                max(int(round(mx_.pos[1] + self.sample_dist * n[1])), 0), w - 1
+            )
+            rid = int(rid_map[rr, cc])
+            if rid <= 0:
+                continue  # 遮侧无区域标签, 弃
+            mask = rid_map == rid
+            alpha = 1.0 - mx_.transmittance
+            rec = mx.clip(
+                (img - alpha * mx_.albedo) / mx_.transmittance, 0.0, 1.0
+            )
+            base = mx.where(mask, rec, img)
+            veil = mx.where(
+                mask, mx.full(img.shape, mx_.albedo), mx.zeros(img.shape)
+            )
+            out.append(LayerSplit(base, veil, mask))
+        return out
+
+
 class GroupingTracker:
     """grouping 的后台增量架构 (flow.md 层间节奏: 实时管线止于
     edgemap, 组织层后台低频刷新, 帧间链 id 增量对应)。
@@ -772,12 +998,19 @@ class GroupingTracker:
         pg: PerceptualGrouping | None = None,
         match_radius: float = 8.0,
         segmenter=None,
+        loop_hook=None,
+        loop_feedback=None,
     ):
         """match_radius: 帧间链/T 结对应的距离阈值 (px), 应大于
         帧间最大位移。segmenter: 可选 SceneSegmenter —— 给则后台
-        链路延伸为 grouping → 分割 (结果进 TrackedResult.segment)。"""
+        链路延伸为 grouping → 分割 (结果进 TrackedResult.segment)。
+        loop_hook(job, tracked, seg): 可选闭环钩子 (temporal/fusion/
+        scenegraph, 分割后调用); loop_feedback(): 返回上一轮反馈图
+        (prior_map), 注入本轮分割。"""
         self.pg = pg if pg is not None else PerceptualGrouping()
         self.segmenter = segmenter
+        self.loop_hook = loop_hook
+        self.loop_feedback = loop_feedback
         self.match_radius = match_radius
         self._cond = threading.Condition()
         self._pending: tuple | None = None
@@ -798,16 +1031,21 @@ class GroupingTracker:
         mean_ori: mx.array,
         like_edge: mx.array | None = None,
         like_tex: mx.array | None = None,
+        app: mx.array | None = None,
     ) -> None:
         """登记一帧输入 (非阻塞, 毫秒级); 只保留最新帧。
         输入在此物化: 未求值的懒图携带提交线程的流, 工作线程
         访问会报 no Stream in current thread (MLX 流按线程注册)。
-        配置 segmenter 时须同时给两路类似然 (Y 层输入)。"""
+        配置 segmenter 时须同时给两路类似然 (Y 层输入)。
+        app: (H,W,C) 表观特征图 (强度/似然通道) —— 链匹配的
+        不变性项 (prior.md: 表观跨帧稳定 = 同一物体判据)。"""
         mx.eval(enh, mean_ori)
         if like_edge is not None:
             mx.eval(like_edge, like_tex)
+        if app is not None:
+            mx.eval(app)
         with self._cond:
-            self._pending = (enh, mean_ori, like_edge, like_tex)
+            self._pending = (enh, mean_ori, like_edge, like_tex, app)
             self._cond.notify()
 
     def latest(self) -> TrackedResult | None:
@@ -852,9 +1090,12 @@ class GroupingTracker:
                     from segment import grouping_contours
 
                     polys, circs = grouping_contours(res)
+                    fb = self.loop_feedback() if self.loop_feedback else None
                     seg = self.segmenter.run(
-                        job[0], job[2], job[3], polys, circs
+                        job[0], job[2], job[3], polys, circs, prior_map=fb
                     )
+                    if self.loop_hook is not None:
+                        self.loop_hook(job, tracked, seg)
                     tracked = tracked._replace(segment=seg)
                 with self._cond:
                     self._result = tracked
@@ -863,7 +1104,11 @@ class GroupingTracker:
 
     def _match(self, res: GroupingResult) -> TrackedResult:
         """质心近邻匹配: 新链 → 上一帧最近质心的 tid (一对一贪心),
-        未命中分配新 tid。链数百量级, 逐链贪心足够。"""
+        未命中分配新 tid。链数百量级, 逐链贪心足够。
+        [阴性结果] 链级表观项 (类别似然/强度签名) 实测有害:
+        似然随 vbgmm online 适应漂移 + 同类链签名无区分度 →
+        稳定 tid 13→7 (2026-08-08), 已回滚; 表观项只在区域侧
+        (SubregionTracker, 区域均值相位平均掉) 使用。"""
         cents = []
         for ch in res.chains:
             c = mx.mean(res.edgels.pos[ch], axis=0)
@@ -1003,10 +1248,67 @@ if __name__ == "__main__":
             f"front=chain{t.front} behind=chain{t.behind} support={t.support}"
         )
 
-    # D. X 配置: 两线均通过 → 0 个 T 结
+    # D. X 配置: 两线均通过 → 0 个 T 结, 检出 X 结
     ld, md = ridge_field([hline(48, 16, 112), vline(64, 24, 88)])
     rd = pg.run(ld, md)
-    print(f"D. X: chains={len(rd.chains)}, t_junctions={len(rd.t_junctions)} (期望 0)")
+    assert len(rd.t_junctions) == 0, f"X 场景不应产 T: {len(rd.t_junctions)}"
+    assert len(rd.x_junctions) >= 1, "X 场景应检出 X 结"
+    print(
+        f"D. X: chains={len(rd.chains)}, t_junctions=0 ✓, "
+        f"x_junctions={len(rd.x_junctions)} ✓"
+    )
+
+    # E. Metelli 门: 四扇区混合定律 (半透明先验)
+    # 场景: 背景边竖直 (B1=0.2 左 | B2=0.8 右), 遮层边水平,
+    # 上侧覆 α=0.4, t=0.9 的层: P=αt+(1−α)B → 左上 0.48, 右上 0.84
+    Hm, Wm = 96, 128
+    cols_e = mx.arange(Wm)[None, :]
+    bot_e = mx.where(
+        cols_e < 64, mx.full((48, Wm), 0.2), mx.full((48, Wm), 0.8)
+    )
+    top_e = mx.where(
+        cols_e < 64, mx.full((48, Wm), 0.48), mx.full((48, Wm), 0.84)
+    )
+    img_e = mx.concatenate([top_e, bot_e], axis=0)
+    xj = XJunction((48.0, 64.0), 0, 1, (1.0, 0.0), (0.0, 1.0))
+    # 四归属自动搜索, 无需指对哪条是遮层边
+    got = MetelliGate().validate([xj], img_e)
+    assert len(got) == 1, f"应通过 Metelli 门: {len(got)}"
+    assert abs(got[0].transmittance - 0.6) < 0.05, (
+        f"透过率: {got[0].transmittance:.2f} (期望 0.6)"
+    )
+    assert abs(got[0].albedo - 0.9) < 0.05, (
+        f"层反照率: {got[0].albedo:.2f} (期望 0.9)"
+    )
+    # 反例: 遮侧对比度*反向* (左亮右弱 vs 裸侧左弱右亮) ——
+    # 四种归属的 r 全为负, 物理上无合法分解 → 拒
+    bad_top = mx.where(
+        cols_e < 64, mx.full((48, Wm), 0.75), mx.full((48, Wm), 0.35)
+    )
+    img_bad = mx.concatenate([bad_top, bot_e], axis=0)
+    assert not MetelliGate().validate([xj], img_bad), "对比反向应被拒"
+    print(f"E. Metelli: 合法叠加通过 (τ={got[0].transmittance:.2f}, "
+          f"t={got[0].albedo:.2f}), 对比反向被拒 ✓")
+
+    # F. 层解耦 (C6 第一步): 遮层区背景恢复
+    rid_f = mx.where(
+        mx.arange(Hm)[:, None] < 48,
+        mx.full((Hm, Wm), 1),
+        mx.full((Hm, Wm), 2),
+    ).astype(mx.int32)
+    splits = LayerSeparator().recover(got, [xj], img_e, rid_f)
+    assert len(splits) == 1, f"应解耦 1 结: {len(splits)}"
+    sp = splits[0]
+    # 遮层区 (上半) 恢复背景: 左 0.2 / 右 0.8
+    assert abs(float(sp.base[24, 32]) - 0.2) < 0.05, (
+        f"左上恢复: {float(sp.base[24, 32]):.2f} (期望 0.2)"
+    )
+    assert abs(float(sp.base[24, 96]) - 0.8) < 0.05, (
+        f"右上恢复: {float(sp.base[24, 96]):.2f} (期望 0.8)"
+    )
+    assert abs(float(sp.veil[24, 32]) - 0.9) < 0.05, "遮层 t=0.9"
+    assert not bool(sp.mask[72, 32]), "裸区不应进遮层掩码"
+    print("F. 层解耦: 遮层区背景恢复 0.2/0.8, t=0.9 剥离 ✓")
 
     path = Utils.project_root() / "artifacts/grouping_synth.png"
     pg.visualize(lc, rc, path)

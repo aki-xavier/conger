@@ -22,7 +22,7 @@ MLX。本层是离线层, 不做逐帧承诺 (逐帧管线止于 edgemap)。
 """
 
 import heapq
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import NamedTuple
 
 import mlx.core as mx
@@ -166,7 +166,8 @@ class RegionHierarchy:
         heap = [(s, a, b) for (a, b), s in strength.items()]
         heapq.heapify(heap)
         ucm = [[0.0] * w for _ in range(h)]
-        self._merges: list[tuple[float, int, int]] = []  # (高度, 根a, 根b)
+        size = [1] * (self.n_basins + 1)
+        self._merges: list[tuple[float, int, int]] = []  # (高度, 存留, 被吸收)
         while heap:
             s, a, b = heapq.heappop(heap)
             ra, rb = find(a), find(b)
@@ -180,32 +181,45 @@ class RegionHierarchy:
             count.pop(key)
             for y, x in arc_pixels.pop(key, []):
                 ucm[y][x] = s
+            # 并大留小 (union by size): 存留侧的弧键/强度不变, 旧堆项
+            # 仍有效 —— 只需重连被吸收侧的弧, 堆弹出从 O(Σfrontier)
+            # (实测 4M) 降到 O(N log N)
+            if size[ra] < size[rb]:
+                ra, rb = rb, ra
             self._merges.append((s, ra, rb))
             parent[rb] = ra
-            # 重连两区域对外的弧: 接触点数加权均值
-            neighbors = {
-                find(x) for x in (adj.get(ra, set()) | adj.get(rb, set()))
-            } - {ra, rb}
-            for x in neighbors:
-                parts, pix = [], []
-                for old in ((min(ra, x), max(ra, x)), (min(rb, x), max(rb, x))):
-                    if old in strength:
-                        parts.append((strength.pop(old), count.pop(old)))
-                        pix += arc_pixels.pop(old, [])
-                if not parts:
+            size[ra] += size[rb]
+            for x in adj.get(rb, set()):
+                rx = find(x)
+                if rx in (ra, rb):
                     continue
-                nc = sum(c for _, c in parts)
-                ns = sum(s2 * c for s2, c in parts) / nc
-                nkey = (min(ra, x), max(ra, x))
-                strength[nkey] = ns
-                count[nkey] = nc
-                arc_pixels[nkey] = pix
-                heapq.heappush(heap, (ns, nkey[0], nkey[1]))
-            adj[ra] = neighbors
+                old_b = (min(rb, x), max(rb, x))
+                if old_b not in strength:
+                    continue  # 该邻弧已是 (ra,x) 形态或已内化
+                s2 = strength.pop(old_b)
+                c2 = count.pop(old_b)
+                pix2 = arc_pixels.pop(old_b, [])
+                old_a = (min(ra, rx), max(ra, rx))
+                if old_a in strength:
+                    # 存留侧本就有到 x 的弧: 接触点数加权均值重算,
+                    # 旧堆项强度失配自然作废
+                    nc = count[old_a] + c2
+                    ns = (strength[old_a] * count[old_a] + s2 * c2) / nc
+                    strength[old_a] = ns
+                    count[old_a] = nc
+                    arc_pixels[old_a] = arc_pixels.get(old_a, []) + pix2
+                    heapq.heappush(heap, (ns, old_a[0], old_a[1]))
+                else:
+                    # 重键 (ra, x), 强度不变
+                    nkey = (min(ra, rx), max(ra, rx))
+                    strength[nkey] = s2
+                    count[nkey] = c2
+                    arc_pixels[nkey] = pix2
+                    heapq.heappush(heap, (s2, nkey[0], nkey[1]))
+                adj.setdefault(rx, set()).discard(rb)
+                adj[rx].add(ra)
+            adj[ra] = (adj.get(ra, set()) | adj.get(rb, set())) - {ra, rb}
             adj.pop(rb, None)
-            for x in neighbors:
-                adj.setdefault(x, set()).discard(rb)
-                adj[x].add(ra)
         self._ucm = mx.array(ucm, dtype=mx.float32)
 
     @property
@@ -431,6 +445,94 @@ class PixelLabelLayer:
             q = q * mx.power(pi_m[lab_m].reshape(h, w, 3), w_macro)
         q = q / mx.maximum(q.sum(axis=-1, keepdims=True), 1e-12)
         return q, mx.argmax(q, axis=-1).astype(mx.int32)
+
+
+# ── 子区域跨帧对应 ─────────────────────────────────────────────────
+
+
+@dataclass(slots=True)
+class SubregionTracker:
+    """子区域跨帧身份 (flow.md §2 的区域对应, 与 GroupingTracker 的
+    链 tid 同族): 质心近邻匹配 → 稳定 rid 图。
+
+    分割层每帧的子区域标签是当帧重排的 (无身份), 场景图节点按
+    当帧 id 渲染会随帧错位 (实测); 本器把当帧标签映射为跨帧稳定
+    的 rid, 场景图/渲染全部以 rid 为键。"""
+
+    match_radius: float = 12.0  # 对应距离阈值 (px, 应大于帧间位移+松弛)
+    app_weight_std: float = 2.0  # 多少 σ 的表观差 ≈ 耗尽几何门半径
+    _prev: list[tuple[int, float, float, int, list | None]] = field(
+        default_factory=list
+    )  # (rid, row, col, area, 表观均值向量|None)
+    _next_rid: int = 1
+
+    def run(
+        self, sub: mx.array, app: mx.array | None = None
+    ) -> tuple[mx.array, dict[int, int]]:
+        """当帧子区域标签 (H,W) → (rid 图 (H,W) int32, {rid: 面积})。
+        app: (H,W,C) 表观特征图 (强度/似然通道) —— 给则匹配代价加
+        表观项: 几何硬门 (match_radius) 不变, 门内按 几何+表观σ差
+        (全局逐像素 σ 归一) 取最小 (prior.md 不变性假设: 表观跨视角
+        稳定是"同一物体"判断的根基; 治几何交叉时的身份交换)。"""
+        lab = sub.reshape(-1)
+        h, w = sub.shape
+        n = int(mx.max(sub))
+        yy, xx = mx.meshgrid(
+            mx.arange(h, dtype=mx.float32), mx.arange(w, dtype=mx.float32),
+            indexing="ij",
+        )
+        # 逐区域面积/质心 (scatter 批量)
+        def sc(v: mx.array) -> mx.array:
+            return mx.zeros((n + 1,)).at[lab].add(v)
+
+        cnt = sc(mx.ones((int(lab.shape[0]),)))
+        rs = sc(yy.reshape(-1)) / mx.maximum(cnt, 1.0)
+        cs = sc(xx.reshape(-1)) / mx.maximum(cnt, 1.0)
+        # 表观签名: 逐区域通道均值, 按通道全局 (逐像素) σ 归一 ——
+        # 别用区域间 σ: 表观无区分度时区域间 σ→0 会放大噪声
+        # (实测链跟踪退化: 稳定 tid 13→5), 全局 σ 跨帧稳定
+        means: list[list[float]] | None = None
+        if app is not None:
+            c_dim = int(app.shape[2])
+            mm = mx.stack(
+                [sc(app[:, :, k].reshape(-1)) / mx.maximum(cnt, 1.0)
+                 for k in range(c_dim)],
+                axis=-1,
+            )[1:]  # (n, C)
+            sig = mx.std(app.reshape(-1, c_dim), axis=0) + 1e-6
+            means = (mm / sig).tolist()
+        app_w = (self.match_radius / self.app_weight_std) ** 2
+        # 匹配: 当帧区域 → 上帧最近质心 (一对一贪心, 区域数百量级)
+        prev = list(self._prev)
+        used: set[int] = set()
+        remap = [0] * (n + 1)
+        new_prev: list[tuple[int, float, float, int, list | None]] = []
+        for r in range(1, n + 1):
+            cr, cc, ca = float(rs[r]), float(cs[r]), int(cnt[r])
+            am = means[r - 1] if means is not None else None
+            best, bi = self.match_radius**2, -1
+            for pi, (rid, pr, pc, _, pam) in enumerate(prev):
+                d2 = (cr - pr) ** 2 + (cc - pc) ** 2
+                if d2 >= best or pi in used:
+                    continue  # 几何硬门
+                if am is not None and pam is not None:
+                    d2 = d2 + app_w * sum(
+                        (a - b) ** 2 for a, b in zip(am, pam)
+                    )
+                if d2 < best:
+                    best, bi = d2, pi
+            if bi >= 0:
+                used.add(bi)
+                rid = prev[bi][0]
+            else:
+                rid = self._next_rid
+                self._next_rid += 1
+            remap[r] = rid
+            new_prev.append((rid, cr, cc, ca, am))
+        self._prev = new_prev
+        rid_map = mx.array(remap, dtype=mx.int32)[lab].reshape(h, w)
+        areas = {rid: a for rid, _, _, a, _ in new_prev}
+        return rid_map, areas
 
 
 # ── 总装门面 ──────────────────────────────────────────────────────
@@ -710,3 +812,36 @@ if __name__ == "__main__":
     fig.savefig(out)
     plt.close(fig)
     print(out)
+
+    # ── 表观不变性匹配: 几何交叉时的身份保持 (prior.md 不变性假设) ──
+    # 两条窄带对向移动 ±10px (中心距 16, 双方候选都在 12px 门内):
+    # 纯几何必然交换身份; 表观 (亮/暗) 应拉回正确对应
+    subA = mx.zeros((32, 96), dtype=mx.int32)
+    subA[:, 46:50] = 1  # A.r1 亮, 质心 col=48
+    subA[:, 62:66] = 2  # A.r2 暗, 质心 col=64
+    appA = mx.zeros((32, 96, 1))
+    appA = appA.at[:, 46:50, 0].add(0.9)
+    appA = appA.at[:, 62:66, 0].add(0.1)
+    subB = mx.zeros((32, 96), dtype=mx.int32)
+    subB[:, 56:60] = 1  # B.r1 亮, 质心 col=58 (右移 10)
+    subB[:, 52:56] = 2  # B.r2 暗, 质心 col=54 (左移 10)
+    appB = mx.zeros((32, 96, 1))
+    appB = appB.at[:, 56:60, 0].add(0.9)  # B.r1 亮 (=A.r1 的表观)
+    appB = appB.at[:, 52:56, 0].add(0.1)  # B.r2 暗 (=A.r2)
+    tk = SubregionTracker()
+    ridA, _ = tk.run(subA, app=appA)
+    ridB, _ = tk.run(subB, app=appB)
+    # 纯几何: B.r1(col58) 更近 A.r2(col64); 表观应纠正为
+    # B.r1(亮) ↔ A.r1(亮), B.r2(暗) ↔ A.r2(暗)
+    r1_A, r2_A = int(ridA[16, 48]), int(ridA[16, 64])
+    r1_B, r2_B = int(ridB[16, 58]), int(ridB[16, 54])
+    assert r1_B == r1_A, f"亮区身份应跨帧保持: {r1_B} vs {r1_A}"
+    assert r2_B == r2_A, f"暗区身份应跨帧保持: {r2_B} vs {r2_A}"
+    # 对照: 无表观时几何交叉会交换 (验证测试场景本身有鉴别力)
+    tk2 = SubregionTracker()
+    tk2.run(subA)
+    ridB2, _ = tk2.run(subB)
+    assert int(ridB2[16, 58]) != r1_A or int(ridB2[16, 54]) != r2_A, (
+        "无表观对照应发生交换/断链"
+    )
+    print("表观匹配: 几何交叉下亮/暗区身份保持 (对照组交换) ✓")

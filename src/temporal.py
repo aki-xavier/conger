@@ -64,11 +64,19 @@ class MotorEKF:
 
     q_vel: float = 1e-4  # 转移噪声 (速度一致性先验强度)
     r_obs: float = 1e-4  # 观测噪声方差 (对应点定位精度)
+    r_slow: float = 0.0  # 低速先验 (Weiss slow-and-smooth): >0 则
+    # 每轮更新加零速度伪观测 ξ~N(0,r_slow) —— 证据弱/含糊 (孔径)
+    # 时偏向低速解释, 证据强时影响可略; 默认关 (无双义场景不付代价)
     n_iter: int = 2  # 迭代 EKF 轮数 (小运动 1–2 轮足够)
     xi: mx.array = field(default_factory=lambda: mx.zeros(6))
     cov: mx.array = field(
         default_factory=lambda: mx.eye(6) * 1.0  # 初始大不确定度
     )
+
+    def __post_init__(self):
+        """初始状态物化: 懒图携带创建线程的流, 后台线程 (tracker
+        worker) 首触会报 no Stream in current thread。"""
+        mx.eval(self.xi, self.cov)
 
     def predict(self) -> None:
         """常速度转移: ξ⁻ = ξ, P⁻ = P + Q。"""
@@ -94,7 +102,13 @@ class MotorEKF:
             # S⁻¹ 在 float32 下条件数爆炸 (实测逆误差 ~16)
             p_inv = mx.linalg.inv(self.cov + 1e-9 * mx.eye(6), stream=mx.cpu)
             a = h.T @ h / self.r_obs + p_inv  # 信息矩阵 (6,6)
-            step = mx.linalg.inv(a, stream=mx.cpu) @ (h.T @ resid / self.r_obs)
+            rhs = h.T @ resid / self.r_obs
+            if self.r_slow > 0:
+                # 零速度伪观测 (低速先验): 信息 +I/r_slow,
+                # 残差 0−ξ → 步长向低速收缩
+                a = a + mx.eye(6) / self.r_slow
+                rhs = rhs - self.xi / self.r_slow
+            step = mx.linalg.inv(a, stream=mx.cpu) @ rhs
             self.xi = self.xi + step
             self.cov = mx.linalg.inv(a, stream=mx.cpu)  # 后验协方差 = 信息逆
 
@@ -178,6 +192,10 @@ class SlowCalibration:
     cov: mx.array = field(
         default_factory=lambda: mx.eye(4) * 25.0  # 初值不确定度 (5² px²)
     )
+
+    def __post_init__(self):
+        """初始协方差物化 (同 MotorEKF, 后台线程安全)。"""
+        mx.eval(self.k, self.cov)
 
     def update(self, pts: mx.array, pixels: mx.array) -> None:
         """一帧标定更新: pts (N,3) 三维点 (预测编码坐标), pixels
@@ -326,3 +344,28 @@ if __name__ == "__main__":
     )
     print(f"6. C1 标定: fx 误差 {float(rel[0]):.4f} (单帧均值 "
           f"{_st.mean(single_errs):.4f}), K={cal.k.tolist()} ✓")
+
+    # ── 7. 低速先验 (Weiss slow-and-smooth) ──────────────────────
+    # 7a. 收缩性: 同一份噪声对应, 有先验的步长模长必不大于无先验
+    pts7 = mx.array(
+        [[x, y, 3.0] for x in (-1.0, 0.0, 1.0) for y in (-1.0, 0.0, 1.0)]
+    )
+    xi7 = mx.array([0.0, 0.0, 0.0, 0.025, 0.0, 0.0])  # 半 twist 约定
+    q7 = transform_points(xi7, pts7)  # 真值对应
+    q7n = q7 + mx.random.normal(q7.shape, key=mx.random.key(3)) * 0.3
+    ekf0 = MotorEKF()
+    ekf0.predict()
+    ekf0.update(pts7, q7n)
+    ekf1 = MotorEKF(r_slow=0.01)
+    ekf1.predict()
+    ekf1.update(pts7, q7n)
+    n0, n1 = float(mx.sum(ekf0.xi**2)), float(mx.sum(ekf1.xi**2))
+    assert n1 < n0, f"先验应收缩: {n1:.4f} vs {n0:.4f}"
+    # 7b. 强一致证据下先验偏置可略: 干净对应 + 先验仍复原平移
+    ekf2 = MotorEKF(r_slow=0.01)
+    ekf2.predict()
+    ekf2.update(pts7, q7)
+    dx7 = 2.0 * float(ekf2.xi[3])  # 半 twist → 物理位移
+    assert abs(dx7 - 0.05) < 0.01, f"干净对应下应复原: {dx7:.4f}"
+    print(f"7. 低速先验: 噪声下收缩 ({n1:.4f}<{n0:.4f}), "
+          f"干净对应偏置可略 (dx={dx7:.4f}) ✓")

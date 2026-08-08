@@ -227,3 +227,53 @@ class Color:
         sat = hsl_image[..., 1]
 
         return sat * mx.exp(1j * hue)
+
+    @staticmethod
+    def gray_world_wb(rgb_image: mx.array) -> mx.array:
+        """灰度世界白平衡 (prior.md 光学先验: 白平衡/光源颜色恒常性,
+        Land & McCann Retinex 的工程形): 假设场景平均反射率为中性灰,
+        逐通道增益 = 总平均/通道平均, 整体色偏被自动校正。
+        输入 (...,3) [0,1]; 保总亮度, 输出裁剪回 [0,1]。"""
+        means = mx.mean(rgb_image, axis=(-3, -2))  # (...,3) 通道均值
+        gray = mx.mean(means, axis=-1, keepdims=True)
+        gain = gray / mx.maximum(means, 1e-6)
+        return mx.clip(rgb_image * gain[..., None, :], 0.0, 1.0)
+
+    @staticmethod
+    def log_chromaticity(rgb_image: mx.array, eps: float = 1e-3) -> mx.array:
+        """对数色度 (光照不变特征, prior.md "归一化必须在特征层"):
+        c1 = log(R/G), c2 = log(B/G) —— 强度缩放 I→λI 在对数域相消,
+        阴影/曝光变化不改色度。输入 (...,3), 返回 (...,2)。"""
+        safe = mx.maximum(rgb_image, eps)
+        g = safe[..., 1:2]
+        return mx.concatenate(
+            [mx.log(safe[..., 0:1] / g), mx.log(safe[..., 2:3] / g)], axis=-1
+        )
+
+
+if __name__ == "__main__":
+    # ── 光学先验包自检 ─────────────────────────────────────────────
+    # 场景: 三块表面 (红/绿/蓝灰) 条带
+    base = mx.zeros((32, 96, 3))
+    base = base.at[:, :32].add(mx.array([0.7, 0.2, 0.2]))
+    base = base.at[:, 32:64].add(mx.array([0.2, 0.6, 0.3]))
+    base = base.at[:, 64:].add(mx.array([0.5, 0.5, 0.55]))
+
+    # 1. 白平衡: 暖光源 (R×1.3, B×0.75) → 校正后通道均值近相等
+    cast = base * mx.array([1.3, 1.0, 0.75])
+    wb = Color.gray_world_wb(cast)
+    means = mx.mean(wb, axis=(0, 1))
+    spread = float(mx.max(means) - mx.min(means))
+    assert spread < 0.05, f"校正后通道均值应近等: {means.tolist()}"
+    print(f"1. 白平衡: 暖色偏校正, 通道均值散布 {spread:.4f} ✓")
+
+    # 2. 对数色度: 同表面两强度 → 色度相同 (阴影不变性)
+    dark = base * 0.3
+    c_bright = Color.log_chromaticity(base)
+    c_dark = Color.log_chromaticity(dark)
+    diff = float(mx.max(mx.abs(c_bright - c_dark)))
+    assert diff < 1e-3, f"强度缩放不应改色度: {diff}"
+    # 不同表面色度可区分
+    gap = float(mx.abs(c_bright[16, 16] - c_bright[16, 48]).sum())
+    assert gap > 0.5, f"红/绿表面色度应可分: {gap}"
+    print(f"2. 对数色度: 强度不变 (差 {diff:.2e}), 表面可分 ({gap:.2f}) ✓")

@@ -24,19 +24,19 @@
 
 import math
 from dataclasses import dataclass
+from typing import NamedTuple
 
 import mlx.core as mx
 
-from cga import Motor, Plane, Sphere
+from cga import Motor, Multivector, Plane, Sphere
 from fusion import DepthCue, FusionResult, PrimFit
-from vbgmm import VBGMM
 
 
 @dataclass(slots=True)
 class SceneNode:
     """场景图节点: 图元 + 最小参数 (归一化拟合空间) + 协方差 + 统计。"""
 
-    blade: object  # Plane/Sphere blade (像素单位, 输出用)
+    blade: Multivector  # Plane/Sphere blade (像素单位, 输出用)
     kind: str  # "plane" / "sphere"
     params: mx.array  # (P,) 归一化拟合空间参数
     cov: mx.array  # (P,P) 参数协方差 (同空间)
@@ -53,42 +53,64 @@ class SceneGraph:
         shape: tuple[int, int],
         match_thr: float = 2.0,
         max_misses: int = 3,
+        max_rms: float = 0.5,
+        max_slope: float = 20.0,
     ):
         """shape: 图像 (H,W) —— 归一化拟合空间的尺度基准。
         match_thr: Bhattacharyya 匹配阈值 (宁并勿分)。
-        max_misses: 连续冲突多少帧后节点退场。"""
+        max_misses: 连续冲突多少帧后节点退场。
+        max_rms: 拟合残差上限 —— 混合深度区域的高残差拟合不入图。
+        max_slope: 平面坡度上限 —— 边界混合区是干净深度坡 (残差低),
+        rms 门挡不住, 但 |a|~1e2 的陡坡不是真实表面, 留稠密场。"""
         self.h, self.w = shape
         self.s = float(max(shape))
         self.match_thr = match_thr
         self.max_misses = max_misses
+        self.max_rms = max_rms
+        self.max_slope = max_slope
         self.nodes: list[SceneNode] = []
         self.deaths = 0  # 累计退场数 (运行统计)
 
     # ── 匹配: 同空间 Bhattacharyya ─────────────────────────────────
 
-    def _bhatt(self, m1, c1, m2, c2) -> float:
-        """两组 (μ,Σ) 的 Bhattacharyya 距离 (同参数空间内)。"""
+    @staticmethod
+    def _logdet_batch(a: mx.array) -> mx.array:
+        """批量 logdet (特征值和, (K,P,P) → (K,))。"""
+        ev = mx.linalg.eigh(a, stream=mx.cpu)[0]
+        return mx.sum(mx.log(mx.maximum(ev, 1e-12)), axis=-1)
+
+    def _bhatt_batch(
+        self, m1: mx.array, c1: mx.array, m2: mx.array, c2: mx.array
+    ) -> mx.array:
+        """K 组 (μ,Σ) 对单候选的 Bhattacharyya 距离 (向量化一批算):
+        d_B = ⅛ΔμᵀΣ̄⁻¹Δμ + ½ln(detΣ̄/√(detΣᵢ·detΣⱼ))。
+        m1 (K,P), c1 (K,P,P), m2 (P,), c2 (P,P) → (K,)。"""
+        dim = c1.shape[-1]
         cb = (c1 + c2) * 0.5
-        dm = (m1 - m2)[:, None]
-        inv = mx.linalg.inv(cb + 1e-9 * mx.eye(cb.shape[0]), stream=mx.cpu)
-        t1 = float(dm.T @ inv @ dm) / 8.0
+        inv = mx.linalg.inv(cb + 1e-9 * mx.eye(dim), stream=mx.cpu)
+        dm = (m1 - m2)[:, :, None]  # (K,P,1)
+        t1 = (dm.transpose(0, 2, 1) @ inv @ dm)[:, 0, 0] / 8.0
         t2 = 0.5 * (
-            VBGMM.logdet_spd(cb)
-            - 0.5 * (VBGMM.logdet_spd(c1) + VBGMM.logdet_spd(c2))
+            self._logdet_batch(cb)
+            - 0.5 * (self._logdet_batch(c1) + self._logdet_batch(c2[None]))
         )
         return t1 + t2
 
     def _match(self, fit: PrimFit) -> int:
-        """找同品节点 (kind 相同且 d_B < 阈值), 返回节点下标或 −1。"""
-        best, bi = self.match_thr, -1
+        """找同品节点 (kind 相同且 d_B < 阈值), 返回节点下标或 −1。
+        批量 Bhattacharyya: 逐对 CPU 求逆在百级节点时是主开销
+        (实测 ~1.4s), 一次批算替代。"""
+        cand = [
+            (i, nd) for i, nd in enumerate(self.nodes) if nd.kind == fit.kind
+        ]
+        if not cand:
+            return -1
         p = mx.array(fit.params, dtype=mx.float32)
-        for i, nd in enumerate(self.nodes):
-            if nd.kind != fit.kind:
-                continue
-            d = self._bhatt(nd.params, nd.cov, p, fit.cov)
-            if d < best:
-                best, bi = d, i
-        return bi
+        mus = mx.stack([nd.params for _, nd in cand])
+        covs = mx.stack([nd.cov for _, nd in cand])
+        d = self._bhatt_batch(mus, covs, p, fit.cov)
+        bi = int(mx.argmin(d))
+        return cand[bi][0] if float(d[bi]) < self.match_thr else -1
 
     # ── 累积: 信息滤波融合 ─────────────────────────────────────────
 
@@ -112,7 +134,8 @@ class SceneGraph:
             na, nb = a / s, b / s
             nc = c - a * (w / 2) / s - b * (h / 2) / s
             nl = math.sqrt(na * na + nb * nb + 1.0)
-            return Plane((na / nl, nb / nl, -1.0 / nl), nc / nl)
+            # z = na·x + nb·y + nc ⇔ (−na)x + (−nb)y + z = nc
+            return Plane((-na / nl, -nb / nl, 1.0 / nl), nc / nl)
         cu, cv, cz, rho = (float(params[i]) for i in range(4))
         return Sphere((cu * s + w / 2, cv * s + h / 2, cz), rho * s)
 
@@ -126,7 +149,16 @@ class SceneGraph:
         for fit in res.fits:
             if fit.blade is None or fit.cov is None:
                 continue
+            if fit.rms > self.max_rms:
+                continue  # 混合深度区域的高残差拟合, 留稠密场
+            if fit.kind == "plane" and (
+                abs(float(fit.params[0])) > self.max_slope
+                or abs(float(fit.params[1])) > self.max_slope
+            ):
+                continue  # 边界混合区的陡坡 (低残差但不是真实表面)
+            region = self._region_of(fit, res)  # 先记 rid (见下)
             if M is not None:
+                # _align 经 _replace 产生新对象, identity 查询会丢 rid
                 fit = self._align(fit, M)
             i = self._match(fit)
             if i >= 0:
@@ -137,7 +169,7 @@ class SceneGraph:
                     SceneNode(
                         fit.blade, fit.kind,
                         mx.array(fit.params, dtype=mx.float32),
-                        fit.cov, self._region_of(fit, res),
+                        fit.cov, region,
                     )
                 )
                 created += 1
@@ -151,7 +183,7 @@ class SceneGraph:
             nx, ny, nz = float(vals[1]), float(vals[2]), float(vals[3])
             dd = float(vals[5])
             a_px, b_px = nx / (-nz), ny / (-nz)
-            c_px = -dd / nz
+            c_px = dd / nz  # z = (dd − nx·x − ny·y)/nz, 常数项 = dd/nz
             a = a_px * self.s
             b = b_px * self.s
             c = c_px + a_px * self.w / 2 + b_px * self.h / 2
@@ -269,6 +301,116 @@ class SceneGraph:
     def as_cue(self, render: mx.array, precision: float = 50.0) -> DepthCue:
         """场景渲染作高精度 DepthCue 反喂融合层 (闭环契约)。"""
         return DepthCue(render, mx.full(render.shape, precision))
+
+    def detect_symmetry(
+        self,
+        rid_map: mx.array,
+        ang_deg: float = 15.0,
+        dist_tol: float = 1.0,
+        min_overlap: float = 0.5,
+        max_samples: int = 200,
+    ) -> list[SymmetryMatch]:
+        """镜像面对称检测 (prior.md 几何与结构: 对称性先验)。
+
+        关键教训: 任意两平面关于其角平分面是*精确*镜像的
+        (相交面交换/平行面中分面), blade 级验证恒真、无鉴别力 ——
+        真门在**支撑城**: 区域 i 的像素升上自身平面 → 跨候选面
+        反射 → 投影回图像, 落在区域 j 内的比例 (双向取 min) ≥
+        min_overlap 才算对称。候选面 = 角平分面闭式 (单位法向
+        (n₁∓n₂)·x = d₁∓d₂, 两支覆盖相交/平行)。blade 一致性只作
+        松门 (拟合噪声容忍)。球-球对称留钩。低频后台层。"""
+        h, w = rid_map.shape
+        rm = rid_map.tolist()
+        planes = [
+            (k, nd) for k, nd in enumerate(self.nodes) if nd.kind == "plane"
+        ]
+
+        def blade_nd(nd: SceneNode) -> tuple[list[float], float]:
+            v = nd.blade.values
+            return [float(v[k]) for k in (1, 2, 3)], float(v[5])
+
+        def samples(rid: int) -> list[tuple[int, int]]:
+            """区域像素 (行, 列) 等距抽样到 max_samples。"""
+            pts = [
+                (r, c)
+                for r in range(h)
+                for c in range(w)
+                if rm[r][c] == rid
+            ]
+            if len(pts) > max_samples:
+                step = len(pts) / max_samples
+                pts = [pts[int(k * step)] for k in range(max_samples)]
+            return pts
+
+        def overlap(
+            nd_from: SceneNode, rid_from: int, mirror: Plane, rid_to: int
+        ) -> float:
+            """from 区像素升上自身平面 → 反射 → 投影落在 to 区的比例。"""
+            n, d = blade_nd(nd_from)
+            mv = mirror.values
+            nm = [float(mv[k]) for k in (1, 2, 3)]
+            dm = float(mv[5])
+            if abs(n[2]) < 1e-9:
+                return 0.0
+            pts = samples(rid_from)
+            if not pts:
+                return 0.0
+            hit = 0
+            for r, c in pts:
+                z = (d - n[0] * c - n[1] * r) / n[2]  # 平面提升
+                t = nm[0] * c + nm[1] * r + nm[2] * z - dm
+                x2, y2 = c - 2 * t * nm[0], r - 2 * t * nm[1]
+                ci, ri = int(round(x2)), int(round(y2))
+                if 0 <= ri < h and 0 <= ci < w and rm[ri][ci] == rid_to:
+                    hit += 1
+            return hit / len(pts)
+
+        out: list[SymmetryMatch] = []
+        for a in range(len(planes)):
+            for b in range(a + 1, len(planes)):
+                i, nd_i = planes[a]
+                j, nd_j = planes[b]
+                n1, d1 = blade_nd(nd_i)
+                n2, d2 = blade_nd(nd_j)
+                for sgn in (1.0, -1.0):  # 两条角平分面
+                    nm = [n1[k] - sgn * n2[k] for k in range(3)]
+                    nl = math.sqrt(sum(v * v for v in nm))
+                    if nl < 1e-9:
+                        continue  # 平行面的另一支由 sgn=-1 覆盖
+                    # Plane 构造只归一法向不缩放距离, d 须预除 |nm|
+                    mirror = Plane(tuple(nm), (d1 - sgn * d2) / nl)
+                    # blade 一致性松门 (理想情形恒真, 容忍拟合噪声)
+                    ref = reflect(nd_i.blade, mirror)
+                    nr = [float(ref.values[k]) for k in (1, 2, 3)]
+                    dr = float(ref.values[5])
+                    dp = sum(nr[k] * n2[k] for k in range(3))
+                    if dp < 0:  # 法向符号对齐 (blade 轴向任意)
+                        nr, dr, dp = [-v for v in nr], -dr, -dp
+                    ang = math.degrees(math.acos(min(max(dp, -1.0), 1.0)))
+                    if ang >= ang_deg or abs(dr - d2) >= dist_tol:
+                        continue
+                    # 真门: 支撑城双向重叠
+                    ov = min(
+                        overlap(nd_i, nd_i.region, mirror, nd_j.region),
+                        overlap(nd_j, nd_j.region, mirror, nd_i.region),
+                    )
+                    if ov >= min_overlap:
+                        out.append(
+                            SymmetryMatch(
+                                mirror, (i, j), ang + abs(dr - d2) + (1 - ov)
+                            )
+                        )
+                        break  # 一支角平分面命中即可
+        out.sort(key=lambda m: m.residual)
+        return out
+
+
+class SymmetryMatch(NamedTuple):
+    """镜像对称检测产物: 镜像面 + 对称节点对 (nodes 索引) + 残差。"""
+
+    mirror: Plane  # 镜像面 blade
+    pair: tuple[int, int]  # 对称节点对 (self.nodes 索引)
+    residual: float  # 法向角差(度) + 距离差 (排序用, 混合量纲)
 
 
 def reflect(node_blade, mirror: Plane):
@@ -389,3 +531,31 @@ if __name__ == "__main__":
         f"反射结果 ({rx},{ry},{rz})"
     )
     print(f"5. reflect: (2,1,3) → ({rx:.1f},{ry:.1f},{rz:.1f}) ✓")
+
+    # ── 6. 对称面检测: 支撑城重叠是真门 ────────────────────────────
+    # 定理: 任意两平面关于其角平分面精确镜像 → blade 验证无鉴别力;
+    # 真门 = 区域支撑城反射重叠。场景: 屋顶对 π1: z=−0.5x+37 (左区),
+    # π2: z=0.5x−27 (右区) 关于 x=64 镜像; π3: z=0.3x+5 无对称伙伴
+    sg6 = SceneGraph((H, W))
+    rid6 = mx.zeros((H, W), dtype=mx.int32)
+    rid6 = rid6.at[:, 32:64].add(1)
+    rid6 = rid6.at[:, 64:96].add(2)
+    rid6 = rid6.at[40:60, 100:120].add(3)
+    sg6.nodes = [
+        SceneNode(Plane((0.5, 0.0, 1.0), 37.0 / math.sqrt(1.25)), "plane",
+                  mx.array([-0.5, 0.0, 5.0]), mx.eye(3), 1),
+        SceneNode(Plane((-0.5, 0.0, 1.0), -27.0 / math.sqrt(1.25)), "plane",
+                  mx.array([0.5, 0.0, 5.0]), mx.eye(3), 2),
+        SceneNode(Plane((-0.3, 0.0, 1.0), 5.0 / math.sqrt(1.09)), "plane",
+                  mx.array([0.3, 0.0, 5.0]), mx.eye(3), 3),
+    ]
+    syms = sg6.detect_symmetry(rid6)
+    assert len(syms) == 1, f"应只检出 1 对: {len(syms)}"
+    m = syms[0]
+    assert m.pair == (0, 1), m.pair
+    # 镜像面 x=64: 法向 ±x 且过 (64, 0, 0)
+    mv = m.mirror.values
+    assert abs(abs(float(mv[1])) - 1.0) < 1e-3, f"镜像面法向: {mv[1]:.3f}"
+    assert abs(m.mirror.dist(Point(64.0, 0.0, 0.0))) < 1e-3, "应过 x=64"
+    print(f"6. 对称面: 屋顶对检出 (镜像面 x=64, 残差 {m.residual:.3f}), "
+          f"非对称对被支撑城门拦下 ✓")
