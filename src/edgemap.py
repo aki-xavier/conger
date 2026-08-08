@@ -224,7 +224,9 @@ class EdgePrior:
         )
 
         def gate(other: mx.array) -> mx.array:
-            """相对差的 sigmoid 门控 (loc 高于对侧 → ≈1)。"""
+            """相对差的 sigmoid 门控 (loc 高于对侧 → ≈1)。
+            分母地板 1e-6 是绝对量纲: loc≈0 的平坦区噪声差被放大,
+            但该处 like≈0 乘出来仍 ≈0, 无害。"""
             z = beta * (loc - other) / mx.maximum(loc, 1e-6)
             return 1.0 / (1.0 + mx.exp(-z))
 
@@ -254,7 +256,7 @@ class EdgePrior:
         e = mx.stack([s.energy for s in rw.scales], axis=-1)
         p = e / mx.maximum(mx.sum(e, axis=-1, keepdims=True), 1e-12)
         ori = mx.stack([s.ori for s in rw.scales], axis=-1)
-        conf = mx.broadcast_to(mx.sqrt(p), p.shape)  # 能量弱的方向不可信
+        conf = mx.sqrt(p)  # 能量弱的方向不可信
         _, hp = self.scale(rw)
         return self.propagate(
             p, ori, conf, self.n_iter, self.lam, self.gain, hp, self.eps

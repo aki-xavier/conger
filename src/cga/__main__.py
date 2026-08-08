@@ -66,6 +66,9 @@ def main() -> None:
     c = Circle((0, 0, 0), 1.0, (0, 0, 1))
     check("point on circle", close(vmax(Point(0, 1, 0).ip(c)), 0))
     check("point off circle", vmax(Point(0, 0, 1).ip(c)) > 1e-3)
+    # 非单位法向: d 须按单位法向计算 (回归: Plane 归一化 n 但不缩放 d)
+    cnu = Circle((1, 2, 3), 2.0, (0, 0, 2))
+    check("circle non-unit normal", close(vmax(Point(3, 2, 3).ip(cnu)), 0))
 
     # 退化输入守卫
     try:

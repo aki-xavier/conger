@@ -60,7 +60,8 @@ class FrameOut:
 
 
 def prev_z_of(pts: mx.array, depth: mx.array) -> mx.array:
-    """点列 (N,2) (row,col) 在深度图上的采样值 (最近邻, 越界裁剪)。"""
+    """点列 (N,2) (row,col) 在深度图上的采样值 (floor 截断取整,
+    偏差 ≤1px; 越界裁剪)。"""
     h, w = depth.shape
     rows = mx.clip(pts[:, 0].astype(mx.int32), 0, h - 1)
     cols = mx.clip(pts[:, 1].astype(mx.int32), 0, w - 1)
@@ -93,6 +94,13 @@ class RealtimePipeline:
         self._ls = LoopState(img0.shape, depth0) if loop else None
         if tracker is not None:
             self.tracker = tracker
+            if loop:
+                # 外部注入 tracker 也要挂闭环钩子, 否则 _ls 永远
+                # 不被驱动 = 静默无闭环 (review 发现的静默失效)
+                if tracker.loop_hook is None:
+                    tracker.loop_hook = self._loop_hook
+                if tracker.loop_feedback is None:
+                    tracker.loop_feedback = self._loop_feedback
         else:
             seg = None
             if with_segment:
@@ -108,7 +116,9 @@ class RealtimePipeline:
         self._submit(like0, feat)
 
     def loop_state(self) -> LoopState | None:
-        """闭环状态 (未接闭环时为 None)。"""
+        """闭环状态 (未接闭环时为 None)。
+        线程安全: 后台 worker 写 st.*, 调用方须在 wait_next 返回后
+        读 (版本屏障), 否则读到半更新状态。"""
         return self._ls
 
     def _loop_feedback(self) -> mx.array | None:
@@ -156,6 +166,7 @@ class RealtimePipeline:
         else:
             st.scene.accumulate(fr)
         # 深度/反馈通道: 场景渲染 (rid 图使跨帧渲染成立)
+        prev_depth = st.depth  # 上帧渲染 (P 的深度采样源, 见下)
         render, _ = st.scene.render(rid_map, fr.depth)
         st.feedback = st.scene.feedback(render)
         st.depth = render
@@ -186,10 +197,15 @@ class RealtimePipeline:
             pr, pc = float(P[j][0]), float(P[j][1])
             qr, qc = float(Q[int(qi[j])][0]), float(Q[int(qi[j])][1])
             # 链级统一深度 (两帧采样合并取中位): 边沿链跨深度不连续,
-            # 分别采样会得到不一致的 z (实测 Δz 1.9 毁掉反投影)
-            zs = mx.concatenate(
-                [prev_z_of(P, st.depth), prev_z_of(Q, render)]
+            # 分别采样会得到不一致的 z (实测 Δz 1.9 毁掉反投影)。
+            # P 采上帧渲染 (prev_depth), Q 采当帧 —— 曾误两采当帧
+            # (st.depth 先被覆盖), 运动物体的 P 落到背景深度
+            z_prev = (
+                prev_z_of(P, prev_depth)
+                if prev_depth is not None
+                else prev_z_of(Q, render)
             )
+            zs = mx.concatenate([z_prev, prev_z_of(Q, render)])
             z_tid = float(mx.median(zs))
             pps.append((pc * z_tid / fx, pr * z_tid / fx, z_tid))
             qqs.append((qc * z_tid / fx, qr * z_tid / fx, z_tid))

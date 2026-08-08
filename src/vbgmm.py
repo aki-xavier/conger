@@ -20,9 +20,6 @@ from utils import Utils
 #        ▼
 #   __post_init__: z-score 标准化 (mu/sd)
 #        │
-#        ├─ 冷启动且给 alpha0_grid → select_alpha0(): 网格逐候选 fit,
-#        │   取最终 ELBO 最大者 (经验贝叶斯, 固定 key 保证可比)
-#        │
 #        └─ fit(): VB-EM 主循环 (Bishop 10.2)
 #             init_resp(): 暖启动后验先做一次 E 步; 否则随机中心硬分配
 #             loop ≤ max_iter: online_update(ρ=1) —— 一次调用即经典
@@ -76,15 +73,11 @@ class VBGMM:
     x_orig: mx.array  # (N, D) 原始特征
     k_max: int = 8
     alpha0: float = 1e-2  # Dirichlet 浓度: 小 → 稀疏混合
-    alpha0_grid: tuple[float, ...] | None = None  # 冷启动经验贝叶斯网格 (选定即冻结)
     beta0: float = 1.0  # NIW 均值先验强度
     max_iter: int = 100
     tol: float = 1e-5
-    subsample: int = 0  # >0: M 步子采样数; <0: 自动按 subsample_cap 封顶 (E 步始终全图)
-    subsample_cap: int = 8192  # 自动子采样的预算上限 (调度器接管前的默认形态)
+    subsample: int = 0  # >0: M 步子采样数 (E 步始终全图)
     warm: Posterior | None = None  # 暖启动: 上一帧的后验 (online VB 简化版)
-    restarts: int = 1  # 冷启动多起点数 (>1: 固定 key 0..restarts-1, 取最优 ELBO)
-    elbo_every: int = 1  # 每几轮算一次 ELBO (标量同步是固定开销)
     mu: mx.array | None = None  # 特征均值 (标准化用)
     sd: mx.array | None = None
     r: mx.array | None = None  # (N, K) 责任
@@ -182,44 +175,13 @@ class VBGMM:
         self.mu = mx.mean(x, axis=0)
         self.sd = mx.maximum(mx.sqrt(mx.var(x, axis=0)), 1e-6)
         z = (x - self.mu) / self.sd
-        if self.alpha0_grid is not None and self.warm is None:
-            self.select_alpha0(x)
-        elif self.warm is None and self.restarts > 1:
-            # 多起点重启: 多个固定 key 冷启动, 取最终 ELBO 最大者
-            # (防单起点撞上差的局部最优; key 固定, 结果可复现)
-            best_elbo, saved = -math.inf, None
-            for key in range(self.restarts):
-                self.elbo = []
-                self.fit(x, key)
-                if self.elbo[-1] > best_elbo:
-                    best_elbo = self.elbo[-1]
-                    saved = (self.r, self.alpha, self.posterior, list(self.elbo))
-            self.r, self.alpha, self.posterior, self.elbo = saved  # type: ignore
-        else:
-            self.fit(x, 0)
+        self.fit(x, 0)
         nk = mx.sum(self.r, axis=0)
         self.weights = self.alpha / mx.sum(self.alpha)
         self.means_orig = (self.r.T @ x) / mx.maximum(nk[:, None], 1e-12)
         # online VB 统计量状态的初值 (online_update 的 EWMA 起点)
         nks, xbars, ss = self.stats(z, self.r)
         self.acc = self.accumulate(nks, xbars, ss)
-
-    def select_alpha0(self, x: mx.array):
-        """经验贝叶斯选 α0: 对网格每个候选完整拟合, 取最终 ELBO 最大者。
-        冷启动 init_resp 用固定 key, 各候选初始责任一致, ELBO 可比。
-        只有冷启动时启用 (暖启动应延续上一帧的先验, 不重新选)。"""
-        best = (-math.inf, self.alpha0)
-        saved = None
-        assert self.alpha0_grid is not None
-        for a in self.alpha0_grid:
-            self.alpha0 = a
-            self.elbo = []
-            self.fit(x)
-            if self.elbo[-1] > best[0]:
-                best = (self.elbo[-1], a)
-                saved = (self.r, self.alpha, self.posterior, list(self.elbo))
-        self.alpha0 = best[1]
-        self.r, self.alpha, self.posterior, self.elbo = saved  # type: ignore
 
     # ── VB-EM 主循环 ──────────────────────────────────────────────
 
@@ -230,10 +192,8 @@ class VBGMM:
         经典 VB-EM 的一次迭代 (E 步 → 记 bound → M 步), 故离线/在线
         共享同一条代码路径。子采样只作用迭代过程, 最终责任对全图重算。
         """
-        z = (x - self.mu) / self.sd  # type: ignore
+        z = (x - self.mu) / self.sd
         sub = self.subsample
-        if sub < 0:
-            sub = min(z.shape[0], self.subsample_cap)
         if 0 < sub < z.shape[0]:
             idx = mx.random.permutation(z.shape[0], key=mx.random.key(1))
             x_fit = x[idx[:sub]]
@@ -258,7 +218,7 @@ class VBGMM:
         n_iter = self.max_iter if self.warm is not None else self.max_iter - 1
         done = False
         for it in range(n_iter):
-            mon = it % self.elbo_every == 0 and (it > 0 or self.warm is None)
+            mon = it > 0 or self.warm is None
             r = self.online_update(x_fit, rho=1.0, monitor=mon)
             if mon:
                 bound = self.elbo[-1]
@@ -275,9 +235,8 @@ class VBGMM:
         self.alpha = self.posterior.alpha  # type: ignore
 
     def init_resp(self, z: mx.array, key: int = 0) -> mx.array:
-        """冷启动初始责任: 随机中心硬分配 + 平滑 (key 固定 → 可复现;
-        多起点重启见 __post_init__ 的 restarts)。暖启动不需要 ——
-        直接以旧后验进入 EM 循环。"""
+        """冷启动初始责任: 随机中心硬分配 + 平滑 (key 固定 → 可复现)。
+        暖启动不需要 —— 直接以旧后验进入 EM 循环。"""
         n, _ = z.shape
         k = self.k_max
         idx = mx.random.permutation(n, key=mx.random.key(key))[:k]
@@ -605,15 +564,20 @@ class VBGMM:
     def neighbor_similarity(r: mx.array, shape: tuple[int, int]) -> mx.array:
         """共分配相似度: r_i·r_j 是后验意义下两像素同类的概率。
         对 4 邻域取均值 → 区域内部 ≈1, 边界 ≈0, 即相似性聚类的
-        软边界图 (不需要 N×N 全相似度矩阵)。"""
+        软边界图 (不需要 N×N 全相似度矩阵)。
+        按实际邻居数归一 (边框 3、角 2; 恒除 4 会让边框相似度
+        系统性偏低出伪边框)。"""
         h, w = shape
         rr = r.reshape(h, w, -1)
         sim = mx.zeros((h, w))
+        cnt = mx.zeros((h, w))
         right = mx.sum(rr[:, :-1] * rr[:, 1:], axis=-1)
         sim = sim.at[:, :-1].add(right).at[:, 1:].add(right)
+        cnt = cnt.at[:, :-1].add(1.0).at[:, 1:].add(1.0)
         down = mx.sum(rr[:-1] * rr[1:], axis=-1)
         sim = sim.at[:-1].add(down).at[1:].add(down)
-        return sim / 4.0
+        cnt = cnt.at[:-1].add(1.0).at[1:].add(1.0)
+        return sim / mx.maximum(cnt, 1.0)
 
     @staticmethod
     def _hsv_palette(k: int, s: float = 0.75, v: float = 0.95) -> mx.array:

@@ -10,10 +10,11 @@
   arbitrate: 节点残差持续 > 3σ 包络 → 退场, 区域交还残差场
   render: 场景深度渲染 + 残差高亮 → feedback: prior_map (→ 分割层),
        场景渲染作高精度 DepthCue 反喂融合层 (闭环演示)
-  reflect: 反射 versor 共轭 (§7.3 对称补全的工具; 检测器留钩)
+  reflect: 反射 versor 共轭 + detect_symmetry 对称面检测
+       (角平分面候选 + 支撑城重叠真门)
 
   [留钩] 关联边 (meet/op/ip 关联代数); 曼哈顿正交联合精化;
-         对称面检测; motor 协方差传播 (小运动下 blade 对齐足够);
+         motor 协方差传播 (小运动下 blade 对齐足够);
          特征层反馈只留输出字段。
 
 **参数空间约定 (最大的坑)**: 节点携带"空间标签 = 归一化拟合空间"
@@ -41,6 +42,7 @@ class SceneNode:
     params: mx.array  # (P,) 归一化拟合空间参数
     cov: mx.array  # (P,P) 参数协方差 (同空间)
     region: int  # 来源子区域 id
+    sign: float = 1.0  # 球半球符号 (朝向区域质量侧; 平面恒 1)
     hits: int = 1  # 被匹配融合的次数
     misses: int = 0  # 连续冲突帧数 (仲裁用)
 
@@ -127,7 +129,8 @@ class SceneGraph:
         nd.blade = self.make_blade(nd.kind, nd.params)
 
     def make_blade(self, kind: str, params: mx.array):
-        """归一化参数 → 像素单位 blade (换算是 fusion 已有逻辑)。"""
+        """归一化参数 → 像素单位 blade (换算是 fusion 已有逻辑)。
+        注意混合量纲: x,y 为像素, z 为深度单位 (非米制, 已知近似)。"""
         h, w, s = self.h, self.w, self.s
         if kind == "plane":
             a, b, c = (float(params[0]), float(params[1]), float(params[2]))
@@ -169,7 +172,7 @@ class SceneGraph:
                     SceneNode(
                         fit.blade, fit.kind,
                         mx.array(fit.params, dtype=mx.float32),
-                        fit.cov, region,
+                        fit.cov, region, sign=fit.sign,
                     )
                 )
                 created += 1
@@ -202,7 +205,9 @@ class SceneGraph:
         return fit._replace(blade=blade, params=(cu, cv, c2[2], rho / self.s))
 
     def _region_of(self, fit: PrimFit, res: FusionResult) -> int:
-        """fit 的来源区域 (按参数在 fits 列表中的位置反查)。"""
+        """fit 的来源区域 (按对象 identity 在 fits 中的位置反查)。
+        锁定不变量: PrimitiveFit 按区域顺序构建 fits, fits[i] ↔
+        区域 i+1; fusion 层若改构建顺序须同步改这里。"""
         for i, f2 in enumerate(res.fits):
             if f2 is fit:
                 return i + 1
@@ -219,7 +224,9 @@ class SceneGraph:
             res = self._node_residual(nd, depth, subregions)
             sigma = float(mx.sqrt(mx.max(mx.linalg.eigh(nd.cov, stream=mx.cpu)[0])))
             tol = max(3.0 * sigma, 0.05)
-            if res > tol:
+            if res is None or res > tol:
+                # None = 区域消失 (对象出画): 计 miss, 否则节点永不
+                # 退场 (此前返回 0.0 → misses 恒重置, 节点泄漏)
                 nd.misses += 1
             else:
                 nd.misses = 0
@@ -231,17 +238,20 @@ class SceneGraph:
         self.deaths += died
         return died
 
-    def _node_residual(self, nd: SceneNode, depth: mx.array, sub: mx.array) -> float:
-        """节点在其来源区域的加权 RMS 残差 (渲染 vs 观测)。"""
+    def _node_residual(
+        self, nd: SceneNode, depth: mx.array, sub: mx.array
+    ) -> float | None:
+        """节点在其来源区域的加权 RMS 残差 (渲染 vs 观测)。
+        区域消失 (无像素) 返回 None —— 调用方按 miss 计。"""
         mask = (sub == nd.region).reshape(-1)
         if nd.kind == "plane":
             zr = self._render_plane(nd.params).reshape(-1)
         else:
-            zr = self._render_sphere(nd.params).reshape(-1)
+            zr = self._render_sphere(nd).reshape(-1)
         d = depth.reshape(-1)
         k = int(mx.sum(mask))
         if k == 0:
-            return 0.0
+            return None  # 区域消失 → miss (调用方处理)
         key = mx.where(mask, mx.arange(mask.shape[0]), mask.shape[0])
         idx = mx.argsort(key)[:k]
         return float(mx.sqrt(mx.mean((d[idx] - zr[idx]) ** 2)))
@@ -258,17 +268,18 @@ class SceneGraph:
         v = (yy - self.h / 2) / self.s
         return params[0] * u + params[1] * v + params[2]
 
-    def _render_sphere(self, params: mx.array) -> mx.array:
-        """球深度渲染 (上半球, 朝向相机)。"""
+    def _render_sphere(self, nd: SceneNode) -> mx.array:
+        """球深度渲染: cz + sign·√rr (sign = 节点半球符号,
+        此前硬编码上半球, 背向半球节点渲染全错)。"""
         yy, xx = mx.meshgrid(
             mx.arange(self.h, dtype=mx.float32),
             mx.arange(self.w, dtype=mx.float32), indexing="ij",
         )
         u = (xx - self.w / 2) / self.s
         v = (yy - self.h / 2) / self.s
-        cu, cv, cz, rho = params[0], params[1], params[2], params[3]
+        cu, cv, cz, rho = nd.params[0], nd.params[1], nd.params[2], nd.params[3]
         rr = mx.maximum(rho**2 - (u - cu) ** 2 - (v - cv) ** 2, 0.0)
-        return cz - mx.sqrt(rr)
+        return cz + nd.sign * mx.sqrt(rr)
 
     def render(
         self, subregions: mx.array, dense: mx.array
@@ -281,7 +292,7 @@ class SceneGraph:
             zr = (
                 self._render_plane(nd.params)
                 if nd.kind == "plane"
-                else self._render_sphere(nd.params)
+                else self._render_sphere(nd)
             )
             mask = subregions == nd.region
             out = mx.where(mask, zr, out)
@@ -559,3 +570,20 @@ if __name__ == "__main__":
     assert abs(m.mirror.dist(Point(64.0, 0.0, 0.0))) < 1e-3, "应过 x=64"
     print(f"6. 对称面: 屋顶对检出 (镜像面 x=64, 残差 {m.residual:.3f}), "
           f"非对称对被支撑城门拦下 ✓")
+
+    # ── 7. 球节点: 半球符号渲染 (P0 修复: 曾硬编码上半球) ─────────
+    sg7 = SceneGraph((H, W))
+    sph_blade = Sphere((64.0, 48.0, 3.0), 1.5)
+    prm7 = mx.array([0.0, 0.0, 3.0, 1.5])  # (cu,cv,cz,ρ) 归一化
+    sub7 = mx.ones((H, W), dtype=mx.int32)
+    sg7.nodes = [
+        SceneNode(sph_blade, "sphere", prm7, mx.eye(4), 1, sign=-1.0)
+    ]
+    r_near, _ = sg7.render(sub7, mx.zeros((H, W)))
+    sg7.nodes = [SceneNode(sph_blade, "sphere", prm7, mx.eye(4), 1,
+                           sign=1.0)]
+    r_far, _ = sg7.render(sub7, mx.zeros((H, W)))
+    # 球心处 (cu=cv=0 → 图中心): 近半球 3−1.5=1.5, 远半球 3+1.5=4.5
+    assert abs(float(r_near[48, 64]) - 1.5) < 1e-4, float(r_near[48, 64])
+    assert abs(float(r_far[48, 64]) - 4.5) < 1e-4, float(r_far[48, 64])
+    print("7. 球节点: sign=−1 渲 1.5 / sign=+1 渲 4.5 (半球符号生效) ✓")

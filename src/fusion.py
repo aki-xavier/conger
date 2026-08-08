@@ -45,14 +45,18 @@ class DepthCue(NamedTuple):
 
 
 class CueFusion:
-    """贝叶斯线索整合: p(d|c₁..c_M) ∝ p(d)∏p(c_i|d)^w_i 的高斯闭式。"""
+    """贝叶斯线索整合: p(d|c₁..c_M) ∝ p(d)∏p(c_i|d) 的高斯闭式
+    (线索权重即其 precision 本身, 无额外指数权重)。"""
 
     @staticmethod
     def run(
         cues: list[DepthCue], prior_precision: float = 1e-3
     ) -> tuple[mx.array, mx.array]:
         """精度加权融合 → (均值, 精度)。prior 为弱全局精度 (分段平滑
-        的职责由图元化接管, 见 flow.md §5.2), 遮挡偏序不进表决。"""
+        的职责由图元化接管, 见 flow.md §5.2), 遮挡偏序不进表决。
+        cues 须非空 (契约)。"""
+        if not cues:
+            raise ValueError("CueFusion.run: cues 不能为空")
         p = mx.full(cues[0].mean.shape, prior_precision)
         d = mx.zeros(cues[0].mean.shape)
         for c in cues:
@@ -219,8 +223,10 @@ class PrimitiveFit:
             rho2[lab] - (u - cu[lab]) ** 2 - (v - cv[lab]) ** 2, 0.0
         )  # 钳底: 负值开方得 NaN 会沿 minimum 传染整个选模
         pred_sp = cz[lab] + sign[lab] * mx.sqrt(rr)
-        ok = (cnt > self.min_points) & cond3 & cond4
+        ok = (cnt > self.min_points) & cond4
         ok = ok & mx.all(mx.isfinite(th4), axis=1) & (rho2 > 0)
+        # 注: 球门不要求 cond3 (平面 Gram 条件数) —— 线状区域平面
+        # 退化时球拟合再好也不该被拒 (两模型的门各自独立)
         res_pl = (z - pred_pl) ** 2 * wt
         res_sp = (z - pred_sp) ** 2 * wt
         rms_pl = mx.sqrt(scatter(res_pl) / mx.maximum(wsum, 1.0))
@@ -255,11 +261,29 @@ class PrimitiveFit:
                 )
             else:
                 prm = (float(cu[r]), float(cv[r]), float(cz[r]), float(rho[r]))
+                # 注意: x,y 换像素而 z 保持深度单位 —— blade 在
+                # (px,px,depth) 混合量纲空间, 非米制 (已知近似;
+                # motor 对齐对球只做中心点变换, 半径不动)
                 blade = Sphere(
                     (prm[0] * s + w / 2, prm[1] * s + h / 2, prm[2]), prm[3] * s
                 )
+                # 协方差 Δ 变换: cov4 是 Kasa (D,E,F,G) 空间的, params
+                # 是 (cu,cv,cz,ρ) 空间 —— 不变换下游 (scenegraph 信息
+                # 滤波/Bhattacharyya) 拿到的就是语义错位的协方差
+                dd, ee, ff = (float(t) for t in th4[r, :3])
+                rho_v = max(prm[3], 1e-6)
+                jm = mx.array(
+                    [
+                        [-0.5, 0.0, 0.0, 0.0],
+                        [0.0, -0.5, 0.0, 0.0],
+                        [0.0, 0.0, -0.5, 0.0],
+                        [dd / (4 * rho_v), ee / (4 * rho_v),
+                         ff / (4 * rho_v), -1.0 / (2 * rho_v)],
+                    ]
+                )
+                cov_s = jm @ cov4[r] @ jm.T
                 fits.append(
-                    PrimFit(blade, "sphere", cov4[r], prm, float(sign[r]),
+                    PrimFit(blade, "sphere", cov_s, prm, float(sign[r]),
                             float(rms_sp[r]))
                 )
         return fits, render, resid
@@ -391,7 +415,9 @@ class ManhattanCoupling:
 
     吸附保区域质心处深度不变 (锚点), 修正全进截距/坡度;
     |m_z| < 0.3 的近垂直面不可表达为 z(x,y), 跳过 (docstring 级
-    已知限制)。协方差/rms 不变 (保守, 吸附不缩不确定度)。"""
+    已知限制)。协方差/rms 不变 (保守, 吸附不缩不确定度)。
+    顺序语义: 先平行后正交, 正交旋转可能微扰刚吸附的平行对齐
+    (corner 概率低, 不回查)。"""
 
     cluster_deg: float = 10.0  # 平行聚类角
     ortho_deg: float = 10.0  # 正交吸附的余差门
@@ -536,7 +562,9 @@ class DepthFusionLayer:
         boundary: 边界强度图 (如 enh) —— 给则稠密场先过边缘感知
         平滑 (E_data+λE_smooth, 紧凑性先验), 再图元化。
         manhattan: True 则图元提升后施加平行/正交吸附
-        (ManhattanCoupling; 默认关 —— 非正交场景不应付代价)。"""
+        (ManhattanCoupling; 默认关 —— 非正交场景不应付代价)。
+        注意 manhattan 路径重渲 render 但不重算 residual
+        (残差场保持吸附前口径)。"""
         d, p = CueFusion.run(cues, self.prior_precision)
         if boundary is not None:
             d = EdgeAwareSmooth().run(d, p, boundary)
@@ -620,7 +648,12 @@ if __name__ == "__main__":
     cu, cv, cz, rho = f2.params
     assert abs(cu) < 2e-2 and abs(cv) < 2e-2 and abs(cz - cz0) < 2e-2
     assert abs(rho - rho0) < 2e-2, f"球参数 {f2.params}"
-    print(f"3. 球提升: c=({cu:.3f},{cv:.3f},{cz:.3f}) ρ={rho:.3f} ✓")
+    # 协方差已 Δ 变换到 (cu,cv,cz,ρ) 空间: 对角元应为正且量级合理
+    assert f2.cov is not None
+    dg = [float(f2.cov[i, i]) for i in range(4)]
+    assert all(x > 0 for x in dg), f"球 cov 对角应正: {dg}"
+    assert dg[2] < 1e-2, f"cz 方差量级: {dg[2]:.2e} (Kasa cz 天然欠优)"
+    print(f"3. 球提升: c=({cu:.3f},{cv:.3f},{cz:.3f}) ρ={rho:.3f} cov✓ ✓")
 
     # ── 5. 反馈闭环: 双平面世界, 缺口边界由真实反馈保持 ─────────────
     # 两个深度平面在 col 64 相接 (深度跳变); enh 在边界上有 16px 缺口
@@ -646,7 +679,7 @@ if __name__ == "__main__":
 
     # ── 6. 退化区域: 残差留稠密场 ───────────────────────────────────
     sub3 = mx.ones((H, W), dtype=mx.int32)
-    sub3[:5, :5] = 2  # 25px 小区域 (>= min_points=10 不退化), 用 2x2
+    sub3[:5, :5] = 2  # 21px 区域 (≥ min_points=10 不退化)
     sub3[:2, :2] = 3  # 4px 区域 → 退化
     fr4 = DepthFusionLayer().run(cues, sub3)
     assert fr4.fits[2].kind == "dense", "4px 区域应退化留稠密场"

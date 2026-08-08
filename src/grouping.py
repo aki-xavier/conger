@@ -39,7 +39,7 @@ CGA blade 只承载输出图元 (稀疏通用语), 不进逐对循环。
      dedupe 3px 去重
        ▼
   GroupingResult (edgels / chains / completions /
-  circles / t_junctions)
+  circles / t_junctions / x_junctions)
 """
 
 import math
@@ -52,7 +52,7 @@ from typing import NamedTuple
 import matplotlib.pyplot as plt
 import mlx.core as mx
 
-from cga import Circle, Line, Point
+from cga import Circle
 from cga.multivector import Multivector
 from edgemap import EdgePrior
 from segment import SegmentResult
@@ -68,11 +68,6 @@ class Edgels(NamedTuple):
     tangent: mx.array  # (N,2) 单位切向 = 法向旋转 90°
     strength: mx.array  # (N,) L_e 峰值 ∈[0,1]
 
-    def cga_point(self, idx: int) -> Multivector:
-        """提升为 2D conformal 点 (x=col, y=row, z=0)。不做反投影 —
-        深度未知时图像点只对应 3D 射线 (flow.md §1.1)。"""
-        r, c = float(self.pos[idx, 0]), float(self.pos[idx, 1])
-        return Point(c, r, 0.0)
 
 
 class TJunction(NamedTuple):
@@ -100,8 +95,7 @@ class GroupingResult(NamedTuple):
     """组织层输出 (flow.md §1): 2D CGA 直接形式图元 + 偏序约束。
     circle_params 与 circles 一一对应 ((x,y) 圆心, ρ), 供分割层
     栅格化用 (blade 本身不反投影)。
-    lines 惰性化: 逐链 cga 积在大图上耗时 2s+, 无人消费即不建 ——
-    需要时用 PerceptualGrouping.line_blades(res) 现取。"""
+    链的 line blade 无人消费, 不建 (大图逐链 cga 积 2s+)。"""
 
     edgels: Edgels
     chains: list[mx.array]  # 每条链: (L,) int edgel 索引, 沿轮廓有序
@@ -320,10 +314,16 @@ class PerceptualGrouping:
 
     def complete(
         self, ed: Edgels, chains: list[mx.array]
-    ) -> tuple[list[tuple[int, int, float]], list[Multivector], list]:
+    ) -> tuple[
+        list[tuple[int, int, float]],
+        list[Multivector],
+        list[tuple[tuple[float, float], float]],
+    ]:
         """不同链端点两两评估 p(连续|两端几何) —— 同一套邻近性 ×
         共圆残差 (臆造边缘会制造假深度不连续, 故只给概率)。
         p ≥ complete_thr 的弧段额外输出拟合圆 blade 与其参数。"""
+        if not chains:
+            return [], [], []  # 空输入守卫 (空帧: edgels/链为零)
         owner = {}
         for cid, ch in enumerate(chains):
             for idx in ch.tolist():
@@ -347,8 +347,8 @@ class PerceptualGrouping:
         circles: list[Multivector] = []
         circle_params: list[tuple[tuple[float, float], float]] = []
         if cand:
-            # 共圆几何批量化 (逐对 pair_geometry 的 MLX 同步是大图瓶颈);
-            # 语义与 pair_geometry 逐字一致 (三分支: 平行/退化/共圆)
+            # 共圆几何批量化 (逐对 Python 的 MLX 同步是大图瓶颈);
+            # 三分支语义: 平行/退化 rho<rho_min/共圆
             ia_l = [p[0] for p in cand]
             ib_l = [p[1] for p in cand]
             ea = mx.array([ends[k] for k in ia_l])
@@ -400,30 +400,6 @@ class PerceptualGrouping:
         completions.sort(key=lambda t: -t[2])
         return completions, circles, circle_params
 
-    def pair_geometry(
-        self, ed: Edgels, a: int, b: int
-    ) -> tuple[float, tuple[tuple[float, float], float] | None]:
-        """两端点共圆残差 (长度量纲, px) 与候选圆参数 ((x,y), ρ)。
-        法向近平行 (直线状) 时圆为 None。坐标转 (x=col, y=row)。"""
-        xa, xb = ed.pos[a], ed.pos[b]
-        na, nb = ed.normal[a], ed.normal[b]
-        d = xb - xa
-        det = float(na[0] * nb[1] - na[1] * nb[0])
-        if abs(det) < self.det_eps:
-            res = abs(float(mx.sum(d * na))) + abs(float(mx.sum(d * nb)))
-            res = max(min(res, self.res_max) - self.res_floor, 0.0)
-            return res, None
-        t = float(d[0] * nb[1] - d[1] * nb[0]) / det
-        c = xa + t * na
-        rho_a = float(mx.sqrt(mx.sum((c - xa) ** 2)))
-        rho_b = float(mx.sqrt(mx.sum((c - xb) ** 2)))
-        if rho_a < self.rho_min:
-            return self.res_max, None
-        res = abs((rho_b**2 - rho_a**2) / (2.0 * rho_a))
-        res += abs((rho_a**2 - rho_b**2) / (2.0 * rho_b))
-        res = max(min(res, self.res_max) - self.res_floor, 0.0)
-        center = (float(c[1]), float(c[0]))  # (x=col, y=row)
-        return min(res, self.res_max), (center, rho_a)
 
     # ── 5. T 结检测: 交叉几何 + 竖杠中断证据 ───────────────────────
 
@@ -442,6 +418,8 @@ class PerceptualGrouping:
         的 through 侧), stub 需弧长 ≥ t_arm_min+t_span (投影 span ≤
         弧长, 差值为死区), 短链在数学上不可能出线; 射线的 stub 侧
         q 在链外 (延长线上), 短链仍可能出线, 不过滤。"""
+        if not chains:
+            return [], []  # 空输入守卫
         # 弧长 (scatter 一次批算)
         lens, owns = [], []
         for cid, ch in enumerate(chains):
@@ -512,7 +490,7 @@ class PerceptualGrouping:
             for k in self.nonzero(hit).tolist():
                 a, b = pairs[pair_of[k]]
                 cands.append((a, b, p1[k] + t[k] * d1[k]))
-        cands += self.endpoint_ray_candidates(ed, chains, bboxes, active)
+        cands += self.endpoint_ray_candidates(ed, chains, active)
 
         out: list[TJunction] = []
         xout: list[XJunction] = []
@@ -660,12 +638,11 @@ class PerceptualGrouping:
         self,
         ed: Edgels,
         chains: list[mx.array],
-        bboxes: list[tuple[float, ...]],
         targets: set[int] | None = None,
     ) -> list[tuple[int, int, mx.array]]:
         """链端点延长线候选: 竖杠链端点沿末端段方向延长, 命中其他
         链的最近交点 (延长 ≤ t_radius) → (遮挡链, 竖杠链, 交点)。
-        全部段打表 (MLX), 全端点一次批算; 包围盒预筛候选段。
+        全部段打表 (MLX), 全端点一次批算; 段中点网格桶预筛。
         targets: 可作为命中目标的链 (through 侧需过弧长过滤);
         stub 侧遍历全部链 (q 在链外, 短链仍可能出线)。"""
         # 段表: P1 (M,2), D1 (M,2), OWN (M,) 段所属链 (原始 id)
@@ -779,15 +756,6 @@ class PerceptualGrouping:
             x_junctions=x_junctions,
         )
 
-    def line_blades(self, res: GroupingResult) -> list[Multivector]:
-        """按需构造 line blade (p1∧p2∧e∞, 直接形式)。
-        逐链 cga 积在大图上 2s+, 故从 run() 的热路径移出 ——
-        需要 CGA 线图元的消费者 (如场景图关联) 现取。"""
-        out = []
-        for ch in res.chains:
-            p1, p2 = res.edgels.cga_point(int(ch[0])), res.edgels.cga_point(int(ch[-1]))
-            out.append(Line(p1, p2))
-        return out
 
     def visualize(self, like: mx.array, res: GroupingResult, out_path: str | Path):
         """链按 id 着色, edgel 带切向刻度, 补全画虚线, T 结画叉。"""
@@ -828,8 +796,8 @@ class TrackedResult(NamedTuple):
     tids: list[int]  # 与 result.chains 平行, 同一物理链跨帧同 id
     ages: list[int]  # 各链连续被追踪的帧数 (1 = 新出现)
     version: int  # 完成序号
-    tj_tids: list[int] = []  # 与 result.t_junctions 平行, 稳定 T 结 id
-    tj_ages: list[int] = []  # 各 T 结连续帧数
+    tj_tids: list[int]  # 与 result.t_junctions 平行, 稳定 T 结 id
+    tj_ages: list[int]  # 各 T 结连续帧数
     segment: SegmentResult | None = None  # 接分割层时的分割结果
 
 
@@ -1040,7 +1008,7 @@ class GroupingTracker:
         app: (H,W,C) 表观特征图 (强度/似然通道) —— 链匹配的
         不变性项 (prior.md: 表观跨帧稳定 = 同一物体判据)。"""
         mx.eval(enh, mean_ori)
-        if like_edge is not None:
+        if like_edge is not None and like_tex is not None:
             mx.eval(like_edge, like_tex)
         if app is not None:
             mx.eval(app)
@@ -1084,19 +1052,27 @@ class GroupingTracker:
                     job = self._pending
                     self._pending = None
                 assert job is not None
-                res = self.pg.run(job[0], job[1])
-                tracked = self._match(res)
-                if self.segmenter is not None and job[2] is not None:
-                    from segment import grouping_contours
+                try:
+                    res = self.pg.run(job[0], job[1])
+                    tracked = self._match(res)
+                    if self.segmenter is not None and job[2] is not None:
+                        from segment import grouping_contours
 
-                    polys, circs = grouping_contours(res)
-                    fb = self.loop_feedback() if self.loop_feedback else None
-                    seg = self.segmenter.run(
-                        job[0], job[2], job[3], polys, circs, prior_map=fb
-                    )
-                    if self.loop_hook is not None:
-                        self.loop_hook(job, tracked, seg)
-                    tracked = tracked._replace(segment=seg)
+                        polys, circs = grouping_contours(res)
+                        fb = self.loop_feedback() if self.loop_feedback else None
+                        seg = self.segmenter.run(
+                            job[0], job[2], job[3], polys, circs, prior_map=fb
+                        )
+                        if self.loop_hook is not None:
+                            self.loop_hook(job, tracked, seg)
+                        tracked = tracked._replace(segment=seg)
+                except Exception:
+                    # 故障隔离: 单帧异常不得杀死守护线程 (此前一帧坏
+                    # 数据即静默死线程, wait_next 只能等超时)
+                    import traceback
+
+                    traceback.print_exc()
+                    continue
                 with self._cond:
                     self._result = tracked
                     self._version += 1
@@ -1257,6 +1233,11 @@ if __name__ == "__main__":
         f"D. X: chains={len(rd.chains)}, t_junctions=0 ✓, "
         f"x_junctions={len(rd.x_junctions)} ✓"
     )
+
+    # 空输入守卫 (P0 修复: 空帧 complete/detect_t_junctions 曾崩)
+    res_empty = pg.run(mx.zeros((32, 32)), mx.zeros((32, 32)))
+    assert not res_empty.chains and not res_empty.t_junctions
+    print("空帧: 0 链 0 T 0 X ✓")
 
     # E. Metelli 门: 四扇区混合定律 (半透明先验)
     # 场景: 背景边竖直 (B1=0.2 左 | B2=0.8 右), 遮层边水平,

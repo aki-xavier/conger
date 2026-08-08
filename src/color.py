@@ -78,6 +78,8 @@ class Color:
         输入 (...,3) 的 RGB (值域 [0,1]); 返回 (...,3) 的 L*a*b*:
         L∈[0,100], a∈[−128,127], b∈[−128,127]。
         """
+        # 入口钳负: where 两分支都求值, 微负输入的 2.4 次幂会 NaN
+        rgb_image = mx.maximum(rgb_image, 0.0)
         # 1. sRGB → 线性 RGB (逆伽马校正)
         mask_linear = rgb_image > 0.04045
         linear_rgb = mx.where(
@@ -237,7 +239,8 @@ class Color:
         means = mx.mean(rgb_image, axis=(-3, -2))  # (...,3) 通道均值
         gray = mx.mean(means, axis=-1, keepdims=True)
         gain = gray / mx.maximum(means, 1e-6)
-        return mx.clip(rgb_image * gain[..., None, :], 0.0, 1.0)
+        # 广播: (…,3) 输入的空间维在 −3/−2 → 增益补两维
+        return mx.clip(rgb_image * gain[..., None, None, :], 0.0, 1.0)
 
     @staticmethod
     def log_chromaticity(rgb_image: mx.array, eps: float = 1e-3) -> mx.array:
@@ -266,6 +269,11 @@ if __name__ == "__main__":
     spread = float(mx.max(means) - mx.min(means))
     assert spread < 0.05, f"校正后通道均值应近等: {means.tolist()}"
     print(f"1. 白平衡: 暖色偏校正, 通道均值散布 {spread:.4f} ✓")
+    # 1b. 4D 批量输入广播 (P0 修复: gain 维度曾错位)
+    wb4 = Color.gray_world_wb(mx.stack([cast, cast]))
+    assert wb4.shape == (2, 32, 96, 3)
+    assert float(mx.max(mx.abs(wb4[0] - wb))) < 1e-6, "批量应与单图一致"
+    print("1b. 白平衡 4D 批量: 广播正确 ✓")
 
     # 2. 对数色度: 同表面两强度 → 色度相同 (阴影不变性)
     dark = base * 0.3

@@ -22,6 +22,7 @@ MLX。本层是离线层, 不做逐帧承诺 (逐帧管线止于 edgemap)。
 """
 
 import heapq
+import math
 from dataclasses import dataclass, field
 from typing import NamedTuple
 
@@ -236,7 +237,7 @@ class RegionHierarchy:
         """在合并高度 τ 处切层级 → 区域标签图 (1..K, mx.int32)。
 
         重放 τ 以下的合并事件 (与构建同序同规则, 结构一致):
-        内边界 (强度 < τ) 消失, 外边界保留。
+        内边界 (强度 ≤ τ) 消失, 外边界保留。
         """
         parent: dict[int, int] = {}
 
@@ -295,8 +296,6 @@ class ContourCut:
         """折线 ((N,2) (row,col) 亚像素) 与圆 ((x,y),ρ) 栅格化为
         (H,W) bool 掩码。短于 min_len 的折线不参与切割 (防碎链过切)。
         """
-        import math
-
         h, w = shape
         mask = [[False] * w for _ in range(h)]
 
@@ -398,6 +397,17 @@ class PixelLabelLayer:
     temperature: float = 2.5  # 软化温度 (合成验证定)
     lam: float = 0.4  # 像素项权重; 区域先验权重 = 1−λ (偏区域平滑)
 
+    @staticmethod
+    def _scatter_mean(vals: mx.array, lab: mx.array, n: int) -> mx.array:
+        """按标签分组求通道均值: vals (N,C) + 标签 (N,) → (n,C)。"""
+        cols = [
+            mx.zeros((n,)).at[lab].add(vals[:, c])
+            for c in range(int(vals.shape[1]))
+        ]
+        out = mx.stack(cols, axis=-1)
+        cnt = mx.zeros((n,)).at[lab].add(mx.ones((int(lab.shape[0]),)))
+        return out / mx.maximum(cnt, 1.0)[:, None]
+
     def soften(self, p: mx.array) -> mx.array:
         """温度软化: normalize(p^(1/T))。p (...,C)。"""
         q = mx.power(mx.maximum(p, 1e-12), 1.0 / self.temperature)
@@ -423,25 +433,14 @@ class PixelLabelLayer:
         n = int(mx.max(sublabels)) + 1
         # 区域先验 π_k: 子区域内 p̃ 的均值 (区域内近似 i.i.d.),
         # 逐通道 scatter-add (同 grouping 的弧长批算)
-        cols = [
-            mx.zeros((n,)).at[lab].add(p[..., c].reshape(-1)) for c in range(3)
-        ]
-        pi = mx.stack(cols, axis=-1)
-        cnt = mx.zeros((n,)).at[lab].add(mx.ones((int(lab.shape[0]),)))
-        pi = pi / mx.maximum(cnt, 1.0)[:, None]
+        pi = self._scatter_mean(p.reshape(-1, 3), lab, n)
         pi_pix = pi[lab].reshape(h, w, 3)
         q = mx.power(pi_pix, 1.0 - self.lam) * mx.power(p, self.lam)
         if macro is not None:
             # 宏簇语义先验: 簇内 p̃ 均值 (同一套 scatter 批算)
             lab_m = macro.reshape(-1)
             m = int(mx.max(macro)) + 1
-            cols_m = [
-                mx.zeros((m,)).at[lab_m].add(p[..., c].reshape(-1))
-                for c in range(3)
-            ]
-            pi_m = mx.stack(cols_m, axis=-1)
-            cnt_m = mx.zeros((m,)).at[lab_m].add(mx.ones((int(lab_m.shape[0]),)))
-            pi_m = pi_m / mx.maximum(cnt_m, 1.0)[:, None]
+            pi_m = self._scatter_mean(p.reshape(-1, 3), lab_m, m)
             q = q * mx.power(pi_m[lab_m].reshape(h, w, 3), w_macro)
         q = q / mx.maximum(q.sum(axis=-1, keepdims=True), 1e-12)
         return q, mx.argmax(q, axis=-1).astype(mx.int32)

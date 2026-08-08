@@ -371,9 +371,11 @@ class RieszWavelet:
         return (c[:, k:] - c[:, :-k]) / k
 
     def ifft2(self, arr: mx.array):
-        """逆变换取实部, 并按 pad 裁回原尺寸。"""
+        """逆变换取实部, 并按 pad 裁回原尺寸。
+        裁剪条件与 update() 统一为 self.pad > 0 (原先用
+        adaptive_pad, 手动 pad + 非自适应时两处行为不一致)。"""
         ret = mx.real(mx.fft.ifft2(arr))
-        if self.adaptive_pad:
+        if self.pad > 0:
             ret = ret[
                 self.pad : self.pad + self.height,
                 self.pad : self.pad + self.width,

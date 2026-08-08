@@ -171,6 +171,9 @@ class Circle(Multivector):
     ):
         """由球心/半径/所在平面法向构造 (球 ∧ 平面的交)。"""
         s = Sphere(center, radius)
-        d = center[0] * normal[0] + center[1] * normal[1] + center[2] * normal[2]
+        # Plane 归一化法向但不缩放 d, 故 d 须用单位法向计算 (零法向由 Plane 抛错)
+        nl = math.sqrt(sum(n * n for n in normal))
+        d_raw = sum(c * n for c, n in zip(center, normal, strict=True))
+        d = d_raw / nl if nl > 1e-12 else 0.0
         p = Plane(normal, d)  # Plane 负责法向归一化与退化检查
         super().__init__(s.op(p).values)

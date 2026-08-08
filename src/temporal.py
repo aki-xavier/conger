@@ -84,7 +84,12 @@ class MotorEKF:
 
     def update(self, p_prev: mx.array, q_cur: mx.array) -> None:
         """点-点对应更新: p_prev (N,3) 上帧点, q_cur (N,3) 本帧点。
-        残差 r = q − T(ξ;p), 雅可比数值化 (Motor.apply 扰动)。"""
+        残差 r = q − T(ξ;p), 雅可比数值化 (to_matrix 扰动)。
+        迭代重线性化时先验只算一次 —— 循环内读 self.cov 会把
+        测量信息 hᵀh/r_obs 计入 n_iter 次 (协方差 ~2× 过自信)。"""
+        p_inv = mx.linalg.inv(
+            self.cov + 1e-9 * mx.eye(6), stream=mx.cpu
+        )  # 先验信息, 迭代外固定
         for _ in range(self.n_iter):
             pred = transform_points(self.xi, p_prev)
             resid = (q_cur - pred).reshape(-1)  # (3N,)
@@ -100,7 +105,6 @@ class MotorEKF:
             h = mx.stack(jac, axis=-1)  # (3N, 6)
             # 信息形式更新: 反演全在 6×6 切空间 —— 直接求 (3N)² 的
             # S⁻¹ 在 float32 下条件数爆炸 (实测逆误差 ~16)
-            p_inv = mx.linalg.inv(self.cov + 1e-9 * mx.eye(6), stream=mx.cpu)
             a = h.T @ h / self.r_obs + p_inv  # 信息矩阵 (6,6)
             rhs = h.T @ resid / self.r_obs
             if self.r_slow > 0:
@@ -214,7 +218,8 @@ class SlowCalibration:
         p_inv = mx.linalg.inv(self.cov + 1e-9 * mx.eye(4), stream=mx.cpu)
         a = h.T @ h / self.r_obs + p_inv
         step = mx.linalg.inv(a, stream=mx.cpu) @ (h.T @ resid / self.r_obs)
-        self.k = self.k + self.lr * step  # 小增益: 时间常数 ≈ 1/lr 帧
+        self.k = self.k + self.lr * step  # lr 保持 1.0; 慢化由 q 承担
+        # (lr 阻尼会让滤波随协方差收缩指数冻结, 见类 docstring)
         self.cov = mx.linalg.inv(a, stream=mx.cpu)
 
 

@@ -224,3 +224,4 @@ __marimo__/
 .DS_Store
 artifacts/*.png
 artifacts/*.jpg
+.pi-subagents/
