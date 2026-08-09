@@ -339,7 +339,9 @@ class OcclusionOrder:
     ) -> list[OrdinalConstraint]:
         """T 结偏序 → 序数约束 (链 → 区域几何映射)。
         behind 链近端点位于背景侧: 背景方向 = 端点 − 结点; front 链
-        最近 edgel 的单位法向按此定向, 两侧偏移 offset 采样区域 id。
+        最近 edgel 的法向按此定向, 两侧偏移 offset 采样区域 id。
+        多偏移尝试 (2/4/6px): 轮廓切割的边界掩码 (rid 0) 会吃掉
+        固定 2px 的采样 (自然图实测映射成功率仅 1%)。
         res 为鸭子类型 (GroupingResult), 避免 fusion→grouping 依赖环。"""
         h, w = rid_map.shape
         pos, normal = res.edgels.pos, res.edgels.normal
@@ -372,11 +374,12 @@ class OcclusionOrder:
             if nr * br + nc_ * bc < 0:
                 nr, nc_ = -nr, -nc_  # 法向定向到背景侧
             pr, pc = float(pts[i, 0]), float(pts[i, 1])
-            rid_f = _rid(pr - offset * nr, pc - offset * nc_)
-            rid_b = _rid(pr + offset * nr, pc + offset * nc_)
-            if rid_f <= 0 or rid_b <= 0 or rid_f == rid_b:
-                continue  # 采样落到同区/无标签 → 约束不可信, 跳过
-            out.append(OrdinalConstraint(t.pos, rid_f, rid_b))
+            for off in (offset, 2 * offset):
+                rid_f = _rid(pr - off * nr, pc - off * nc_)
+                rid_b = _rid(pr + off * nr, pc + off * nc_)
+                if rid_f > 0 and rid_b > 0 and rid_f != rid_b:
+                    out.append(OrdinalConstraint(t.pos, rid_f, rid_b))
+                    break
         return out
 
     def enforce(

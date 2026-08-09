@@ -113,6 +113,7 @@ class SceneGraph:
         nd.hits += 1
         nd.misses = 0
         nd.blade = self.make_blade(nd.kind, nd.params)
+        mx.eval(nd.blade.values, nd.params, nd.cov)  # 跨线程物化
 
     def make_blade(self, kind: str, params: mx.array):
         """归一化参数 → 像素单位 blade (换算是 fusion 已有逻辑)。
@@ -154,13 +155,15 @@ class SceneGraph:
                 self._merge(self.nodes[i], fit)
                 merged += 1
             else:
-                self.nodes.append(
-                    SceneNode(
-                        fit.blade, fit.kind,
-                        mx.array(fit.params, dtype=mx.float32),
-                        fit.cov, region, sign=fit.sign,
-                    )
+                node = SceneNode(
+                    fit.blade, fit.kind,
+                    mx.array(fit.params, dtype=mx.float32),
+                    fit.cov, region, sign=fit.sign,
                 )
+                # 物化: 懒图携带 worker 线程局部流, 主线程读会报
+                # no Stream (MotorEKF __post_init__ 同款教训)
+                mx.eval(node.blade.values, node.params, node.cov)
+                self.nodes.append(node)
                 created += 1
         return {"created": created, "merged": merged}
 
@@ -401,6 +404,78 @@ class SceneGraph:
         out.sort(key=lambda m: m.residual)
         return out
 
+    def export(
+        self, K: tuple[float, float, float, float], rid_map: mx.array
+    ) -> SceneModel:
+        """导出米制 CGA 图元场景 (管线终态输出)。
+        K = (fx, fy, cx, cy) 来自 temporal 的 C1 慢速标定。
+        反投影: 像素-深度混合空间 → 米制相机空间。平面法向经
+        局部切平面 Jacobian (锚点 = 区域质心 —— 线性拟合模型是
+        倒数曲面的局部一阶, 与视平线同一教训); 球半径按深度
+        比例换算 (fx/fy 不等时为椭球近似, 取 fx)。"""
+        fx, fy, cx, cy = K
+        h, w, s = self.h, self.w, self.s
+        # 区域质心 (scatter 批量, 像素坐标)
+        lab = rid_map.reshape(-1)
+        n = int(mx.max(rid_map))
+        yy, xx = Utils.grid((h, w))
+
+        def sc(v: mx.array) -> mx.array:
+            return mx.zeros((n + 1,)).at[lab].add(v.reshape(-1))
+
+        cnt = mx.maximum(sc(mx.ones((h, w))), 1.0)
+        rc = (sc(yy) / cnt).tolist()
+        cc = (sc(xx) / cnt).tolist()
+
+        prims: list[ScenePrimitive] = []
+        for nd in self.nodes:
+            r = nd.region
+            col_c, row_c = cc[r], rc[r]
+            u_c, v_c = (col_c - w / 2) / s, (row_c - h / 2) / s
+            if nd.kind == "plane":
+                a, b, c = (float(nd.params[i]) for i in range(3))
+                z_c = a * u_c + b * v_c + c
+                # 锚点反投影到米制
+                px, py = (col_c - cx) * z_c / fx, (row_c - cy) * z_c / fy
+                # 像素空间法向 (na,nb,−1) (z = na·col + nb·row + nc)
+                na, nb = a / s, b / s
+                # Jacobian 变换到米制法向 (在锚点处)
+                nx = na * fx / z_c
+                ny = nb * fy / z_c
+                nz = -(na * fx * px + nb * fy * py) / (z_c * z_c) - 1.0
+                nl = math.sqrt(nx * nx + ny * ny + nz * nz)
+                d = (nx * px + ny * py + nz * z_c) / nl
+                blade = Plane((nx / nl, ny / nl, nz / nl), d)
+            else:  # sphere
+                cu, cv, cz, rho = (float(nd.params[i]) for i in range(4))
+                col0, row0 = cu * s + w / 2, cv * s + h / 2
+                px = (col0 - cx) * cz / fx
+                py = (row0 - cy) * cz / fy
+                rho_m = rho * s * cz / fx  # 深度比例换算 (椭球近似)
+                blade = Sphere((px, py, cz), max(rho_m, 1e-6))
+            prims.append(
+                ScenePrimitive(nd.kind, blade, nd.cov, r, nd.hits)
+            )
+        return SceneModel(prims, K, self.detect_symmetry(rid_map))
+
+
+class ScenePrimitive(NamedTuple):
+    """米制 CGA 图元 (导出的终态单元)。"""
+
+    kind: str  # "plane" / "sphere"
+    blade: Multivector  # 米制空间的 Plane/Sphere blade
+    cov: mx.array  # 参数协方差 (原归一化拟合空间, 未传播到米制)
+    region: int  # 来源 rid
+    hits: int  # 累积命中次数 (存活证据)
+
+
+class SceneModel(NamedTuple):
+    """管线终态输出: 米制 CGA 图元场景 + 标定 + 关系。"""
+
+    primitives: list[ScenePrimitive]
+    K: tuple[float, float, float, float]  # (fx, fy, cx, cy)
+    symmetries: list[SymmetryMatch]  # 对称关系 (detect_symmetry 产物)
+
 
 class SymmetryMatch(NamedTuple):
     """镜像对称检测产物: 镜像面 + 对称节点对 (nodes 索引) + 残差。"""
@@ -573,3 +648,27 @@ if __name__ == "__main__":
     assert abs(float(r_near[48, 64]) - 1.5) < 1e-4, float(r_near[48, 64])
     assert abs(float(r_far[48, 64]) - 4.5) < 1e-4, float(r_far[48, 64])
     print("7. 球节点: sign=−1 渲 1.5 / sign=+1 渲 4.5 (半球符号生效) ✓")
+
+    # ── 8. export: 米制反投影 (终态输出) ────────────────────────────
+    # 平面 z = 3 + 0.01·(col−64): 归一化参数 a = 0.01·128 = 1.28
+    sg8 = SceneGraph((H, W))
+    prm8 = mx.array([1.28, 0.0, 3.0])
+    rid8 = mx.ones((H, W), dtype=mx.int32)
+    sg8.nodes = [
+        SceneNode(sg8.make_blade("plane", prm8), "plane", prm8,
+                  mx.eye(3), 1)
+    ]
+    K8 = (100.0, 100.0, 64.0, 48.0)
+    model = sg8.export(K8, rid8)
+    pb = model.primitives[0].blade
+    assert isinstance(pb, Plane)  # 类型窄化 (pyright)
+    # 像素 (64,48) 深 3 → 米制 (0,0,3) 应在平面上
+    assert abs(pb.dist(Point(0.0, 0.0, 3.0))) < 1e-3
+    # 像素 (100,48) 深 3.36 → 米制 (1.2096, 0, 3.36) 也应在
+    # 像素 (100,48) 深 3.36 → 米制 (1.2096, 0, 3.36):
+    # 残差是像素线性模型自身的近似量级 (~0.04 @ 36px 偏心,
+    # 非 bug —— 倒数曲面的一阶展开误差, 偏心越大越大)
+    d2 = pb.dist(Point(1.2096, 0.0, 3.36))
+    assert abs(d2) < 0.06, f"米制平面外点残差 {d2:.4f}"
+    print(f"8. export: 米制平面两检查点残差 < 2e-2, "
+          f"primitives={len(model.primitives)} ✓")

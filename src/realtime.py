@@ -48,6 +48,7 @@ class LoopState:
         from segment import SubregionTracker
 
         self.region_tracker = SubregionTracker()  # 跨帧区域对应
+        self.last_rid: object = None  # 最新 rid 图 (export 用)
 
 
 @dataclass(slots=True)
@@ -170,6 +171,7 @@ class RealtimePipeline:
         # 跨帧区域对应: 场景图节点以稳定 rid 为键 (此前用当帧子区域
         # id, 跨帧标签重排导致渲染错位 —— 已修, 见 SubregionTracker)
         rid_map, _, _alts = st.region_tracker.run(seg.subregions, app=app)
+        st.last_rid = rid_map
         # T 结遮挡偏序 → 序数深度约束 (prior.md: 高权重不可下调)
         occ = OcclusionOrder.constraints_from_grouping(
             tracked.result, rid_map
@@ -443,3 +445,11 @@ if __name__ == "__main__":
         f"真闭环: dx_ss={dx_ss:.4f} (真值 {DX}), 深度 {z1:.1f}/{z3:.1f}/{z2:.1f}, "
         f"边界分离保持 ✓"
     )
+    # 终态输出: 米制 CGA 图元场景 (export 验证)
+    st2 = pipe2.loop_state()
+    model = st2.scene.export(
+        (FX, FX, W / 2, H / 2), st2.last_rid
+    )
+    n_pl = sum(1 for p in model.primitives if p.kind == "plane")
+    print(f"终态导出: SceneModel 图元 {len(model.primitives)} "
+          f"(平面 {n_pl}), K={model.K[0]:.0f} ✓")
