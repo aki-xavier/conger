@@ -67,6 +67,49 @@ class EdgePrior:
     # ── 方向场采样与传播原语 ──────────────────────────────────────
 
     @staticmethod
+    def texture_gradient(
+        rw: RieszWavelet, radius: int = 8, n_dir: int = 4
+    ) -> mx.array:
+        """纹理梯度 (gPb tg 通道的先验派等价物, 零学习):
+        逐方向半盘对比 —— 位移 ±d 两侧的谱能量描述子做 χ² 距离,
+        取方向最大值。二阶统计 (比较两侧) 故纹理内部天然抑制
+        (同统计 → 零响应), 伪装边敏感 (相似≠相同: 尺度/光滑度差)。
+        描述子 = 逐尺度能量的相对谱 (亮度无关)。"""
+        e = mx.stack([s.energy for s in rw.scales], axis=-1)  # (H,W,S)
+        desc = e / mx.maximum(e.sum(axis=-1, keepdims=True), 1e-12)
+        out = mx.zeros(desc.shape[:2])
+        def box3(m: mx.array) -> mx.array:
+            """(H,W,S) 分离式盒均值 (box_mean 的 3 通道版, edge pad)。"""
+            k = 2 * radius + 1
+            p = k // 2
+            m = mx.pad(m, [(p, p), (p, p), (0, 0)], mode="edge")
+            c = mx.concatenate(
+                [mx.zeros((1, m.shape[1], m.shape[2])),
+                 mx.cumsum(m, axis=0)],
+                axis=0,
+            )
+            m = (c[k:] - c[:-k]) / k
+            c = mx.concatenate(
+                [mx.zeros((m.shape[0], 1, m.shape[2])),
+                 mx.cumsum(m, axis=1)],
+                axis=1,
+            )
+            return (c[:, k:] - c[:, :-k]) / k
+
+        for k in range(n_dir):
+            ang = k * math.pi / n_dir
+            dr, dc = int(round(radius * math.sin(ang))), int(
+                round(radius * math.cos(ang))
+            )
+            m_pos = mx.roll(mx.roll(desc, dr, axis=0), dc, axis=1)
+            m_neg = mx.roll(mx.roll(desc, -dr, axis=0), -dc, axis=1)
+            m_pos = box3(m_pos)
+            m_neg = box3(m_neg)
+            chi2 = ((m_pos - m_neg) ** 2 / (m_pos + m_neg + 1e-6)).sum(axis=-1)
+            out = mx.maximum(out, chi2)
+        return out
+
+    @staticmethod
     def precomp_gather(
         shape: tuple[int, ...],
         dy: mx.array,

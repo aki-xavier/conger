@@ -78,7 +78,7 @@ class Watershed:
                 labels[y0][x0] = n_seeds
                 while stack:
                     y, x = stack.pop()
-                    for ny, nx in ((y-1, x), (y+1, x), (y, x-1), (y, x+1)):
+                    for ny, nx in ((y - 1, x), (y + 1, x), (y, x - 1), (y, x + 1)):
                         if (
                             0 <= ny < h
                             and 0 <= nx < w
@@ -99,7 +99,7 @@ class Watershed:
         arcs: dict[tuple[int, int], list[float]] = {}
         while heap:
             lvl, y, x, lab = heapq.heappop(heap)
-            for ny, nx in ((y-1, x), (y+1, x), (y, x-1), (y, x+1)):
+            for ny, nx in ((y - 1, x), (y + 1, x), (y, x - 1), (y, x + 1)):
                 if not (0 <= ny < h and 0 <= nx < w):
                     continue
                 nl = labels[ny][nx]
@@ -164,10 +164,36 @@ class RegionHierarchy:
                 a = parent[a]
             return a
 
-        heap = [(s, a, b) for (a, b), s in strength.items()]
+        # 初始规模 = 盆地真实像素数 (合并优先级需知小侧是谁;
+        # 原实现全 1 只是 union-by-size 的性能技巧)
+        size = [0] * (self.n_basins + 1)
+        for row in labels:
+            for a in row:
+                size[a] += 1
+        # 尺度先验 (BSDS 评测暴露的逻辑问题): 纯弧强度竞争下,
+        # 纹理碎片凭局部强边活到高 τ → 过度分割 (1577 区 vs GT
+        # ~10)。初始堆按 强度×小侧规模折扣 排序, 碎片无论边强
+        # 先并 —— 与纹理身份无关, 伪装色安全 (伪装鱼是大区)。
+        # 折扣只作用初始堆: 合并重推的弧用原始强度 —— 否则合并
+        # 路径被打乱, 缺口桥弧的弱接触被提前内化, 桥均值从
+        # 0.220 跳到 0.504 (实测破掉缺口稀释性质/测试 5)
+        size_ref = max(16.0, 0.001 * h * w)  # 对象尺度参考 (0.1% 图幅)
+
+        def eff(key: tuple[int, int]) -> float:
+            """初始弧有效强度。
+            弱弧 (桥/缺口候选) 不折扣: 桥盆地小是常态, 折扣会让它
+            先并入一侧, 反而毁掉缺口稀释路径 (测试 5 的教训);
+            强弧 (纹理碎片的墙) 才按小侧规模折扣先并。"""
+            raw = strength.get(key, 0.0)
+            if raw < 0.3:  # 弱三分位语义: 稀释区
+                return raw
+            ra, rb = find(key[0]), find(key[1])
+            small = min(size[ra], size[rb])
+            return raw * min(1.0, (small / size_ref) ** 0.5)
+
+        heap = [(eff(k), k[0], k[1]) for k in strength]
         heapq.heapify(heap)
         ucm = [[0.0] * w for _ in range(h)]
-        size = [1] * (self.n_basins + 1)
         self._merges: list[tuple[float, int, int]] = []  # (高度, 存留, 被吸收)
         while heap:
             s, a, b = heapq.heappop(heap)
@@ -175,7 +201,10 @@ class RegionHierarchy:
             if ra == rb:
                 continue  # 弧已在先前的合并中内化
             key = (min(ra, rb), max(ra, rb))
-            if abs(strength.get(key, -1.0) - s) > 1e-9:
+            # 过期判: 原始强度或有效强度任一匹配 (两阶段入堆)
+            if key not in strength or (
+                abs(strength.get(key, -1.0) - s) > 1e-9 and abs(eff(key) - s) > 1e-9
+            ):
                 continue  # 过期堆项 (弧已重连/重算)
             # 执行合并: 该弧边界像素记当前高度
             strength.pop(key)
@@ -322,8 +351,10 @@ class ContourCut:
                 n = max(2, int(seg / 0.5) + 1)  # 0.5px 步长防断缝
                 for k in range(n):
                     t = k / (n - 1)
-                    draw(pts[i][0] * (1 - t) + pts[i + 1][0] * t,
-                         pts[i][1] * (1 - t) + pts[i + 1][1] * t)
+                    draw(
+                        pts[i][0] * (1 - t) + pts[i + 1][0] * t,
+                        pts[i][1] * (1 - t) + pts[i + 1][1] * t,
+                    )
         for (cx, cy), rho in circles:
             n = max(8, int(2 * math.pi * rho / 0.5))
             for k in range(n):
@@ -368,7 +399,7 @@ class SubregionLayer:
                 out[y0][x0] = nxt
                 while stack:
                     y, x = stack.pop()
-                    for ny, nx in ((y-1, x), (y+1, x), (y, x-1), (y, x+1)):
+                    for ny, nx in ((y - 1, x), (y + 1, x), (y, x - 1), (y, x + 1)):
                         if (
                             0 <= ny < h
                             and 0 <= nx < w
@@ -401,8 +432,7 @@ class PixelLabelLayer:
     def _scatter_mean(vals: mx.array, lab: mx.array, n: int) -> mx.array:
         """按标签分组求通道均值: vals (N,C) + 标签 (N,) → (n,C)。"""
         cols = [
-            mx.zeros((n,)).at[lab].add(vals[:, c])
-            for c in range(int(vals.shape[1]))
+            mx.zeros((n,)).at[lab].add(vals[:, c]) for c in range(int(vals.shape[1]))
         ]
         out = mx.stack(cols, axis=-1)
         cnt = mx.zeros((n,)).at[lab].add(mx.ones((int(lab.shape[0]),)))
@@ -467,7 +497,7 @@ class SubregionTracker:
 
     def run(
         self, sub: mx.array, app: mx.array | None = None
-    ) -> tuple[mx.array, dict[int, int]]:
+    ) -> tuple[mx.array, dict[int, int], dict[int, int]]:
         """当帧子区域标签 (H,W) → (rid 图 (H,W) int32, {rid: 面积})。
         app: (H,W,C) 表观特征图 (强度/似然通道) —— 给则匹配代价加
         表观项: 几何硬门 (match_radius) 不变, 门内按 几何+表观σ差
@@ -477,9 +507,11 @@ class SubregionTracker:
         h, w = sub.shape
         n = int(mx.max(sub))
         yy, xx = mx.meshgrid(
-            mx.arange(h, dtype=mx.float32), mx.arange(w, dtype=mx.float32),
+            mx.arange(h, dtype=mx.float32),
+            mx.arange(w, dtype=mx.float32),
             indexing="ij",
         )
+
         # 逐区域面积/质心 (scatter 批量)
         def sc(v: mx.array) -> mx.array:
             return mx.zeros((n + 1,)).at[lab].add(v)
@@ -494,35 +526,46 @@ class SubregionTracker:
         if app is not None:
             c_dim = int(app.shape[2])
             mm = mx.stack(
-                [sc(app[:, :, k].reshape(-1)) / mx.maximum(cnt, 1.0)
-                 for k in range(c_dim)],
+                [
+                    sc(app[:, :, k].reshape(-1)) / mx.maximum(cnt, 1.0)
+                    for k in range(c_dim)
+                ],
                 axis=-1,
             )[1:]  # (n, C)
             sig = mx.std(app.reshape(-1, c_dim), axis=0) + 1e-6
             means = (mm / sig).tolist()
         app_w = (self.match_radius / self.app_weight_std) ** 2
-        # 匹配: 当帧区域 → 上帧最近质心 (一对一贪心, 区域数百量级)
+        # 匹配: 当帧区域 → 上帧最近质心 (一对一贪心, 区域数百量级)。
+        # 备选身份 (分歧保留): 亚军候选记 alts, 供下游仲裁翻案
+        # (不武断硬指派 —— 匹配模糊时下游可用其他证据重审)
         prev = list(self._prev)
         used: set[int] = set()
         remap = [0] * (n + 1)
+        alts: dict[int, int] = {}  # 当帧区域标签 → 亚军 rid
         new_prev: list[tuple[int, float, float, int, list | None]] = []
         for r in range(1, n + 1):
             cr, cc, ca = float(rs[r]), float(cs[r]), int(cnt[r])
             am = means[r - 1] if means is not None else None
-            best, bi = self.match_radius**2, -1
+            best, bi = math.inf, -1
+            second, si = math.inf, -1
             for pi, (rid, pr, pc, _, pam) in enumerate(prev):
                 d2 = (cr - pr) ** 2 + (cc - pc) ** 2
-                if d2 >= best or pi in used:
-                    continue  # 几何硬门
+                # 几何硬门 (match_radius); 剪枝界 = min(second, 门):
+                # 几何 ≥ second 的总分必 ≥ second (app≥0)
+                if d2 >= min(second, self.match_radius**2) or pi in used:
+                    continue
                 if am is not None and pam is not None:
-                    d2 = d2 + app_w * sum(
-                        (a - b) ** 2 for a, b in zip(am, pam)
-                    )
+                    d2 = d2 + app_w * sum((a - b) ** 2 for a, b in zip(am, pam))
                 if d2 < best:
+                    second, si = best, bi
                     best, bi = d2, pi
-            if bi >= 0:
+                elif d2 < second:
+                    second, si = d2, pi
+            if bi >= 0 and best < self.match_radius**2:
                 used.add(bi)
                 rid = prev[bi][0]
+                if si >= 0:
+                    alts[r] = prev[si][0]
             else:
                 rid = self._next_rid
                 self._next_rid += 1
@@ -531,7 +574,7 @@ class SubregionTracker:
         self._prev = new_prev
         rid_map = mx.array(remap, dtype=mx.int32)[lab].reshape(h, w)
         areas = {rid: a for rid, _, _, a, _ in new_prev}
-        return rid_map, areas
+        return rid_map, areas, alts
 
 
 # ── 总装门面 ──────────────────────────────────────────────────────
@@ -828,18 +871,20 @@ if __name__ == "__main__":
     appB = appB.at[:, 56:60, 0].add(0.9)  # B.r1 亮 (=A.r1 的表观)
     appB = appB.at[:, 52:56, 0].add(0.1)  # B.r2 暗 (=A.r2)
     tk = SubregionTracker()
-    ridA, _ = tk.run(subA, app=appA)
-    ridB, _ = tk.run(subB, app=appB)
+    ridA, _, _ = tk.run(subA, app=appA)
+    ridB, _, altsB = tk.run(subB, app=appB)
     # 纯几何: B.r1(col58) 更近 A.r2(col64); 表观应纠正为
     # B.r1(亮) ↔ A.r1(亮), B.r2(暗) ↔ A.r2(暗)
     r1_A, r2_A = int(ridA[16, 48]), int(ridA[16, 64])
     r1_B, r2_B = int(ridB[16, 58]), int(ridB[16, 54])
     assert r1_B == r1_A, f"亮区身份应跨帧保持: {r1_B} vs {r1_A}"
     assert r2_B == r2_A, f"暗区身份应跨帧保持: {r2_B} vs {r2_A}"
+    # 备选身份 (分歧保留): B.r1 的亚军应是 A.r2 (几何上更近的那个)
+    assert altsB.get(1) == r2_A, f"亚军候选: {altsB}"
     # 对照: 无表观时几何交叉会交换 (验证测试场景本身有鉴别力)
     tk2 = SubregionTracker()
     tk2.run(subA)
-    ridB2, _ = tk2.run(subB)
+    ridB2, _, _ = tk2.run(subB)
     assert int(ridB2[16, 58]) != r1_A or int(ridB2[16, 54]) != r2_A, (
         "无表观对照应发生交换/断链"
     )

@@ -151,6 +151,31 @@ class VBGMM:
         lnb = -(nu0 * d / 2.0) * math.log(2.0)
         return lnb - float(VBGMM.mvlgamma(mx.array([nu0 / 2.0]), d)[0])
 
+    # ── 级联快速冷启动 (B1+B2+C1) ──────────────────────────────────
+
+    @classmethod
+    def fast_fit(
+        cls,
+        x: mx.array,
+        shape: tuple[int, int],
+        k_max: int = 48,
+        ds: int = 8,
+        refine: int = 1,
+        coarse_iter: int = 25,
+    ):
+        """多分辨率级联冷启动 (全量冷拟合 ~16s → ~3-4s, ~5×):
+        ① 1/ds² 分辨率拟合 coarse_iter 轮 —— 剖析显示成本结构是
+        轮数×固定开销 (ELBO 同步) 而非像素数, 低分辨率只是粗种子
+        (快初始化由级联吸收), 轮数才是要压的;
+        ② 暖启动 + 全分辨率精化 refine 轮 (每轮 ~1.6s 全数据 E 步)。
+        500ms 级还需 E 步 kernel 级优化 (同步消除), 属实现层工程,
+        记录在 roadmap。"""
+        h, w = shape
+        sub = x.reshape(h, w, x.shape[1])[::ds, ::ds].reshape(-1, x.shape[1])
+        gm_small = cls(sub, k_max=k_max, max_iter=coarse_iter)
+        return cls(x, k_max=k_max, warm=gm_small.posterior,
+                   max_iter=refine)
+
     # ── 特征图 → 特征矩阵 (本模块按需组装) ─────────────────────────
 
     HS_FEAT_NAMES: ClassVar[list[str]] = list(

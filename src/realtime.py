@@ -93,6 +93,9 @@ class RealtimePipeline:
         self.rw = RieszWavelet(img0)
         feat = self.rw.features()
         self.hs = hs0
+        # 冷启动用全量拟合: 闭环反馈路径对首帧模型质量敏感
+        # (fast_fit 级联在 eval 路径用, 实测闭环深度断言会挂 ——
+        # 稳态 90ms/帧不受影响, 全量冷启动是一次性的)
         self.gm = VBGMM(VBGMM.feature_matrix(feat), k_max=k_max)
         self.gm_hs = (
             VBGMM(
@@ -166,7 +169,7 @@ class RealtimePipeline:
             return  # 无深度源, 本轮闭环跳过
         # 跨帧区域对应: 场景图节点以稳定 rid 为键 (此前用当帧子区域
         # id, 跨帧标签重排导致渲染错位 —— 已修, 见 SubregionTracker)
-        rid_map, _ = st.region_tracker.run(seg.subregions, app=app)
+        rid_map, _, _alts = st.region_tracker.run(seg.subregions, app=app)
         # T 结遮挡偏序 → 序数深度约束 (prior.md: 高权重不可下调)
         occ = OcclusionOrder.constraints_from_grouping(
             tracked.result, rid_map

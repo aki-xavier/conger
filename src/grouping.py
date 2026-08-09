@@ -792,6 +792,7 @@ class TrackedResult(NamedTuple):
     version: int  # 完成序号
     tj_tids: list[int]  # 与 result.t_junctions 平行, 稳定 T 结 id
     tj_ages: list[int]  # 各 T 结连续帧数
+    tid_alts: list[int]  # 与 tids 平行, 亚军候选 tid (-1 = 无)
     segment: SegmentResult | None = None  # 接分割层时的分割结果
 
 
@@ -1085,26 +1086,36 @@ class GroupingTracker:
             cents.append((float(c[0]), float(c[1])))
         prev = list(self._prev)
         used: set[int] = set()
-        tids, ages = [], []
+        tids, ages, alts = [], [], []
         new_prev = []
         for cr, cc in cents:
             best, bi = self.match_radius**2, -1
+            second, si = self.match_radius**2, -1
             for pi, (pr, pc, tid, age) in enumerate(prev):
                 d2 = (cr - pr) ** 2 + (cc - pc) ** 2
-                if d2 < best and pi not in used:
-                    best, bi = d2, pi
+                if d2 < second and pi not in used:
+                    if d2 < best:
+                        second, si = best, bi
+                        best, bi = d2, pi
+                    else:
+                        second, si = d2, pi
             if bi >= 0:
                 used.add(bi)
                 tid, age = prev[bi][2], prev[bi][3] + 1
+                # 亚军候选 (分歧保留): 供下游仲裁翻案, -1 = 无
+                alts.append(prev[si][2] if si >= 0 else -1)
             else:
                 tid, age = self._next_tid, 1
                 self._next_tid += 1
+                alts.append(-1)
             tids.append(tid)
             ages.append(age)
             new_prev.append((cr, cc, tid, age))
         self._prev = new_prev
         tj_tids, tj_ages = self._match_tjunctions(res, tids)
-        return TrackedResult(res, tids, ages, self._version + 1, tj_tids, tj_ages)
+        return TrackedResult(
+            res, tids, ages, self._version + 1, tj_tids, tj_ages, alts
+        )
 
     def _match_tjunctions(
         self, res: GroupingResult, tids: list[int]

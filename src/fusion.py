@@ -98,7 +98,12 @@ class EdgeAwareSmooth:
             num = num.at[:-1, :].add(wd * z[1:, :])
             wsum = wsum.at[1:, :].add(wd)
             wsum = wsum.at[:-1, :].add(wd)
-            z = (data + self.lam * num) / (p + self.lam * wsum)
+            denom = p + self.lam * wsum
+            z = mx.where(
+                denom > 1e-9,
+                (data + self.lam * num) / denom,
+                z,  # 全边界包围的未观测孤立点: 保持上轮值 (防坍缩)
+            )
         return z
 
 
@@ -116,7 +121,10 @@ class OrdinalConstraint(NamedTuple):
 
 
 class PrimFit(NamedTuple):
-    """单区域拟合产物: blade + 类型 + 参数协方差 + 渲染参数 + 残差。"""
+    """单区域拟合产物: blade + 类型 + 参数协方差 + 渲染参数 + 残差。
+    双假设原则 (分歧保留): 选模不是 argmax —— 主假设 (kind/params)
+    按 rms 定, 备选假设带权重存 alt; 渲染用两模型的权重混合,
+    裁决留给下游 (scenegraph 合并/仲裁时可翻案)。"""
 
     blade: Multivector | None  # Plane/Sphere blade; None = 退化, 留稠密场
     kind: str  # "plane" / "sphere" / "dense"
@@ -124,6 +132,8 @@ class PrimFit(NamedTuple):
     params: tuple[float, ...]  # 平面 (a,b,c) / 球 (cu,cv,cz,ρ) (归一化坐标)
     sign: float  # 球渲染的半球符号 (平面恒 1)
     rms: float  # 加权 RMS 残差
+    alt: tuple[str, tuple[float, ...], mx.array | None, float] | None = None
+    # (备选 kind, params, cov, 权重∈(0,1)); 单假设/退化时为 None
 
 
 class PrimitiveFit:
@@ -236,56 +246,75 @@ class PrimitiveFit:
             (cnt > self.min_points) & cond3 & mx.all(mx.isfinite(th3), axis=1),
             rms_pl, math.inf,
         )
-        use_sphere = rms_sp < rms_pl  # (n,) 模型选择
-
-        # 渲染深度与残差场 (未图元化区域留稠密深度)
+        use_sphere = rms_sp < rms_pl  # (n,) 主假设 (索引/不变量用)
+        # 双假设权重: 逆方差归一 (与选模同判据; BIC 参数罚留钩)
+        inv_pl = 1.0 / mx.maximum(rms_pl, 1e-6) ** 2
+        inv_sp = 1.0 / mx.maximum(rms_sp, 1e-6) ** 2
+        w_sph = inv_sp / (inv_pl + inv_sp)  # (n,) 球假设权重
+        # 渲染: 双模型权重混合 (不再 argmax 选一)
         fitted = mx.isfinite(mx.minimum(rms_pl, rms_sp))
-        pred = mx.where(use_sphere[lab], pred_sp, pred_pl)
+        pred = (1.0 - w_sph)[lab] * pred_pl + w_sph[lab] * pred_sp
         is_fit = fitted[lab] & (lab > 0)
         render = mx.where(is_fit, pred, z).reshape(h, w)
         resid = mx.where(is_fit, z - pred, 0.0).reshape(h, w)
 
-        # ── 逐区域 PrimFit (blade 换回像素单位) ─────────────────────
+        # ── 逐区域 PrimFit (blade 换回像素单位) + 备选假设 ──────────
         fits: list[PrimFit] = []
         finite_l = fitted.tolist()
         sph_l = use_sphere.tolist()
+        pl_ok_l = mx.isfinite(rms_pl).tolist()
+        sp_ok_l = mx.isfinite(rms_sp).tolist()
+        w_sph_l = [float(v) for v in w_sph]
+
+        def plane_fit(r: int) -> PrimFit:
+            """平面假设构造。"""
+            a, b, c = (float(t) for t in th3[r])
+            return PrimFit(self.plane_blade(a, b, c, h, w), "plane",
+                           cov3[r], (a, b, c), 1.0, float(rms_pl[r]))
+
+        def sphere_fit(r: int) -> PrimFit:
+            """球假设构造 (blade 混合量纲 + cov Δ 变换, 见内注)。"""
+            prm = (float(cu[r]), float(cv[r]), float(cz[r]), float(rho[r]))
+            # 注意: x,y 换像素而 z 保持深度单位 —— blade 在
+            # (px,px,depth) 混合量纲空间, 非米制 (已知近似)
+            blade = Sphere(
+                (prm[0] * s + w / 2, prm[1] * s + h / 2, prm[2]), prm[3] * s
+            )
+            # cov4 (Kasa D,E,F,G 空间) → (cu,cv,cz,ρ) 空间 Δ 变换
+            dd, ee, ff = (float(t) for t in th4[r, :3])
+            rho_v = max(prm[3], 1e-6)
+            jm = mx.array(
+                [
+                    [-0.5, 0.0, 0.0, 0.0],
+                    [0.0, -0.5, 0.0, 0.0],
+                    [0.0, 0.0, -0.5, 0.0],
+                    [dd / (4 * rho_v), ee / (4 * rho_v),
+                     ff / (4 * rho_v), -1.0 / (2 * rho_v)],
+                ]
+            )
+            return PrimFit(blade, "sphere", jm @ cov4[r] @ jm.T, prm,
+                           float(sign[r]), float(rms_sp[r]))
+
         for r in range(1, n_reg + 1):
             if not finite_l[r]:
                 fits.append(PrimFit(None, "dense", None, (), 1.0, math.inf))
                 continue
-            if not sph_l[r]:
-                a, b, c = (float(t) for t in th3[r])
-                fits.append(
-                    PrimFit(self.plane_blade(a, b, c, h, w), "plane",
-                            cov3[r], (a, b, c), 1.0, float(rms_pl[r]))
-                )
+            both = pl_ok_l[r] and sp_ok_l[r]
+            if sph_l[r]:
+                f = sphere_fit(r)
+                if both:
+                    pf = plane_fit(r)
+                    f = f._replace(
+                        alt=("plane", pf.params, pf.cov, 1.0 - w_sph_l[r])
+                    )
             else:
-                prm = (float(cu[r]), float(cv[r]), float(cz[r]), float(rho[r]))
-                # 注意: x,y 换像素而 z 保持深度单位 —— blade 在
-                # (px,px,depth) 混合量纲空间, 非米制 (已知近似;
-                # motor 对齐对球只做中心点变换, 半径不动)
-                blade = Sphere(
-                    (prm[0] * s + w / 2, prm[1] * s + h / 2, prm[2]), prm[3] * s
-                )
-                # 协方差 Δ 变换: cov4 是 Kasa (D,E,F,G) 空间的, params
-                # 是 (cu,cv,cz,ρ) 空间 —— 不变换下游 (scenegraph 信息
-                # 滤波/Bhattacharyya) 拿到的就是语义错位的协方差
-                dd, ee, ff = (float(t) for t in th4[r, :3])
-                rho_v = max(prm[3], 1e-6)
-                jm = mx.array(
-                    [
-                        [-0.5, 0.0, 0.0, 0.0],
-                        [0.0, -0.5, 0.0, 0.0],
-                        [0.0, 0.0, -0.5, 0.0],
-                        [dd / (4 * rho_v), ee / (4 * rho_v),
-                         ff / (4 * rho_v), -1.0 / (2 * rho_v)],
-                    ]
-                )
-                cov_s = jm @ cov4[r] @ jm.T
-                fits.append(
-                    PrimFit(blade, "sphere", cov_s, prm, float(sign[r]),
-                            float(rms_sp[r]))
-                )
+                f = plane_fit(r)
+                if both:
+                    sf = sphere_fit(r)
+                    f = f._replace(
+                        alt=("sphere", sf.params, sf.cov, w_sph_l[r])
+                    )
+            fits.append(f)
         return fits, render, resid
 
 
@@ -827,3 +856,21 @@ if __name__ == "__main__":
                       manhattan=True)
     assert bool(mx.all(mx.abs(fr10d.render - fr10c.render) < 1e-3))
     print("10. 曼哈顿: 平行/正交吸附成立, 无证据逐位不动 ✓")
+
+    # ── 11. 双假设: 备选带权重存留 (分歧保留, 不 argmax) ────────────
+    # 混合区域 (左半平面右半球盖): 两假设都该有非平凡权重
+    sub11 = mx.ones((H, W), dtype=mx.int32)
+    z_mix = mx.where(xx < W // 2, 0.3 * u_n + 3.0, z_sph)
+    fr11 = DepthFusionLayer().run(
+        [DepthCue(z_mix, mx.full((H, W), 10.0))], sub11
+    )
+    f11 = fr11.fits[0]
+    assert f11.alt is not None, "混合区域应有备选假设"
+    assert 0.02 < f11.alt[3] < 0.98, f"备选权重: {f11.alt[3]:.3f}"
+    # 纯平面世界 (测试 2 的 fr): 球假设被压制, 备选权重 ≈0 或不存在
+    f_plane = fr.fits[0]
+    assert f_plane.alt is None or f_plane.alt[3] < 0.1, (
+        f"纯平面备选应被压制: {f_plane.alt}"
+    )
+    print(f"11. 双假设: 混合区备选 {f11.alt[0]} 权重 {f11.alt[3]:.3f}, "
+          f"纯平面备选压制 ✓")

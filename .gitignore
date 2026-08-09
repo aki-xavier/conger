@@ -225,3 +225,4 @@ __marimo__/
 artifacts/*.png
 artifacts/*.jpg
 .pi-subagents/
+*.pth

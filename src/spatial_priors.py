@@ -98,7 +98,8 @@ class VanishingPoints:
 
     min_len: float = 15.0  # 链最短弧长 (短链方向噪声大)
     bucket: float = 8.0  # 灭点聚类桶 (px)
-    min_votes: float = 3.0  # 灭点最少加权票数
+    min_share: float = 0.02  # 灭点最少票额占比 (绝对票数不随链数
+    # 缩放 —— 自然图纹理链数千时绝对阈值全漏 (实测 8473 个))
 
     def detect(
         self, res, shape: tuple[int, int]
@@ -144,10 +145,11 @@ class VanishingPoints:
                 votes[key][0] += wgt
                 votes[key][1] += wgt * pr
                 votes[key][2] += wgt * pc
+        total = sum(v[0] for v in votes.values())
         out = [
             (v[1] / v[0], v[2] / v[0], v[0])
             for v in votes.values()
-            if v[0] >= self.min_votes * self.min_len
+            if v[0] >= self.min_share * total
         ]
         out.sort(key=lambda t: -t[2])
         return out
@@ -163,6 +165,8 @@ class GravitySupport:
 
     tilt_min: float = 0.1  # 地面最小纵向坡度 (排除竖直墙面)
     contact_tol: float = 0.15  # 接触容差 (相对地面深度比例)
+    min_area: float = 0.01  # 最小对象面积占比 —— 支撑是对象级关系,
+    # 纹理碎片拟合出的微区不是对象 (自然图实测数百噪声判定)
 
     def ground_index(self, res, sub: mx.array) -> int:
         """fits 中的地面索引 (无地面返回 -1)。签名: 平面 + b>tilt_min
@@ -199,6 +203,9 @@ class GravitySupport:
             rows = [r for r in range(h) if rid in lab[r]]
             if not rows:
                 continue
+            area = sum(lab[r].count(rid) for r in rows)
+            if area < self.min_area * h * w:
+                continue  # 碎片微区不判定 (非对象)
             bottom = max(rows)
             cols = [c for c in range(w) if lab[bottom][c] == rid]
             uc = (sum(cols) / len(cols) - w / 2) / s  # 底行质心 (归一化)
@@ -298,7 +305,7 @@ if __name__ == "__main__":
         edgels=_NS(pos=mx.array(pts_all, dtype=mx.float32)),
         chains=chains_vp,
     )
-    vps = VanishingPoints(min_len=10.0, min_votes=2.0).detect(res_vp, (H, W))
+    vps = VanishingPoints(min_len=10.0, min_share=0.1).detect(res_vp, (H, W))
     assert vps, "应检出灭点"
     vr, vc, _w = vps[0]
     assert abs(vr - 0.0) < 12 and abs(vc - 64) < 8, (
