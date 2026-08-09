@@ -162,17 +162,34 @@ class VBGMM:
         ds: int = 8,
         refine: int = 1,
         coarse_iter: int = 25,
+        coreset: int = 0,
     ):
-        """多分辨率级联冷启动 (全量冷拟合 ~16s → ~3-4s, ~5×):
+        """多分辨率级联冷启动 (全量冷拟合 ~16s → ~2s):
         ① 1/ds² 分辨率拟合 coarse_iter 轮 —— 剖析显示成本结构是
         轮数×固定开销 (ELBO 同步) 而非像素数, 低分辨率只是粗种子
         (快初始化由级联吸收), 轮数才是要压的;
-        ② 暖启动 + 全分辨率精化 refine 轮 (每轮 ~1.6s 全数据 E 步)。
-        500ms 级还需 E 步 kernel 级优化 (同步消除), 属实现层工程,
-        记录在 roadmap。"""
+        ② coreset>0 时插入重要性采样轮: 中池 (x[::4]) 上算
+        margin = 1−max_k r (不确定度), 按 margin+基线加权抽取
+        coreset 个难像素暖启动续拟合 —— coreset 理论的先验派
+        实现: 均匀采样会饿死稀有类 (HS 稀释教训), 难像素才是
+        信息量所在;
+        ③ 暖启动 + 全分辨率精化 refine 轮 (每轮 ~1.6s 全数据 E 步)。
+        500ms 级还需 E 步 kernel 级优化 (同步消除), 属实现层工程。"""
         h, w = shape
         sub = x.reshape(h, w, x.shape[1])[::ds, ::ds].reshape(-1, x.shape[1])
         gm_small = cls(sub, k_max=k_max, max_iter=coarse_iter)
+        if coreset > 0:
+            pool = x[::4]  # 中池 (全数据的 1/4)
+            r_pool = gm_small.infer(pool)
+            margin = 1.0 - mx.max(r_pool, axis=-1)
+            wts = margin + 0.05  # 基线: 已置信区也留采样率
+            sel = mx.random.categorical(
+                mx.log(wts), num_samples=coreset, key=mx.random.key(11)
+            )
+            gm_small = cls(
+                pool[sel.astype(mx.int32)], k_max=k_max,
+                warm=gm_small.posterior, max_iter=coarse_iter,
+            )
         return cls(x, k_max=k_max, warm=gm_small.posterior,
                    max_iter=refine)
 
@@ -183,13 +200,42 @@ class VBGMM:
     )  # HS 支路与 L 同构 (同名谱特征, 证据规则直接复用)
 
     @staticmethod
-    def hs_feature_matrix(hs: mx.array) -> mx.array:
+    def hs_feature_matrix(hs: mx.array, ds: int = 1) -> mx.array:
         """HS 复数色相通道 → (H,W,7) 谱特征 (与 L 支路同构)。
         Re/Im 各跑一遍 riesz, 逐特征图按通道能量加权合并 ——
         判别实验 (2026-08-08): 原始值+梯度 3 列版把等亮度色度
         光栅误报为边缘 (0.493) 且无纹理证据机制; 7 列谱特征版
         纹理分类 1.000 / 边缘 0.000。色度支路需要同样的谱描述。
-        成本: 两次 riesz (色度分辨率本可降采样, 留作优化钩)。"""
+        ds>1: 均值池化降采样 (反混叠) 后计算再升采样 —— 省 ~3×。
+        边界场景实测反而更优 (0.666 vs 0.500, 池化去噪), 但细纹理
+        (全分辨率周期 <16px) 会跌出滤波器组尺度下界而纹理分类
+        全灭 (实测 tex 1.00→0.00) —— 证据规则的尺度标定在全分
+        辨率。默认 ds=1; ds=2 仅用于边缘主导场景的提速。"""
+        if ds > 1:
+            h, w = hs.shape
+            hh, ww = h // ds * ds, w // ds * ds
+            small = (
+                hs[:hh:ds, :ww:ds]
+                + sum(
+                    hs[dy:hh:ds, dx:ww:ds]
+                    for dy in range(ds)
+                    for dx in range(ds)
+                    if dy or dx
+                )
+            ) / (ds * ds)
+            f = VBGMM.hs_feature_matrix(small, 1)  # 递归全分辨率计算
+            out = mx.repeat(mx.repeat(f, ds, axis=0), ds, axis=1)
+            # 补回裁边 (repeat 只覆盖 hh×ww) 再轻平滑去块感
+            out = mx.pad(
+                out,
+                [(0, h - out.shape[0]), (0, w - out.shape[1]), (0, 0)],
+                mode="edge",
+            )
+            from riesz import RieszWavelet as _RW
+
+            return mx.stack(
+                [_RW.box_mean(out[..., c], 3) for c in range(7)], axis=-1
+            )
         f_re = RieszWavelet(mx.real(hs)).features()
         f_im = RieszWavelet(mx.imag(hs)).features()
         w_re = mx.exp(f_re.log_mag)
@@ -859,6 +905,35 @@ if __name__ == "__main__":
     )
     print(f"色度纹理: 等亮度光栅 tex={tex7:.2f} edge={ed7:.2f} "
           f"(3列原始值版曾误报 edge=0.49) ✓")
+
+    # ── coreset 重要性采样: 稀有类捕获 (CS 视角的采样轮) ──────────
+    # 两大团 + 0.6% 稀有团: 均匀级联漏检, margin 加权采样捕获
+    n_cs = 100 * 500
+    na_c = int(n_cs * 0.497)
+    nb_c = int(n_cs * 0.497)
+    x_a = mx.random.normal((na_c, 3), key=mx.random.key(1)) * 0.3
+    x_b = mx.random.normal((nb_c, 3), key=mx.random.key(2)) * 0.3
+    x_b = x_b + mx.array([3.0, 0.0, 0.0])
+    x_c = (
+        mx.random.normal((n_cs - na_c - nb_c, 3), key=mx.random.key(3))
+        * 0.3
+        + mx.array([0.0, 3.0, 3.0])
+    )
+    x_cs = mx.concatenate([x_a, x_b, x_c], axis=0)
+    ctr = mx.array([0.0, 3.0, 3.0])
+
+    def rare_dist(gm) -> float:
+        """最近后验均值到稀有团中心的距离 (原始空间)。"""
+        d = mx.sqrt(((gm.means_orig - ctr) ** 2).sum(axis=-1))
+        return float(mx.min(d))
+
+    gm_u = VBGMM.fast_fit(x_cs, (100, 500), k_max=16, refine=0)
+    gm_c = VBGMM.fast_fit(
+        x_cs, (100, 500), k_max=16, refine=0, coreset=4096
+    )
+    du, dc = rare_dist(gm_u), rare_dist(gm_c)
+    assert dc < 0.3 < du, f"coreset 应捕获稀有团: {dc:.2f} vs 均匀 {du:.2f}"
+    print(f"coreset: 稀有团均值距离 {dc:.2f} (均匀级联 {du:.2f} 漏检) ✓")
 
     # ── natural image (慢: 冷启动拟合 ~10-25s, 默认注释; 全量验证时放开) ──
     # im = Image.open(Utils.project_root() / "images/12.png").convert("L")
