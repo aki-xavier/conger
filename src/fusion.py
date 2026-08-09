@@ -77,7 +77,13 @@ class EdgeAwareSmooth:
     (弱线索区被平滑主导 ≈ 内绘, 强线索区保持)。
     近似: precision 不随平滑更新 (docstring 注明, 不重估)。"""
 
-    iters: int = 8
+    iters: int = 4  # 平滑轮次 ≈ 深度空洞最大半径的扩散需求 (每轮
+    # 4-邻域传播 1px)。减到 4 是移交下游的决策: 残差噪声由
+    # PrimitiveFit 区域级精度加权 LSQ 与 SceneGraph 门 (match_thr /
+    # max_rms) 吸收, 渲染只作弱线索回注 (precision=1.0), 边界锐断
+    # 是 stencil 一步性质与轮数无关。实测验证: fusion §9 + realtime
+    # 闭环两轮全绿 (dx_ss −0.0417/−0.0330, 深度/边界断言过), 保留;
+    # stereo (64) / layers (inpaint_iters) 用独立实例参数不受影响。
     lam: float = 4.0
 
     def run(self, d: mx.array, p: mx.array, boundary: mx.array) -> mx.array:
@@ -132,6 +138,8 @@ class PrimFit(NamedTuple):
     params: tuple[float, ...]  # 平面 (a,b,c) / 球 (cu,cv,cz,ρ) (归一化坐标)
     sign: float  # 球渲染的半球符号 (平面恒 1)
     rms: float  # 加权 RMS 残差
+    rms_raw: float = 0.0  # 区域原始深度 RMS (相对区域均值, 稠密场基线,
+    # 准入门的尺度基准; dense/测试构造默认 0 = 相对门不咬)
     alt: tuple[str, tuple[float, ...], mx.array | None, float] | None = None
     # (备选 kind, params, cov, 权重∈(0,1)); 单假设/退化时为 None
 
@@ -182,6 +190,14 @@ class PrimitiveFit:
 
         cnt = scatter(mx.ones_like(z))
         wsum = scatter(wt)  # 权重和 (归一化分母, 别用像素数)
+        # 区域原始深度 RMS (相对区域均值): "无图元时残差场自身的起伏
+        # 量级" —— scenegraph 准入相对门的尺度基准 (图元须解释
+        # ≥50% 区域方差才进图, 见 SceneGraph.accumulate)。
+        sum_z = scatter(z)
+        mean_z = sum_z / mx.maximum(cnt, 1.0)
+        rms_raw = mx.sqrt(
+            scatter((z - mean_z[lab]) ** 2) / mx.maximum(cnt, 1.0)
+        )
 
         # ── 平面: z = a·u + b·v + c, feats = [u, v, 1] ─────────────
         feats3 = [u, v, mx.ones_like(u)]
@@ -423,7 +439,8 @@ class PrimitiveFit:
             """平面假设构造。"""
             a, b, c = (float(t) for t in th3[r])
             return PrimFit(self.plane_blade(a, b, c, h, w), "plane",
-                           cov3[r], (a, b, c), 1.0, float(rms_pl[r]))
+                           cov3[r], (a, b, c), 1.0, float(rms_pl[r]),
+                           float(rms_raw[r]))
 
         def sphere_fit(r: int) -> PrimFit:
             """球假设构造 (blade 混合量纲 + cov Δ 变换, 见内注)。"""
@@ -446,7 +463,8 @@ class PrimitiveFit:
                 ]
             )
             return PrimFit(blade, "sphere", jm @ cov4[r] @ jm.T, prm,
-                           float(sign[r]), float(rms_sp[r]))
+                           float(sign[r]), float(rms_sp[r]),
+                           float(rms_raw[r]))
 
         def cyl_fit(r: int) -> PrimFit:
             """圆柱假设构造 (blade 混合量纲, 同球约定)。"""
@@ -459,7 +477,7 @@ class PrimitiveFit:
                 (nx, ny, nz), rho_v * s,
             )
             return PrimFit(blade, "cylinder", cov7[r], prm, 1.0,
-                           float(rms_cy[r]))
+                           float(rms_cy[r]), float(rms_raw[r]))
 
         def mk_fit(r: int, kind_i: int) -> PrimFit | None:
             """按排序下标构造对应假设 (kind_i ∈ 0/1/2 = pl/sp/cy)。"""

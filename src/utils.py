@@ -53,6 +53,13 @@ class Utils:
         d_B = ⅛ΔμᵀΣ̄⁻¹Δμ + ½ln(detΣ̄/√(detΣᵢ·detΣⱼ))。
         m1 (K,P), c1 (K,P,P), m2 (P,), c2 (P,P) → (K,)。"""
         dim = c1.shape[-1]
+        if not (
+            mx.all(mx.isfinite(c1)).item() and mx.all(mx.isfinite(c2)).item()
+        ):
+            # 退化输入 (NaN/inf 协方差) → 无限距离: eigh/inv 遇 NaN 抛
+            # C++ 异常 (Abort trap), 此处兜底所有调用方 (scenegraph
+            # _match / vbgmm 合并)。输入守卫在 scenegraph.accumulate。
+            return mx.full((m1.shape[0],), float("inf"))
         cb = (c1 + c2) * 0.5
         inv = mx.linalg.inv(cb + 1e-9 * mx.eye(dim), stream=mx.cpu)
         dm = (m1 - m2)[:, :, None]  # (K,P,1)

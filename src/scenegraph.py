@@ -7,7 +7,7 @@
        │    Bhattacharyya 门控匹配 (同空间, d_B < 2 宁并勿分),
        │    匹配不上 → 新节点 (提升); motor 对齐走 blade 层
        ▼  SceneNode (blade + params + Σ + 运行统计)
-  arbitrate: 节点残差持续 > 3σ 包络 → 退场, 区域交还残差场
+  arbitrate: 存在性序贯检验 (SPRT), log-likelihood-ratio 越阈退场
   render: 场景深度渲染 + 残差高亮 → feedback: prior_map (→ 分割层),
        场景渲染作高精度 DepthCue 反喂融合层 (闭环演示)
   reflect: 反射 versor 共轭 + detect_symmetry 对称面检测
@@ -45,7 +45,7 @@ class SceneNode:
     region: int  # 来源子区域 id
     sign: float = 1.0  # 球半球符号 (朝向区域质量侧; 平面恒 1)
     hits: int = 1  # 被匹配融合的次数
-    misses: int = 0  # 连续冲突帧数 (仲裁用)
+    log_llr: float = 0.0  # 存在性序贯检验: 累积 log-likelihood-ratio (封顶 0, 仲裁用)
 
 
 class SceneGraph:
@@ -55,20 +55,22 @@ class SceneGraph:
         self,
         shape: tuple[int, int],
         match_thr: float = 2.0,
-        max_misses: int = 3,
+        bf_retire: float = -8.0,
         max_rms: float = 0.5,
         max_slope: float = 20.0,
     ):
         """shape: 图像 (H,W) —— 归一化拟合空间的尺度基准。
         match_thr: Bhattacharyya 匹配阈值 (宁并勿分)。
-        max_misses: 连续冲突多少帧后节点退场。
-        max_rms: 拟合残差上限 —— 混合深度区域的高残差拟合不入图。
+        bf_retire: 存在性序贯检验的 log-likelihood-ratio 阈值
+        (标定见 arbitrate: 复刻旧"连续 3 帧 miss"语义)。
+        max_rms: 拟合残差上限 —— 绝对栏 (BIC 惩罚残差, 深度单位)
+        + 相对栏 (rms_raw > max_rms 时图元须解释 ≥50% 区域方差)。
         max_slope: 平面坡度上限 —— 边界混合区是干净深度坡 (残差低),
         rms 门挡不住, 但 |a|~1e2 的陡坡不是真实表面, 留稠密场。"""
         self.h, self.w = shape
         self.s = float(max(shape))
         self.match_thr = match_thr
-        self.max_misses = max_misses
+        self.bf_retire = bf_retire
         self.max_rms = max_rms
         self.max_slope = max_slope
         self.nodes: list[SceneNode] = []
@@ -111,7 +113,7 @@ class SceneGraph:
         nd.cov = mx.linalg.inv(p1 + p2, stream=mx.cpu)
         nd.params = nd.cov @ (p1 @ nd.params + p2 @ p_new)
         nd.hits += 1
-        nd.misses = 0
+        nd.log_llr = 0.0  # 融合 = 强确认, 存在性证据重置 (旧 misses 清零对应)
         nd.blade = self.make_blade(nd.kind, nd.params)
         mx.eval(nd.blade.values, nd.params, nd.cov)  # 跨线程物化
 
@@ -152,12 +154,33 @@ class SceneGraph:
             if fit.blade is None or fit.cov is None:
                 continue
             if fit.rms > self.max_rms:
-                continue  # 混合深度区域的高残差拟合, 留稠密场
+                # 混合深度区域的高残差拟合, 留稠密场。fit.rms 已是
+                # fusion 选模的 BIC 惩罚残差 (rms·n^{k/2n}, fusion.py
+                # 三模型选择) —— 本门是对模型比较证据的绝对质量栏。
+                continue
+            if fit.rms_raw > self.max_rms and fit.rms > 0.7071 * fit.rms_raw:
+                # 相对门 (尺度无关, 缺口 1): 区域确有结构 (rms_raw 超
+                # 绝对栏) 但图元解释方差不足一半 (残差 > √½·rms_raw)
+                # = 混合深度区的低绝对残差拟合 (如两平面深度差小 →
+                # rms 0.3 < 0.5, 旧绝对栏看不见)。留稠密场。平坦/图像
+                # 平行区域 rms_raw ≈ 噪声 < 绝对栏, 相对门不咬。
+                continue
             if fit.kind == "plane" and (
                 abs(float(fit.params[0])) > self.max_slope
                 or abs(float(fit.params[1])) > self.max_slope
             ):
                 continue  # 边界混合区的陡坡 (低残差但不是真实表面)
+            if not (
+                math.isfinite(fit.rms)
+                and math.isfinite(fit.rms_raw)
+                and mx.all(mx.isfinite(fit.cov)).item()
+            ):
+                # 非有限残差/协方差: 退化区域拟合 (奇异正规方程 → 求逆
+                # 产生 NaN/inf)。旧门 NaN>阈值 为 False 会放行 → _match
+                # 的 bhatt eigh 遇 NaN 抛 C++ 异常 → Abort trap (绕过
+                # worker 的 try/except 故障隔离直接杀进程, 实测偶发)。
+                # 根因守卫: 非有限拟合不进图 (区域留稠密场)。
+                continue
             region = self._region_of(fit, res)  # 先记 rid (见下)
             if M is not None:
                 # _align 经 _replace 产生新对象, identity 查询会丢 rid
@@ -180,7 +203,9 @@ class SceneGraph:
         return {"created": created, "merged": merged}
 
     def _align(self, fit: PrimFit, M: Motor) -> PrimFit:
-        """motor 对齐: blade 经 M.apply 变换后重新提取归一化参数。"""
+        """motor 对齐: blade 经 M.apply 变换后重新提取归一化参数。
+        平面/球从共轭 blade 提取; 圆柱用点对旋转 (轴点+方向),
+        半径不变 (同球)。"""
         blade = M.apply(fit.blade)
         if fit.kind == "plane":
             vals = blade.values
@@ -192,6 +217,37 @@ class SceneGraph:
             b = b_px * self.s
             c = c_px + a_px * self.w / 2 + b_px * self.h / 2
             return fit._replace(blade=blade, params=(a, b, c))
+        if fit.kind == "cylinder":
+            # 圆柱: 轴点/方向随 motor 变换 (点对旋转), 半径不变 (同球)。
+            # 由对齐后参数重建 blade —— M.apply 的包裹 Cylinder 不更新
+            # _axis_dir/_axis_point, 直接持有会渲染到旧轴位。
+            qx = float(fit.params[3]) * self.s + self.w / 2
+            qy = float(fit.params[4]) * self.s + self.h / 2
+            qz = float(fit.params[5])
+            n0 = (
+                float(fit.params[0]),
+                float(fit.params[1]),
+                float(fit.params[2]),
+            )
+            from cga import Point as _Pt
+
+            c2 = M.apply(_Pt(qx, qy, qz)).coords()
+            ca = M.apply(_Pt(qx + n0[0], qy + n0[1], qz + n0[2])).coords()
+            n2 = [ca[i] - c2[i] for i in range(3)]
+            nl = math.sqrt(sum(v * v for v in n2)) + 1e-12
+            n2 = [v / nl for v in n2]
+            params = (
+                n2[0],
+                n2[1],
+                n2[2],
+                (c2[0] - self.w / 2) / self.s,
+                (c2[1] - self.h / 2) / self.s,
+                c2[2],
+                float(fit.params[6]),
+            )
+            return fit._replace(
+                blade=self.make_cyl_blade(params), params=params
+            )
         # 球: 中心随 motor 变换 (点), 半径不变
         vals = blade.values
         wgt = float(vals[4])
@@ -216,22 +272,60 @@ class SceneGraph:
 
     # ── 仲裁: 冲突退场 ─────────────────────────────────────────────
 
-    def arbitrate(self, depth: mx.array, subregions: mx.array) -> int:
-        """节点残差 > 3σ 包络持续 max_misses 帧 → 退场。
-        返回本轮退场数。σ 包络 = 节点协方差的主特征尺度。"""
+    def arbitrate(
+        self,
+        depth: mx.array,
+        subregions: mx.array,
+        precision: mx.array | None = None,
+    ) -> int:
+        """节点存在性的序贯模型比较 (SPRT): 每帧累积 log-likelihood-
+        ratio, 越过阈值退场。H1: 节点仍解释其区域 (残差 ~ N(0,σ_node²));
+        H0: 场景已变 (残差 ~ N(0,σ_alt²), σ_alt = 3σ_node)。
+            Δ = ln(σ_alt/σ_node) − res²/2·(1/σ_node² − 1/σ_alt²)
+              = ln3 − 4/9·(res/σ_node)²
+        precision: 融合精度场 (可选) —— 给则 σ_node² = σ_param² + σ_obs²,
+        σ_obs = 1/√p̄ (观测噪声项, 缺口 2)。标定 (锚 = 旧"连续
+        max_misses 帧 > 3σ 包络"语义): 一帧 3σ 残差 Δ=−2.9, 三帧 −8.7
+        → bf_retire=−8 复刻"连续 3 帧 miss"; 区域消失 Δ=−2.9 (同旧 miss
+        语义: 出画 3 帧退场)。逐帧 Δ 下限 −5: 单帧灾难冲突不秒杀
+        (连续两帧才退场)。log_llr 封顶 0: 有界记忆 —— 世界非平稳,
+        正证据不无限累积, 长寿节点保持可退场 (旧规则一次 hit 清零
+        misses 是健忘, 等价物是 _merge 重置)。res<2σ 是正证据 (Δ>0),
+        2σ~3σ 间轻微负债: 持续 2σ 失配是模型错误信号, 旧规则视为
+        hit 是漏检。返回本轮退场数。"""
         died = 0
         keep = []
         for nd in self.nodes:
             res = self._node_residual(nd, depth, subregions)
-            sigma = float(mx.sqrt(mx.max(mx.linalg.eigh(nd.cov, stream=mx.cpu)[0])))
-            tol = max(3.0 * sigma, 0.05)
-            if res is None or res > tol:
-                # None = 区域消失 (对象出画): 计 miss, 否则节点永不
-                # 退场 (此前返回 0.0 → misses 恒重置, 节点泄漏)
-                nd.misses += 1
+            sigma_p = max(
+                float(
+                    mx.sqrt(mx.max(mx.linalg.eigh(nd.cov, stream=mx.cpu)[0]))
+                ),
+                0.05 / 3.0,  # σ_node 地板: 旧 tol=0.05 包络的 1/3
+            )
+            sigma = sigma_p
+            if precision is not None and res is not None:
+                # 观测噪声项: 总噪声 σ² = σ_param² + σ_obs²。上限
+                # 3σ_param: 精度是设计权重非标定噪声 (如场景渲染线索
+                # 恒 1.0), 不封顶 → σ_obs≈1 → res/σ→0 → Δ 恒正, 节点
+                # 永不退场。接线闭环时须校验精度标定再放开。
+                lab = subregions.reshape(-1)
+                mask = lab == nd.region
+                n_r = int(mx.sum(mask))
+                if n_r > 0:
+                    key = mx.where(mask, mx.arange(lab.shape[0]), lab.shape[0])
+                    idx = mx.argsort(key)[:n_r]
+                    p_bar = float(precision.reshape(-1)[idx].mean())
+                    sigma_obs = min(
+                        1.0 / math.sqrt(max(p_bar, 1e-9)), 3.0 * sigma_p
+                    )
+                    sigma = math.sqrt(sigma_p * sigma_p + sigma_obs * sigma_obs)
+            if res is None:
+                delta = math.log(3.0) - 4.0  # 区域消失 ≈ 一次 3σ miss
             else:
-                nd.misses = 0
-            if nd.misses >= self.max_misses:
+                delta = math.log(3.0) - 4.0 / 9.0 * (res / sigma) ** 2
+            nd.log_llr = min(nd.log_llr + max(delta, -5.0), 0.0)
+            if nd.log_llr < self.bf_retire:
                 died += 1
             else:
                 keep.append(nd)
@@ -352,7 +446,7 @@ class SceneGraph:
         rid_map: mx.array,
         ang_deg: float = 15.0,
         dist_tol: float = 1.0,
-        min_overlap: float = 0.5,
+        bf_min: float = 0.0,
         max_samples: int = 200,
     ) -> list[SymmetryMatch]:
         """镜像面对称检测 (prior.md 几何与结构: 对称性先验)。
@@ -360,15 +454,24 @@ class SceneGraph:
         关键教训: 任意两平面关于其角平分面是*精确*镜像的
         (相交面交换/平行面中分面), blade 级验证恒真、无鉴别力 ——
         真门在**支撑城**: 区域 i 的像素升上自身平面 → 跨候选面
-        反射 → 投影回图像, 落在区域 j 内的比例 (双向取 min) ≥
-        min_overlap 才算对称。候选面 = 角平分面闭式 (单位法向
-        (n₁∓n₂)·x = d₁∓d₂, 两支覆盖相交/平行)。blade 一致性只作
-        松门 (拟合噪声容忍)。球-球对称留钩。低频后台层。"""
+        反射 → 投影回图像, 落点命中伙伴区。ang/dist 是硬几何定义门
+        (候选须几何一致); 支撑落点证据走模型比较: k~Bin(n,p),
+        H1 镜像语义 p=0.8 vs H0 随机落点 p₀=伙伴区面积占比,
+        log BF > bf_min 接受 (默认 0 = 模型比较边界)。候选面 =
+        角平分面闭式 (单位法向 (n₁∓n₂)·x = d₁∓d₂, 两支覆盖相交/
+        平行)。blade 一致性只作松门 (拟合噪声容忍)。球-球对称留钩。
+        低频后台层。"""
         h, w = rid_map.shape
         rm = rid_map.tolist()
         planes = [
             (k, nd) for k, nd in enumerate(self.nodes) if nd.kind == "plane"
         ]
+        # 支撑城证据的 H0: 反射随机落点的命中率 = 伙伴区域面积占比
+        lab = rid_map.reshape(-1)
+        n_reg = int(mx.max(rid_map))
+        cnt = mx.zeros(n_reg + 1).at[lab].add(1.0)
+        p_area = [float(cnt[r]) / float(lab.shape[0]) for r in range(n_reg + 1)]
+        p_hi = 0.8  # H1 命中率: 镜像语义下反射应入伙伴支撑 (边缘/量化留 20%)
 
         def blade_nd(nd: SceneNode) -> tuple[list[float], float]:
             v = nd.blade.values
@@ -389,17 +492,18 @@ class SceneGraph:
 
         def overlap(
             nd_from: SceneNode, rid_from: int, mirror: Plane, rid_to: int
-        ) -> float:
-            """from 区像素升上自身平面 → 反射 → 投影落在 to 区的比例。"""
+        ) -> tuple[int, int]:
+            """from 区像素升上自身平面 → 反射 → 投影落在 to 区的
+            命中数/样本数 (证据量, 模型比较用)。"""
             n, d = blade_nd(nd_from)
             mv = mirror.values
             nm = [float(mv[k]) for k in (1, 2, 3)]
             dm = float(mv[5])
             if abs(n[2]) < 1e-9:
-                return 0.0
+                return 0, 0
             pts = samples(rid_from)
             if not pts:
-                return 0.0
+                return 0, 0
             hit = 0
             for r, c in pts:
                 z = (d - n[0] * c - n[1] * r) / n[2]  # 平面提升
@@ -408,7 +512,7 @@ class SceneGraph:
                 ci, ri = int(round(x2)), int(round(y2))
                 if 0 <= ri < h and 0 <= ci < w and rm[ri][ci] == rid_to:
                     hit += 1
-            return hit / len(pts)
+            return hit, len(pts)
 
         out: list[SymmetryMatch] = []
         for a in range(len(planes)):
@@ -434,15 +538,33 @@ class SceneGraph:
                     ang = math.degrees(math.acos(min(max(dp, -1.0), 1.0)))
                     if ang >= ang_deg or abs(dr - d2) >= dist_tol:
                         continue
-                    # 真门: 支撑城双向重叠
-                    ov = min(
-                        overlap(nd_i, nd_i.region, mirror, nd_j.region),
-                        overlap(nd_j, nd_j.region, mirror, nd_i.region),
+                    # 真门: 支撑城双向落点证据 (模型比较, 旧 ov≥min_overlap
+                    # 的 Bayes 化)。双向 (i→j, j→i) 的 H0 命中率各自不同
+                    # (伙伴区面积占比), 证据相加; ang/dist 仍是硬几何定义门。
+                    hi, ni = overlap(nd_i, nd_i.region, mirror, nd_j.region)
+                    hj, nj = overlap(nd_j, nd_j.region, mirror, nd_i.region)
+                    n = ni + nj
+                    if n == 0:
+                        continue
+                    p0a, p0b = p_area[j], p_area[i]
+                    if p0a <= 0.0 or p0b <= 0.0:
+                        # 伙伴区不在当前 rid_map (区域已换/消失):
+                        # 无随机基线, 同旧 ov=0 拒绝
+                        continue
+                    if p0a >= 1.0 or p0b >= 1.0:
+                        continue  # 伙伴区整图: 无随机基线可比较
+                    log_bf = (
+                        hi * math.log(p_hi / p0a)
+                        + (ni - hi) * math.log((1 - p_hi) / (1 - p0a))
+                        + hj * math.log(p_hi / p0b)
+                        + (nj - hj) * math.log((1 - p_hi) / (1 - p0b))
                     )
-                    if ov >= min_overlap:
+                    if log_bf > bf_min:
+                        rat = min(hi / ni, hj / nj)  # 残差排序键保留重叠量
                         out.append(
                             SymmetryMatch(
-                                mirror, (i, j), ang + abs(dr - d2) + (1 - ov)
+                                mirror, (i, j),
+                                ang + abs(dr - d2) + (1 - rat), log_bf,
                             )
                         )
                         break  # 一支角平分面命中即可
@@ -628,11 +750,13 @@ class SceneModel(NamedTuple):
 
 
 class SymmetryMatch(NamedTuple):
-    """镜像对称检测产物: 镜像面 + 对称节点对 (nodes 索引) + 残差。"""
+    """镜像对称检测产物: 镜像面 + 对称节点对 (nodes 索引) + 残差
+    + 支撑城证据的 log-Bayes-factor。"""
 
     mirror: Plane  # 镜像面 blade
     pair: tuple[int, int]  # 对称节点对 (self.nodes 索引)
     residual: float  # 法向角差(度) + 距离差 (排序用, 混合量纲)
+    log_bf: float = 0.0  # 支撑城模型比较证据 (H1 镜像 vs H0 随机落点)
 
 
 def reflect(node_blade, mirror: Plane):
@@ -702,7 +826,7 @@ if __name__ == "__main__":
     for i in range(4):
         depth_conflict = mx.full((H, W), 9.9)  # 与节点 z≈3 严重冲突
         sg.arbitrate(depth_conflict, sub)
-    assert sg.deaths >= 1, f"3 帧冲突应有节点退场: {sg.deaths}"
+    assert sg.deaths >= 1, f"持续冲突应有节点退场: {sg.deaths}"
     print(f"3. 仲裁: 持续冲突后节点退场 (deaths={sg.deaths}) ✓")
 
     # ── 4. 反馈闭环: 场景渲染 → D → 分割; 渲染作 DepthCue 反喂 ──────
