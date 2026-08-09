@@ -23,10 +23,13 @@ MLX。本层是离线层, 不做逐帧承诺 (逐帧管线止于 edgemap)。
 
 import heapq
 import math
+from collections import Counter
 from dataclasses import dataclass, field
 from typing import NamedTuple
 
 import mlx.core as mx
+
+from utils import Utils
 
 
 class RegionMap(NamedTuple):
@@ -63,53 +66,78 @@ class Watershed:
             | (p[:-2, 1:-1] < E)
             | (p[2:, 1:-1] < E)
         )
-        is_min = (~has_lower).tolist()
-        e = E.tolist()
+        is_min = (~has_lower).reshape(-1).tolist()
+        e = E.reshape(-1).tolist()
 
-        # 平台连通分量 (BFS) → 种子
-        labels = [[0] * w for _ in range(h)]
+        # 平台连通分量 (BFS, 扁平索引) → 种子
+        labels = [0] * (h * w)
         n_seeds = 0
-        for y0 in range(h):
-            for x0 in range(w):
-                if not is_min[y0][x0] or labels[y0][x0] != 0:
-                    continue
-                n_seeds += 1
-                stack = [(y0, x0)]
-                labels[y0][x0] = n_seeds
-                while stack:
-                    y, x = stack.pop()
-                    for ny, nx in ((y - 1, x), (y + 1, x), (y, x - 1), (y, x + 1)):
-                        if (
-                            0 <= ny < h
-                            and 0 <= nx < w
-                            and is_min[ny][nx]
-                            and labels[ny][nx] == 0
-                        ):
-                            labels[ny][nx] = n_seeds
-                            stack.append((ny, nx))
+        for i0 in range(h * w):
+            if not is_min[i0] or labels[i0] != 0:
+                continue
+            n_seeds += 1
+            stack = [i0]
+            labels[i0] = n_seeds
+            while stack:
+                i = stack.pop()
+                y, x = divmod(i, w)
+                if x > 0 and is_min[i - 1] and labels[i - 1] == 0:
+                    labels[i - 1] = n_seeds
+                    stack.append(i - 1)
+                if x < w - 1 and is_min[i + 1] and labels[i + 1] == 0:
+                    labels[i + 1] = n_seeds
+                    stack.append(i + 1)
+                if y > 0 and is_min[i - w] and labels[i - w] == 0:
+                    labels[i - w] = n_seeds
+                    stack.append(i - w)
+                if y < h - 1 and is_min[i + w] and labels[i + w] == 0:
+                    labels[i + w] = n_seeds
+                    stack.append(i + w)
 
         # 优先洪泛: 水位 = max(当前像素 E, 来路水位), 单调上升
-        heap = [
-            (e[y][x], y, x, labels[y][x])
-            for y in range(h)
-            for x in range(w)
-            if labels[y][x] > 0
-        ]
+        # (扁平索引 + 收窄 heap 元组, 局部绑定微优化)
+        heap = [(e[i], i) for i in range(h * w) if labels[i] > 0]
         heapq.heapify(heap)
         arcs: dict[tuple[int, int], list[float]] = {}
         while heap:
-            lvl, y, x, lab = heapq.heappop(heap)
-            for ny, nx in ((y - 1, x), (y + 1, x), (y, x - 1), (y, x + 1)):
-                if not (0 <= ny < h and 0 <= nx < w):
-                    continue
-                nl = labels[ny][nx]
+            lvl, i = heapq.heappop(heap)
+            y, x = divmod(i, w)
+            lab = labels[i]
+            # 邻域展开顺序必须与旧实现一致 (上/下/左/右):
+            # 接触事件序列敏感 (arcs 是逐接触点的 E 值列表)
+            if y > 0:
+                nl = labels[i - w]
                 if nl == 0:
-                    labels[ny][nx] = lab
-                    heapq.heappush(heap, (max(e[ny][nx], lvl), ny, nx, lab))
+                    labels[i - w] = lab
+                    heapq.heappush(heap, (max(e[i - w], lvl), i - w))
                 elif nl != lab:
-                    key = (min(lab, nl), max(lab, nl))
-                    arcs.setdefault(key, []).append(max(e[y][x], e[ny][nx]))
-        return labels, arcs
+                    key = (lab, nl) if lab < nl else (nl, lab)
+                    arcs.setdefault(key, []).append(max(e[i], e[i - w]))
+            if y < h - 1:
+                nl = labels[i + w]
+                if nl == 0:
+                    labels[i + w] = lab
+                    heapq.heappush(heap, (max(e[i + w], lvl), i + w))
+                elif nl != lab:
+                    key = (lab, nl) if lab < nl else (nl, lab)
+                    arcs.setdefault(key, []).append(max(e[i], e[i + w]))
+            if x > 0:
+                nl = labels[i - 1]
+                if nl == 0:
+                    labels[i - 1] = lab
+                    heapq.heappush(heap, (max(e[i - 1], lvl), i - 1))
+                elif nl != lab:
+                    key = (lab, nl) if lab < nl else (nl, lab)
+                    arcs.setdefault(key, []).append(max(e[i], e[i - 1]))
+            if x < w - 1:
+                nl = labels[i + 1]
+                if nl == 0:
+                    labels[i + 1] = lab
+                    heapq.heappush(heap, (max(e[i + 1], lvl), i + 1))
+                elif nl != lab:
+                    key = (lab, nl) if lab < nl else (nl, lab)
+                    arcs.setdefault(key, []).append(max(e[i], e[i + 1]))
+        return [labels[y * w:(y + 1) * w] for y in range(h)], arcs
 
 
 # ── R 层: 区域合并层级 (UCM) ──────────────────────────────────────
@@ -133,21 +161,52 @@ class RegionHierarchy:
         self.n_basins = max(max(row) for row in labels)
 
         # 每条弧的边界像素 (UCM 渲染用): 两侧标签不同的像素
+        # 批量化: MLX diff 判不等 (水平+垂直), key 编码 (a·(K+1)+b)
+        # 排序分组 —— Python pass 只处理边界像素 (自然图 ~5-10%
+        # 像素), 不再是全图 22 万双层循环
+        lab = mx.array(labels)
+        kb = self.n_basins + 1
+        eq_h = lab[:, :-1] != lab[:, 1:]  # 像素 (y,x) vs (y,x+1)
+        k_h = int(mx.sum(eq_h))
+        key_h = mx.zeros((max(k_h, 1), 3), dtype=mx.int32)
+        if k_h:
+            fi_h = Utils.nonzero(eq_h)
+            yy_h = fi_h // (w - 1)
+            xx_h = fi_h % (w - 1)
+            a_h = lab[yy_h, xx_h]
+            b_h = lab[yy_h, xx_h + 1]
+            key_h = mx.stack(
+                [mx.minimum(a_h, b_h) * kb + mx.maximum(a_h, b_h),
+                 yy_h, xx_h], axis=-1)
+        eq_v = lab[:-1, :] != lab[1:, :]  # 像素 (y,x) vs (y+1,x)
+        k_v = int(mx.sum(eq_v))
+        key_v = mx.zeros((max(k_v, 1), 3), dtype=mx.int32)
+        if k_v:
+            fi_v = Utils.nonzero(eq_v)
+            yy_v = fi_v // w
+            xx_v = fi_v % w
+            a_v = lab[yy_v, xx_v]
+            b_v = lab[yy_v + 1, xx_v]
+            key_v = mx.stack(
+                [mx.minimum(a_v, b_v) * kb + mx.maximum(a_v, b_v),
+                 yy_v, xx_v], axis=-1)
+        all_k = mx.concatenate([key_h[:k_h], key_v[:k_v]])
+        order = mx.argsort(all_k[:, 0])
         arc_pixels: dict[tuple[int, int], list[tuple[int, int]]] = {}
-        for y in range(h):
-            row = labels[y]
-            for x in range(w):
-                a = row[x]
-                if x + 1 < w:
-                    b = row[x + 1]
-                    if a != b:
-                        key = (min(a, b), max(a, b))
-                        arc_pixels.setdefault(key, []).append((y, x))
-                if y + 1 < h:
-                    b = labels[y + 1][x]
-                    if a != b:
-                        key = (min(a, b), max(a, b))
-                        arc_pixels.setdefault(key, []).append((y, x))
+        # 一次 tolist 全同步 —— 逐元素索引是 7s/11 万次的同步地狱
+        rows = all_k.tolist()
+        prev = -1
+        cur: list[tuple[int, int]] = []
+        for i in order.tolist():
+            kk, yy_i, xx_i = rows[i]
+            if kk != prev:
+                if cur:
+                    arc_pixels[(prev // kb, prev % kb)] = cur
+                prev = kk
+                cur = []
+            cur.append((yy_i, xx_i))
+        if cur:
+            arc_pixels[(prev // kb, prev % kb)] = cur
 
         strength = {k: sum(v) / len(v) for k, v in arcs.items()}
         count = {k: len(v) for k, v in arcs.items()}
@@ -167,9 +226,8 @@ class RegionHierarchy:
         # 初始规模 = 盆地真实像素数 (合并优先级需知小侧是谁;
         # 原实现全 1 只是 union-by-size 的性能技巧)
         size = [0] * (self.n_basins + 1)
-        for row in labels:
-            for a in row:
-                size[a] += 1
+        for a, c in Counter(x for row in labels for x in row).items():
+            size[a] = c
         # 尺度先验 (BSDS 评测暴露的逻辑问题): 纯弧强度竞争下,
         # 纹理碎片凭局部强边活到高 τ → 过度分割 (1577 区 vs GT
         # ~10)。初始堆按 强度×小侧规模折扣 排序, 碎片无论边强
@@ -605,6 +663,8 @@ class SceneSegmenter:
     min_len: float = 10.0  # 轮廓参与切割的最短长度 (px)
     temperature: float = 2.5  # Y 层温度
     lam: float = 0.4  # Y 层像素项权重
+    scan_ds: int = 1  # 降采样域分割 (CS 稀疏哲学: 顺序算法对分辨率
+    # 平方敏感; 仅 realtime 提速路径用, eval 保持 1 —— 探针先行)
 
     def run(
         self,
@@ -616,6 +676,7 @@ class SceneSegmenter:
         macro: mx.array | None = None,
         prior_map: mx.array | None = None,
         w_prior: float = 0.5,
+        scan_ds: int | None = None,
     ) -> SegmentResult:
         """边界强度 + 类似然 (+ 轮廓/宏簇/深度反馈) → 完整分割结果。
 
@@ -625,14 +686,45 @@ class SceneSegmenter:
         """
         if prior_map is not None:
             enh = 1.0 - (1.0 - enh) * (1.0 - w_prior * prior_map)
-        rm = RegionLayer().run(enh)
-        regions = rm.hierarchy.cut(self.tau)
-        mask = ContourCut.rasterize(enh.shape, polylines, circles, self.min_len)
-        sub = SubregionLayer.run(regions, mask)
+        if scan_ds is None:
+            scan_ds = self.scan_ds
+        if scan_ds > 1:
+            # 降采样域分割 (CS 测量稀疏哲学: 顺序算法对分辨率平方
+            # 敏感, 洪泛/合并/T 结全 ÷ds²; 探针先行, 仅 realtime 路径)
+            h, w = enh.shape
+            enh_l = enh.reshape(
+                h // scan_ds, scan_ds, w // scan_ds, scan_ds
+            ).mean(axis=(1, 3))  # 均值池化反混叠 (HS ds 同款)
+            rm = RegionLayer().run(enh_l)
+            regions_l = rm.hierarchy.cut(self.tau)
+            polys_l = [p / float(scan_ds) for p in polylines]
+            circ_l = [
+                ((cx / scan_ds, cy / scan_ds), rho / scan_ds)
+                for (cx, cy), rho in circles
+            ]
+            mask_l = ContourCut.rasterize(
+                enh_l.shape, polys_l, circ_l, self.min_len / scan_ds
+            )
+            sub_l = SubregionLayer.run(regions_l, mask_l)
+
+            def up(x: mx.array) -> mx.array:
+                """最近邻升采样 (区域标签是整数, repeat 保持)。"""
+                return mx.repeat(mx.repeat(x, scan_ds, axis=0), scan_ds, axis=1)
+
+            regions = up(regions_l)
+            sub = up(sub_l)
+            ucm = up(rm.hierarchy.ucm)
+            mx.eval(regions, sub, ucm)  # 跨线程物化 (同 scenegraph 教训)
+        else:
+            rm = RegionLayer().run(enh)
+            regions = rm.hierarchy.cut(self.tau)
+            mask = ContourCut.rasterize(enh.shape, polylines, circles, self.min_len)
+            sub = SubregionLayer.run(regions, mask)
+            ucm = rm.hierarchy.ucm
         soft, hard = PixelLabelLayer(self.temperature, self.lam).run(
             like_edge, like_tex, sub, macro
         )
-        return SegmentResult(regions, sub, soft, hard, rm.hierarchy.ucm)
+        return SegmentResult(regions, sub, soft, hard, ucm)
 
 
 if __name__ == "__main__":

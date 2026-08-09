@@ -16,6 +16,7 @@
 (亚秒), 组织层结果以后台延迟换取。
 """
 
+import os
 import time
 from dataclasses import dataclass
 
@@ -125,7 +126,11 @@ class RealtimePipeline:
             if with_segment:
                 from segment import SceneSegmenter
 
-                seg = SceneSegmenter(tau=0.5)
+                # SCAN_DS 探针开关 (默认 1 = 全分辨率; ds=2 实测序数
+                # 约束全灭, 默认不开, 见 segment.scan_ds 注释)
+                seg = SceneSegmenter(
+                    tau=0.5, scan_ds=int(os.environ.get("SCAN_DS", "1"))
+                )
             self.tracker = GroupingTracker(
                 segmenter=seg,
                 loop_hook=self._loop_hook if loop else None,

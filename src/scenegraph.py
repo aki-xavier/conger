@@ -251,8 +251,12 @@ class SceneGraph:
         qq = nd.params[3:6]
         rr = nd.params[6]
         nz = float(nn[2])
-        pez = mx.stack([-nz * nn[0], -nz * nn[1], 1.0 - nz * nz])
-        w0 = mx.stack([u - qq[0], v - qq[1], -qq[2]], axis=-1)
+        pez = mx.array([-nz * float(nn[0]), -nz * float(nn[1]),
+                        1.0 - nz * nz])
+        q0, q1, q2 = float(qq[0]), float(qq[1]), float(qq[2])
+        w0 = mx.stack(
+            [u - q0, v - q1, mx.full_like(u, -q2)], axis=-1
+        )
         wn = mx.sum(w0 * nn, axis=-1)
         aq = mx.maximum(1.0 - nz * nz, 1e-8)
         bq = mx.sum(w0 * pez, axis=-1)

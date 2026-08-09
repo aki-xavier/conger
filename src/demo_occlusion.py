@@ -8,6 +8,7 @@
 (约束实际做了多少功), (d) 目检深度图序数骨架是否改善。
 """
 
+import os
 import sys
 
 import matplotlib.pyplot as plt
@@ -54,7 +55,10 @@ def main(img_name: str = "12.png") -> None:
     enh = EdgePrior().enhance(like, feat, rw)
     res = PerceptualGrouping().run(enh, feat.mean_ori)
     polys, circs = grouping_contours(res)
-    seg = SceneSegmenter(tau=0.3).run(enh, like, tex, polys, circs)
+    _ds = int(os.environ.get("SCAN_DS", "1"))  # 探针开关 (默认 1)
+    seg = SceneSegmenter(tau=0.3, scan_ds=_ds).run(
+        enh, like, tex, polys, circs
+    )
     sub = seg.subregions
     print(f"{img_name}: 链 {len(res.chains)}, T 结 {len(res.t_junctions)}")
 
