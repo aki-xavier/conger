@@ -21,6 +21,7 @@ from cga.algebra import (
     E3,
     EINF,
     Circle,
+    Cylinder,
     Line,
     Plane,
     Point,
@@ -29,6 +30,7 @@ from cga.algebra import (
 )
 from cga.motors import Motor
 from cga.multivector import Multivector
+from cga.render import RenderPrimitive, RenderResult, render_scene
 
 __all__ = [
     "E0",
@@ -37,11 +39,15 @@ __all__ = [
     "E3",
     "EINF",
     "Circle",
+    "Cylinder",
     "Line",
     "Motor",
     "Multivector",
     "Plane",
     "Point",
     "PointPair",
+    "RenderPrimitive",
+    "RenderResult",
     "Sphere",
+    "render_scene",
 ]

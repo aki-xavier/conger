@@ -13,12 +13,15 @@ import numpy as np
 
 from cga import (
     Circle,
+    Cylinder,
     Line,
     Motor,
     Multivector,
     Plane,
     Point,
+    RenderPrimitive,
     Sphere,
+    render_scene,
 )
 
 _ok = 0
@@ -199,6 +202,55 @@ def main() -> None:
     )
     (w_r, v_r) = Motor.extract_velocity(Motor.rotor((0, 0, 1), 0.2).gp(ID), ID, dt)
     check("extract_velocity rotation sign", close(w_r[2], 2.0))
+
+    # ── 逆渲染: 掩码 / z-buffer / motor 视角 / 区域裁剪 ──────────────
+    K = (100.0, 100.0, 64.0, 48.0)
+    H2, W2 = 96, 128
+    yy2, xx2 = mx.meshgrid(mx.arange(H2), mx.arange(W2), indexing="ij")
+    # 掩码模式: 地平面 z=2 (region 1) + 球 (0,0,3) r=0.5 (region 2)
+    # 中心像素 → 球前表面 2.5; 圆盘外 → 平面 2.0
+    prims = [
+        RenderPrimitive("plane", Plane((0, 0, 1), 2.0), 1),
+        RenderPrimitive("sphere", Sphere((0, 0, 3), 0.5), 2),
+    ]
+    disc2 = (xx2 - 64) ** 2 + (yy2 - 48) ** 2 <= 40**2
+    reg2 = mx.where(disc2, 2, 1).astype(mx.int32)
+    r = render_scene(prims, K, (H2, W2), regions=reg2)
+    check("render masked sphere front", close(r.depth[48, 64], 2.5))
+    check("render masked plane", close(r.depth[10, 10], 2.0))
+    # 全量 z-buffer: 球在前 → 球像素 1.5 遮挡平面 4.0
+    r2 = render_scene(
+        [
+            RenderPrimitive("sphere", Sphere((0, 0, 2), 0.5), 2),
+            RenderPrimitive("plane", Plane((0, 0, 1), 4.0), 1),
+        ],
+        K, (H2, W2),
+    )
+    check("render full zbuffer front", close(r2.depth[48, 64], 1.5))
+    check("render full zbuffer corner", close(r2.depth[5, 5], 4.0))
+    # motor 视角: 相机前进 1m → 平面变近 1m (4.0→3.0)
+    r3 = render_scene(
+        [RenderPrimitive("plane", Plane((0, 0, 1), 4.0), 1)],
+        K, (H2, W2),
+        motor=Motor.translator((0.0, 0.0, -1.0)),
+    )
+    check("render motor view", close(r3.depth[48, 64], 3.0))
+    # 掩码裁剪: 无图元区域深度 0
+    half2 = mx.where(xx2 < W2 // 2, 1, 0).astype(mx.int32)
+    r4 = render_scene(
+        [RenderPrimitive("plane", Plane((0, 0, 1), 2.0), 1)],
+        K, (H2, W2), regions=half2,
+    )
+    check("render masked clip", close(r4.depth[48, 100], 0.0))
+    check("render masked keep", close(r4.depth[48, 10], 2.0))
+
+    # ── 圆柱: 解析距离 + 轴上/柱内/柱外 ──────────────────────────────
+    cy = Cylinder((0.0, 0.0, 2.0), (0.0, 1.0, 0.0), 1.0)  # 轴 ∥ Y 过 (0,0,2)
+    check("cylinder on surface", close(cy.dist(Point(1.0, 5.0, 2.0)), 0.0))
+    check("cylinder inside", close(cy.dist(Point(0.2, 0.0, 2.0)), -0.8))
+    check("cylinder outside", close(cy.dist(Point(3.0, -2.0, 2.0)), 2.0))
+    check("cylinder surface dist symmetric",
+          close(cy.dist(Point(-1.0, 5.0, 2.0)), 0.0))
 
     print(f"\nall {_ok} checks passed")
 

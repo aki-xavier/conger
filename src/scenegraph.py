@@ -29,7 +29,7 @@ from typing import NamedTuple
 
 import mlx.core as mx
 
-from cga import Motor, Multivector, Plane, Sphere
+from cga import Circle, Cylinder, Motor, Multivector, Plane, Sphere
 from fusion import DepthCue, FusionResult, PrimFit
 from utils import Utils
 
@@ -126,8 +126,20 @@ class SceneGraph:
             nl = math.sqrt(na * na + nb * nb + 1.0)
             # z = na·x + nb·y + nc ⇔ (−na)x + (−nb)y + z = nc
             return Plane((-na / nl, -nb / nl, 1.0 / nl), nc / nl)
+        if kind == "cylinder":
+            return self.make_cyl_blade(params)
         cu, cv, cz, rho = (float(params[i]) for i in range(4))
         return Sphere((cu * s + w / 2, cv * s + h / 2, cz), rho * s)
+
+    def make_cyl_blade(self, params: mx.array):
+        """圆柱 7 参 (n̂, q, ρ) → 像素单位 Cylinder (混合量纲同球)。"""
+        h, w, s = self.h, self.w, self.s
+        nx, ny, nz = (float(params[i]) for i in range(3))
+        qx, qy, qz = (float(params[i]) for i in range(3, 6))
+        rho = float(params[6])
+        return Cylinder(
+            (qx * s + w / 2, qy * s + h / 2, qz), (nx, ny, nz), rho * s
+        )
 
     def accumulate(
         self, res: FusionResult, M: Motor | None = None
@@ -227,6 +239,32 @@ class SceneGraph:
         self.deaths += died
         return died
 
+    def _render_cylinder(self, nd: SceneNode) -> mx.array:
+        """圆柱深度渲染 (图像空间柱面近根, 同 fusion pred_cy)。"""
+        yy, xx = mx.meshgrid(
+            mx.arange(self.h, dtype=mx.float32),
+            mx.arange(self.w, dtype=mx.float32), indexing="ij",
+        )
+        u = (xx - self.w / 2) / self.s
+        v = (yy - self.h / 2) / self.s
+        nn = nd.params[0:3]
+        qq = nd.params[3:6]
+        rr = nd.params[6]
+        nz = float(nn[2])
+        pez = mx.stack([-nz * nn[0], -nz * nn[1], 1.0 - nz * nz])
+        w0 = mx.stack([u - qq[0], v - qq[1], -qq[2]], axis=-1)
+        wn = mx.sum(w0 * nn, axis=-1)
+        aq = mx.maximum(1.0 - nz * nz, 1e-8)
+        bq = mx.sum(w0 * pez, axis=-1)
+        cq = mx.sum(w0 * w0, axis=-1) - wn * wn - rr * rr
+        disc = bq * bq - aq * cq
+        zr = mx.where(
+            disc > 0.0,
+            (-bq - mx.sqrt(mx.maximum(disc, 0.0))) / aq,
+            float("inf"),
+        )
+        return mx.where(zr > 0.0, zr, float("inf"))
+
     def _node_residual(
         self, nd: SceneNode, depth: mx.array, sub: mx.array
     ) -> float | None:
@@ -235,8 +273,10 @@ class SceneGraph:
         mask = (sub == nd.region).reshape(-1)
         if nd.kind == "plane":
             zr = self._render_plane(nd.params).reshape(-1)
-        else:
+        elif nd.kind == "sphere":
             zr = self._render_sphere(nd).reshape(-1)
+        else:
+            zr = self._render_cylinder(nd).reshape(-1)
         d = depth.reshape(-1)
         k = int(mx.sum(mask))
         if k == 0:
@@ -278,11 +318,12 @@ class SceneGraph:
         out = dense
         highlight = mx.zeros(dense.shape)
         for nd in self.nodes:
-            zr = (
-                self._render_plane(nd.params)
-                if nd.kind == "plane"
-                else self._render_sphere(nd)
-            )
+            if nd.kind == "plane":
+                zr = self._render_plane(nd.params)
+            elif nd.kind == "sphere":
+                zr = self._render_sphere(nd)
+            else:
+                zr = self._render_cylinder(nd)
             mask = subregions == nd.region
             out = mx.where(mask, zr, out)
             highlight = mx.where(mask, mx.abs(dense - zr), highlight)
@@ -404,6 +445,101 @@ class SceneGraph:
         out.sort(key=lambda m: m.residual)
         return out
 
+    def lift_circles(
+        self,
+        circle_params: list[tuple[tuple[float, float], float]],
+        depth: mx.array,
+        K: tuple[float, float, float, float],
+        n_samp: int = 48,
+        inset: float = 2.0,
+        max_plane_rms: float = 0.05,
+    ) -> list:
+        """2D 圆检测 → 3D 圆 (独立摄入路径, 不经 PrimFit)。
+        grouping.circle_params 是 ((cx,cy), ρ) 像素圆; 圆周内缩采样
+        (圆周本体常落在背景/边缘, 采样即脏) → scene 深度反投影 3D
+        点 → 平面拟合 (质心 + 最小特征方向), 残差 σ > 门拒 (球
+        剪影/噪声会被拦下 —— 诚实门控); 圆心 = 2D 圆心 3D 点在
+        平面上投影, 半径 = 环点平面内距均值。
+        分歧保留: 圆与端视圆柱歧义交下游 (两者都进 SceneModel)。"""
+        fx, fy, cx0, cy0 = K
+        h, w = self.h, self.w
+        out: list = []
+        for (cx, cy), rho in circle_params:
+            if rho < inset + 1.0 or rho > 0.5 * w:
+                continue
+            # 圆周内缩采样 (像素坐标)
+            th = [2.0 * math.pi * k / n_samp for k in range(n_samp)]
+            xs = [cx + (rho - inset) * math.cos(t) for t in th]
+            ys = [cy + (rho - inset) * math.sin(t) for t in th]
+            pts = []
+            for x, y in zip(xs, ys, strict=True):
+                xi, yi = int(round(x)), int(round(y))
+                if not (0 <= xi < w and 0 <= yi < h):
+                    continue
+                z = float(depth[yi, xi])
+                if z <= 0.1:
+                    continue
+                pts.append(
+                    ((x - cx0) * z / fx, (y - cy0) * z / fy, z)
+                )
+            if len(pts) < max(8, n_samp // 3):
+                continue
+            # 平面拟合: 质心 + PCA 最小特征方向 (法向)
+            nx_ = sum(p[0] for p in pts) / len(pts)
+            ny_ = sum(p[1] for p in pts) / len(pts)
+            nz_ = sum(p[2] for p in pts) / len(pts)
+            g = mx.zeros((3, 3))
+            for p in pts:
+                d = mx.array([p[0] - nx_, p[1] - ny_, p[2] - nz_])
+                g += d[:, None] @ d[None, :]
+            ev = mx.linalg.eigh(g, stream=mx.cpu)[1]
+            normal = ev[:, 0]  # 最小特征值方向
+            nl = float(mx.linalg.norm(normal))
+            if nl < 1e-8:
+                continue
+            normal = normal / nl
+            rms_pl = math.sqrt(
+                sum(
+                    (normal[0] * (p[0] - nx_) + normal[1] * (p[1] - ny_)
+                     + normal[2] * (p[2] - nz_)) ** 2
+                    for p in pts
+                )
+                / len(pts)
+            )
+            if rms_pl > max_plane_rms:
+                continue  # 非平面 (球剪影/深度噪声)
+            # 2D 圆心反投影 → 平面上投影 → 圆心; 半径 = 环距均值
+            zc = float(depth[int(round(cy)), int(round(cx))])
+            if zc <= 0.1:
+                continue
+            c3 = mx.array(
+                [(cx - cx0) * zc / fx, (cy - cy0) * zc / fy, zc]
+            )
+            off = c3 - mx.array([nx_, ny_, nz_])
+            center = (mx.array([nx_, ny_, nz_]) + off
+                      - (off @ normal) * normal)
+            rs = [
+                math.sqrt(
+                    (p[0] - center[0]) ** 2 + (p[1] - center[1]) ** 2
+                    + (p[2] - center[2]) ** 2
+                )
+                for p in pts
+            ]
+            r_avg = sum(rs) / len(rs)
+            # 内缩只为干净采样, 半径外推回真圆: 2D 半径 ρ 按中心深度
+            # 换算 (采样环内缩了 inset px, 直接环距均值会偏小)
+            r_avg = rho * zc / fx
+            if r_avg < 0.02:
+                continue
+            out.append(
+                Circle(
+                    (float(center[0]), float(center[1]), float(center[2])),
+                    r_avg,
+                    (float(normal[0]), float(normal[1]), float(normal[2])),
+                )
+            )
+        return out
+
     def export(
         self, K: tuple[float, float, float, float], rid_map: mx.array
     ) -> SceneModel:
@@ -446,17 +582,25 @@ class SceneGraph:
                 nl = math.sqrt(nx * nx + ny * ny + nz * nz)
                 d = (nx * px + ny * py + nz * z_c) / nl
                 blade = Plane((nx / nl, ny / nl, nz / nl), d)
-            else:  # sphere
+            elif nd.kind == "sphere":
                 cu, cv, cz, rho = (float(nd.params[i]) for i in range(4))
                 col0, row0 = cu * s + w / 2, cv * s + h / 2
                 px = (col0 - cx) * cz / fx
                 py = (row0 - cy) * cz / fy
                 rho_m = rho * s * cz / fx  # 深度比例换算 (椭球近似)
                 blade = Sphere((px, py, cz), max(rho_m, 1e-6))
+            else:  # cylinder
+                nx, ny, nz = (float(nd.params[i]) for i in range(3))
+                qx, qy, qz = (float(nd.params[i]) for i in range(3, 6))
+                col0, row0 = qx * s + w / 2, qy * s + h / 2
+                px = (col0 - cx) * qz / fx
+                py = (row0 - cy) * qz / fy
+                rho_m = nd.params[6] * s * qz / fx
+                blade = Cylinder((px, py, qz), (nx, ny, nz), max(rho_m, 1e-6))
             prims.append(
                 ScenePrimitive(nd.kind, blade, nd.cov, r, nd.hits)
             )
-        return SceneModel(prims, K, self.detect_symmetry(rid_map))
+        return SceneModel(prims, K, self.detect_symmetry(rid_map), rid_map)
 
 
 class ScenePrimitive(NamedTuple):
@@ -475,6 +619,8 @@ class SceneModel(NamedTuple):
     primitives: list[ScenePrimitive]
     K: tuple[float, float, float, float]  # (fx, fy, cx, cy)
     symmetries: list[SymmetryMatch]  # 对称关系 (detect_symmetry 产物)
+    regions: mx.array  # 源 rid 图 (掩码逆渲染用, 像素坐标)
+    circles: list = []  # 3D 圆 (lift_circles 产物; 独立摄入路径)
 
 
 class SymmetryMatch(NamedTuple):
@@ -672,3 +818,20 @@ if __name__ == "__main__":
     assert abs(d2) < 0.06, f"米制平面外点残差 {d2:.4f}"
     print(f"8. export: 米制平面两检查点残差 < 2e-2, "
           f"primitives={len(model.primitives)} ✓")
+
+    # ── 9. lift_circles: 平盘环 → 3D 圆 (平面=表面平面) ────────────
+    # 场景: z=3 平面前放一个圆环盘 (圆在 z=3 平面内, 圆心 (64,48),
+    # 半径 40px) —— 深度场: 圆环内与圆外都是平面 z=3 (圆是轮廓标注)
+    K9 = (100.0, 100.0, 64.0, 48.0)
+    depth9 = mx.full((H, W), 3.0)
+    sg9 = SceneGraph((H, W))
+    circ9 = sg9.lift_circles([((64.0, 48.0), 40.0)], depth9, K9)
+    assert len(circ9) == 1, f"平盘环应提升 1 圆, 得 {len(circ9)}"
+    c9 = circ9[0]
+    # 关联判据: 圆上点 ip(p, C) = 0 (对偶圆 = 球∧平面)
+    from cga import Point
+    on = Point(1.2, 0.0, 3.0)  # 圆心 (0,0,3) 半径 1.2 的圆上点
+    assert float(mx.max(mx.abs(on.ip(c9).values))) < 1e-3, on.ip(c9).values
+    off = Point(1.2, 0.0, 3.5)  # 圆平面外 (z=3.5) → 不在圆上
+    assert float(mx.max(mx.abs(off.ip(c9).values))) > 1e-3
+    print("9. 圆提升: 平盘环 → 3D 圆 (圆上点关联 / 平面外点不关联 ✓)")
