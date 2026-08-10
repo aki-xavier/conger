@@ -4,11 +4,15 @@
 
   frame 0: RieszWavelet + VBGMM 冷启动 (全量拟合, 一次性开销)
            │  frame t (t≥1):
-           ├─ rw.update(img) → features()         (特征刷新, ~10ms)
-           ├─ gm.online_update(X, ρ)              (一次 E 步 + EWMA, ~百ms)
-           ├─ class_likelihood → EdgePrior.enhance (空间先验, ~10ms)
+           ├─ rw.update(img) → features()         (特征刷新, ~2ms)
+           ├─ gm.online_update(X, ρ)              (一次 E 步 + EWMA, ~35ms
+           │    2026-08-10 同步消除后: 前台 85→48ms)
+           ├─ class_likelihood → EdgePrior.enhance (空间先验, ~5ms)
            └─ GroupingTracker.submit(enh, ori)    (非阻塞, ~0.4ms)
                 └─ 后台线程: 全量 grouping + 链 id 对应 (数秒, 只留最新帧)
+  loop=True 闭环: 后台融合 → 场景图累积 → 渲染反喂 → 链三维对应 →
+       MotorEKF; 序数约束经自身深度估计验证后才注入 (验证门, 防未验证
+       硬约束扭曲深度, 2026-08-10 架构修复)
 
   消费: tracker.latest() / wait_next() → TrackedResult (稳定 tid)
 

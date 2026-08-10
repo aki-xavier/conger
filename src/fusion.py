@@ -6,7 +6,7 @@
        │  CueFusion: 高斯乘积 (逆方差加权) —— 共轭闭式
        ▼  稠密深度后验 (mean, precision)
   PrimitiveFit: 以分割子区域为拟合单元, 加权 LSQ 提升为
-       平面/球图元 (Kasa), 残差选模, 协方差 = (AᵀWA)⁻¹
+       平面/球/圆柱图元 (Kasa 闭式, 三模型 BIC 选模), 协方差 = (AᵀWA)⁻¹
        正规方程充分统计量按区域 scatter-add, (R,3,3)/(R,4,4) 批量
        求逆 —— 无逐区域 Python/MLX 同步 (grouping 的教训)
        ▼  → 图元 blade (cga Plane/Sphere) + Σ + 残差稠密场
@@ -33,7 +33,6 @@ from dataclasses import dataclass
 from typing import NamedTuple
 
 import mlx.core as mx
-
 from cga import Cylinder, Multivector, Plane, Sphere
 
 

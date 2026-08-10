@@ -16,7 +16,6 @@ import matplotlib.pyplot as plt
 import mlx.core as mx
 import numpy as np
 from PIL import Image
-from segment_anything import SamAutomaticMaskGenerator, sam_model_registry
 
 from color import Color
 from edgemap import EdgePrior
@@ -92,6 +91,12 @@ def main(img_name: str = "12.png") -> None:
 
     # ── SAM (vit_b; MPS 不支持 float64, 用 CPU) ─────────────────────
     t0 = time.perf_counter()
+    # SAM 惰性导入: 仅对比路径需要 (segment_anything 是可选外部依赖)
+    from segment_anything import (  # type: ignore[reportMissingImports]
+        SamAutomaticMaskGenerator,
+        sam_model_registry,
+    )
+
     sam = sam_model_registry["vit_b"](
         checkpoint=str(root / "checkpoints/sam_vit_b_01ec64.pth")
     )

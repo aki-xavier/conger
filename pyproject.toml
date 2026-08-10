@@ -4,7 +4,17 @@ version = "0.1.0"
 description = "Add your description here"
 readme = "README.md"
 requires-python = ">=3.14"
-dependencies = ["matplotlib>=3.11.1", "mlx>=0.32.0", "numpy>=2.5.1"]
+dependencies = [
+    "matplotlib>=3.11.1",
+    "mlx>=0.32.0",
+    "numpy>=1.26,<2.5",  # 对齐 ~/code/cga 的 numpy 上限 (clifford→numba 约束)
+    "scipy>=1.14",  # 评估脚本: loadmat / ndimage 形态学
+    "h5py>=3.11",  # NYU Eigen 评估: h5 读取
+    "cga",  # 独立项目 ~/code/cga (path source, 见 [tool.uv.sources])
+]
+
+[tool.uv.sources]
+cga = { path = "../cga", editable = true }
 
 # ═══════════════════════════════════════════════════════════════════════
 # ruff — linter & formatter

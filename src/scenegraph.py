@@ -7,11 +7,13 @@
        │    Bhattacharyya 门控匹配 (同空间, d_B < 2 宁并勿分),
        │    匹配不上 → 新节点 (提升); motor 对齐走 blade 层
        ▼  SceneNode (blade + params + Σ + 运行统计)
-  arbitrate: 存在性序贯检验 (SPRT), log-likelihood-ratio 越阈退场
+  arbitrate: 存在性序贯检验 (SPRT), 累积 log-likelihood-ratio 越阈退场
+  accumulate 门: BIC 惩罚残差绝对栏 + rms_raw 相对栏 + 非有限拟合守卫
+       (NaN cov 不进图, 防 C++ eigh abort)
   render: 场景深度渲染 + 残差高亮 → feedback: prior_map (→ 分割层),
-       场景渲染作高精度 DepthCue 反喂融合层 (闭环演示)
+       场景渲染作弱精度 DepthCue 反喂融合层 (闭环演示, 防自确认)
   reflect: 反射 versor 共轭 + detect_symmetry 对称面检测
-       (角平分面候选 + 支撑城重叠真门)
+       (角平分面候选 + 支撑城落点证据的 binomial Bayes factor 门)
 
   [留钩] 关联边 (meet/op/ip 关联代数); 曼哈顿正交联合精化;
          motor 协方差传播 (小运动下 blade 对齐足够);
@@ -28,8 +30,8 @@ from dataclasses import dataclass
 from typing import NamedTuple
 
 import mlx.core as mx
-
 from cga import Circle, Cylinder, Motor, Multivector, Plane, Sphere
+
 from fusion import DepthCue, FusionResult, PrimFit
 from utils import Utils
 
