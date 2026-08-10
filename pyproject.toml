@@ -7,7 +7,7 @@ requires-python = ">=3.14"
 dependencies = [
     "matplotlib>=3.11.1",
     "mlx>=0.32.0",
-    "numpy>=1.26,<2.5",  # 对齐 ~/code/cga 的 numpy 上限 (clifford→numba 约束)
+    "numpy>=1.26",  # scipy 互操作桥 (cga 已无 numpy 约束, 旧 <2.5 上限随 clifford 移除)
     "scipy>=1.14",  # 评估脚本: loadmat / ndimage 形态学
     "h5py>=3.11",  # NYU Eigen 评估: h5 读取
     "cga",  # 独立项目 ~/code/cga (path source, 见 [tool.uv.sources])
