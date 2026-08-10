@@ -544,16 +544,6 @@ class OcclusionOrder:
 
         for t in res.t_junctions:
             jr, jc = t.pos
-            ch_b = res.chains[t.behind]
-            e0, e1 = pos[int(ch_b[0])], pos[int(ch_b[-1])]
-            d0 = float((e0[0] - jr) ** 2 + (e0[1] - jc) ** 2)
-            d1 = float((e1[0] - jr) ** 2 + (e1[1] - jc) ** 2)
-            en = e0 if d0 <= d1 else e1
-            br, bc = float(en[0]) - jr, float(en[1]) - jc  # 背景方向
-            bn = math.hypot(br, bc)
-            if bn < 1e-6:
-                continue
-            br, bc = br / bn, bc / bn
             ch_f = res.chains[t.front]
             pts = pos[ch_f]
             i = int(mx.argmin(
@@ -561,12 +551,27 @@ class OcclusionOrder:
             ))
             idx = int(ch_f[i])
             nr, nc_ = float(normal[idx, 0]), float(normal[idx, 1])
-            if nr * br + nc_ * bc < 0:
-                nr, nc_ = -nr, -nc_  # 法向定向到背景侧
+            # 根因修复 (2026-08-10 E3): 旧版用"终止链近端点 − 结点"定
+            # 背景方向 —— 端点恰在结点处, 方向≈0/噪声, front/behind 定向
+            # 随机 (E3 实测板 1 对、板 3 反, 无系统一致性)。改为: behind
+            # = 终止链中部落位的一侧 (T 结语义: 终止链属于被遮表面),
+            # 法向定向到该侧 —— 确定性定向。注意: 纹理终止型假 T (前
+            # 表面自身纹理线终止) 与真 T 在结点几何上不可区分, 该语义
+            # 假设对真遮挡成立、对假 T 仍反 —— 几何不可解部分需深度/
+            # 表面归属独立线索 (记档)。实测 (2026-08-10 iBims 10 场景):
+            # 定向确定性化后序正确率 0.419 (原 0.444, 不可区分) —— 定向
+            # 噪声只是部分成因; 区域中位数 confound 已由局部深度序排除
+            # (0.467), 剩余失效在结点级 through/stub 分类与假 T 歧义,
+            # 需独立深度/表面线索。
+            ch_b = res.chains[t.behind]
+            mid = int(ch_b[len(ch_b) // 2])
+            mr, mc = float(pos[mid, 0]), float(pos[mid, 1])
+            if nr * (mr - jr) + nc_ * (mc - jc) < 0:
+                nr, nc_ = -nr, -nc_  # 法向定向到终止链侧 (= behind)
             pr, pc = float(pts[i, 0]), float(pts[i, 1])
             for off in (offset, 2 * offset):
-                rid_f = _rid(pr - off * nr, pc - off * nc_)
-                rid_b = _rid(pr + off * nr, pc + off * nc_)
+                rid_f = _rid(pr - off * nr, pc - off * nc_)  # front = 反侧
+                rid_b = _rid(pr + off * nr, pc + off * nc_)  # behind = 终止链侧
                 if rid_f > 0 and rid_b > 0 and rid_f != rid_b:
                     out.append(OrdinalConstraint(t.pos, rid_f, rid_b))
                     break
