@@ -94,7 +94,7 @@ def eval_image(img_path: str, gt_path: str, tol: int) -> dict[float, float]:
 
 def main(n_images: int = 20) -> None:
     root = Utils.project_root()
-    imgs = sorted(glob.glob("/tmp/BSDS500/BSDS500/data/images/test/*.jpg"))
+    imgs = sorted(glob.glob("/tmp/datasets/BSDS500/BSDS500/data/images/test/*.jpg"))
     step = max(1, len(imgs) // n_images)
     imgs = imgs[::step]
     tol = int(0.0075 * (321.0**2 + 481.0**2) ** 0.5)
@@ -125,10 +125,10 @@ def main(n_images: int = 20) -> None:
     fig, axes = plt.subplots(3, 3, figsize=(15, 12))
     for r_i, (name, sc) in enumerate(pick):
         img = Image.open(
-            f"/tmp/BSDS500/BSDS500/data/images/test/{name}"
+            f"/tmp/datasets/BSDS500/BSDS500/data/images/test/{name}"
         ).convert("RGB")
         gt_b = gt_boundaries(
-            "/tmp/BSDS500/BSDS500/data/groundTruth/test/"
+            "/tmp/datasets/BSDS500/BSDS500/data/groundTruth/test/"
             + name.replace(".jpg", ".mat")
         )[0]
         rgb = Color.image_to_mlx(img)
