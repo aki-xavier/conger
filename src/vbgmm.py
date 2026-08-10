@@ -398,24 +398,31 @@ class VBGMM:
         eye = mx.eye(d)
         tr = mx.sum(s * eye, axis=(1, 2))  # Tr(S_k), 取 μ 用
 
-        # MLX 的 eigh/inv/cholesky 只有 CPU stream, 逐分量算
+        # 性能批量化 (2026-08-10 剖析: 逐分量 CPU 循环 + 每分量 4 次
+        # float() GPU→CPU 同步 (~192 次/帧) 是前台 79ms 瓶颈)。标量
+        # 因子 (μ/nk/β 比) 批量预计算、末尾单次 mx.eval, 消除全部同步;
+        # 单矩阵乘保持 —— MLX 0.32 批量 @ 在 (48,7,7) 有 ~0.24 数值
+        # 误差 (A/B vs numpy f64 实测), 批量 matmul 不可用。
+        mu_k = mx.maximum(tr / d, 1e-6)  # 逐分量 μ = Tr(S_k)/d
+        nk_beta = self.beta0 * nk / beta  # (K,) 预计算, 免同步
         w_list, logdet_w, tr_w = [], [], []
         for j in range(self.k_max):
-            ev, q_vec = mx.linalg.eigh(s[j], stream=mx.cpu)
-            mu_j = max(float(tr[j]) / d, 1e-6)
-            ev = mx.maximum(ev, 1e-3 * mu_j)
-            s_floor = (q_vec * ev) @ q_vec.T
-            winv_j = eye + float(nk[j]) * s_floor
-            winv_j = winv_j + float(self.beta0 * nk[j] / beta[j]) * (
+            ev_j, q_j = mx.linalg.eigh(s[j], stream=mx.cpu)
+            ev_j = mx.maximum(ev_j, 1e-3 * mu_k[j])
+            sf_j = (q_j * ev_j) @ q_j.T
+            winv_j = eye + nk[j] * sf_j + nk_beta[j] * (
                 xbar[j][:, None] @ xbar[j][None, :]
             )
-            wj = mx.linalg.inv(winv_j, stream=mx.cpu)
-            w_list.append(wj)
-            logdet_w.append(self.logdet_spd(wj))
-            tr_w.append(float(mx.trace(wj)))
+            w_j = mx.linalg.inv(winv_j, stream=mx.cpu)
+            w_list.append(w_j)
+            L_j = mx.linalg.cholesky(
+                w_j + 1e-6 * eye, stream=mx.cpu
+            )  # logdet (原 self.logdet_spd 同式, 惰性免同步)
+            logdet_w.append(2.0 * mx.sum(mx.log(mx.diagonal(L_j))))
+            tr_w.append(mx.sum(mx.diagonal(w_j)))
         w = mx.stack(w_list)
-        logdet_w = mx.array(logdet_w)
-        tr_w = mx.array(tr_w)
+        logdet_w = mx.stack(logdet_w)
+        tr_w = mx.stack(tr_w)
         mx.eval(w, logdet_w, tr_w)
 
         log_pi = self.digamma(alpha) - self.digamma(mx.sum(alpha))  # E[ln π_k]

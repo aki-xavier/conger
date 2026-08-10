@@ -22,6 +22,7 @@ from demo_eval_common import (
     aggregate,
     depth_metrics,
     edge_f1,
+    occlusion_boundary_recall,
     print_summary,
     run_ours,
 )
@@ -89,36 +90,44 @@ def main(n_images: int = 10) -> None:
         name = mp.stem
         rgb, depth, edges, planes, valid = load_scene(str(mp))
         hier, enh, cue = run_ours(rgb)
-        # 区域 (τ 固定 0.5) + 单目深度
-        regions = np.array(hier.cut(0.5))
         z_rel = np.asarray(cue.mean)
         p_mask = np.asarray(cue.precision) > 0.01  # 线索有精度的像素
         sc = {}
         sc.update(depth_metrics(z_rel, depth, valid & p_mask))
+        # 分割的下游准绳 (2026-08-10 架构检讨, 替代 BSDS-F1 口径):
+        # 遮挡边界 recall (深度跳变边界 vs 我们的区域边界, confetti
+        # 不惩罚) + 平面检出。两者都随 τ 变 (τ=0.5 全并 → recall 0,
+        # τ=0.2 碎裂 → recall 高但多余边界 13×) —— 按 τ 扫描报告。
+        for tau in (0.2, 0.3, 0.5):
+            regions = np.array(hier.cut(tau))
+            occl_rec, n_occ = occlusion_boundary_recall(regions, depth, valid)
+            sc[f"occl_rec_{tau}"] = occl_rec
+            det, mIoU = plane_metrics(regions, planes)
+            sc[f"plane_det_{tau}"] = det
+            sc[f"plane_iou_{tau}"] = mIoU
+        sc["n_occl"] = float(n_occ)
         if edges is not None:
             ef = edge_f1(enh, edges)
             sc.update({f"edge_t{t}": v for t, v in ef.items()})
             sc["edge_best"] = max(ef.values())
         else:
             sc["edge_best"] = float("nan")  # 无 GT, 不计入汇总
-        det, mIoU = plane_metrics(regions, planes)
-        sc["plane_det"], sc["plane_iou"] = det, mIoU
         rows.append((name, sc))
         print(f"[{i + 1}/{len(mats)}] {name}: δ1={sc['delta1']:.2f} "
-              f"sp={sc['spearman']:.2f} edge={sc['edge_best']:.2f} "
-              f"plane_det={sc['plane_det']:.2f} "
+              f"sp={sc['spearman']:.2f} occl_rec(0.3)={sc['occl_rec_0.3']:.2f} "
+              f"plane_det(0.3)={sc['plane_det_0.3']:.2f} "
               f"({(time.perf_counter() - t0) / 60:.1f}min)")
 
     print_summary("iBims-1", aggregate(rows))
     # 三通道排序三例
     ranked_d = sorted(rows, key=lambda r: -r[1]["spearman"])
-    ranked_e = sorted(rows, key=lambda r: -r[1]["edge_best"])
-    ranked_p = sorted(rows, key=lambda r: -r[1]["plane_det"])
+    ranked_o = sorted(rows, key=lambda r: -r[1]["occl_rec_0.3"])
+    ranked_p = sorted(rows, key=lambda r: -r[1]["plane_det_0.3"])
     imgs = {n: load_scene(str(next(m for m in mats if m.stem == n)))[0]
             for n, _ in rows}
     fig, axes = plt.subplots(3, 3, figsize=(15, 12))
     for c_i, (label, sel) in enumerate(
-        [("深度 Spearman", ranked_d), ("边界 F1", ranked_e),
+        [("深度 Spearman", ranked_d), ("遮挡边界 recall", ranked_o),
          ("平面检出", ranked_p)]
     ):
         pick = [sel[0], sel[len(sel) // 2], sel[-1]]

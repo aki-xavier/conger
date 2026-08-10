@@ -114,6 +114,47 @@ def edge_f1(enh: mx.array, gt_edges: np.ndarray, tol: int = 3) -> dict[float, fl
     }
 
 
+def region_boundary(regions: np.ndarray) -> np.ndarray:
+    """区域标签图 → 二值边界图。"""
+    b = np.zeros_like(regions, dtype=bool)
+    b[:-1] |= regions[:-1] != regions[1:]
+    b[:, :-1] |= regions[:, :-1] != regions[:, 1:]
+    return b
+
+
+def occlusion_boundary_recall(
+    regions: np.ndarray,
+    depth: np.ndarray,
+    valid: np.ndarray,
+    tol: int = 3,
+    rel_jump: float = 0.15,
+) -> tuple[float, int]:
+    """遮挡边界 recall (分割的下游准绳之一, 2026-08-10 架构检讨):
+    GT = 深度跳变边界 (log 深度相对跳变 > rel_jump, 免尺度);
+    我们的边界 = 区域标签变化。只测 recall —— confetti (多碎边界)
+    不惩罚, 正是 BSDS-F1 与该口径的关键差异 (BSDS 惩罚碎裂, 项目
+    下游 (场景图合并) 对碎裂自愈; 漏遮挡界 = 漏 T 结 = 深度序错,
+    才是致命)。返回 (recall, GT 边界像素数)。"""
+    from scipy import ndimage
+
+    d = np.log(np.maximum(depth, 1e-3))
+    thr = np.log(1.0 + rel_jump)
+    gtb = np.zeros(depth.shape, dtype=bool)
+    gx = np.abs(np.diff(d, axis=1))
+    gtb[:, 1:] |= gx > thr
+    gtb[:, :-1] |= gx > thr
+    gy = np.abs(np.diff(d, axis=0))
+    gtb[1:, :] |= gy > thr
+    gtb[:-1, :] |= gy > thr
+    gtb &= valid
+    n_gt = int(gtb.sum())
+    if n_gt < 50:
+        return float("nan"), n_gt
+    ob = region_boundary(regions)
+    hit = ndimage.binary_dilation(ob, iterations=tol) & gtb
+    return float(hit.sum() / n_gt), n_gt
+
+
 def aggregate(rows: list[tuple[str, dict]]) -> dict:
     """行列表 → 汇总 (逐指标均值, nan 忽略)。"""
     keys = list(rows[0][1].keys())
@@ -137,7 +178,7 @@ def print_summary(title: str, agg: dict) -> None:
               f"(区域级: {agg.get('sp_region', float('nan')):.3f})")
     for k, v in agg.items():
         if k not in ("n", "delta1", "delta2", "delta3", "rmse",
-                     "log_rmse", "spearman") and np.isfinite(v):
+                     "log_rmse", "spearman", "sp_region") and np.isfinite(v):
             print(f"  {k}: {v:.3f}")
 
 
