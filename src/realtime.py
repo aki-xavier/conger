@@ -178,10 +178,36 @@ class RealtimePipeline:
         # id, 跨帧标签重排导致渲染错位 —— 已修, 见 SubregionTracker)
         rid_map, _, _alts = st.region_tracker.run(seg.subregions, app=app)
         st.last_rid = rid_map
-        # T 结遮挡偏序 → 序数深度约束 (prior.md: 高权重不可下调)
+        # T 结遮挡偏序 → 序数深度约束 (prior.md: 高权重不可下调)。
+        # 验证门 (2026-08-10 架构检查最高风险修复): iBims 实数据实测
+        # 序数约束 ≈50% 反向 (序正确率 0.42, E4-E7 排除定向噪声/区域
+        # confound) —— 未验证的硬约束注入融合会**主动扭曲深度** (合成
+        # 世界测试通过只因那里约束大多正确)。注入前与闭环自身深度估
+        # 计 (上帧场景渲染, 运动通道可靠域) 一致性校验: 分歧 → 丢弃。
+        # 代价: 不再纠正深度错误 (约束的原始用途), 但可靠性优先 ——
+        # 50% 反向的硬先验比没有先验更危险。首帧 (st.depth None) 不验
+        # 证 (引导深度自举期)。
         occ = OcclusionOrder.constraints_from_grouping(
             tracked.result, rid_map
         )
+        if occ and st.depth is not None:
+            valid_occ = []
+            d = st.depth.reshape(-1)
+            lab = rid_map.reshape(-1)
+            for cn in occ:
+                mf = lab == cn.front
+                mb = lab == cn.behind
+                nf, nb = int(mx.sum(mf)), int(mx.sum(mb))
+                if nf < 10 or nb < 10:
+                    continue
+                zf = float(mx.median(d[mf]))
+                zb = float(mx.median(d[mb]))
+                if zf < zb:  # 与闭环深度一致才注入
+                    valid_occ.append(cn)
+            if len(valid_occ) < len(occ):
+                print(f"[闭环] 序数约束验证: {len(valid_occ)}/{len(occ)} "
+                      f"通过与闭环深度一致")
+            occ = valid_occ
         fr = st.fusion.run(cues, rid_map, occlusion=occ, boundary=enh)
         if st.M is not None:
             # motor 对齐: 新观测 (cur) 映射回场景 (prev/world) 坐标
