@@ -13,6 +13,7 @@
 用法: PYTHONPATH=src .venv/bin/python3 src/demo_occlusion_eval.py [样本数]
 """
 
+import math
 import sys
 import time
 
@@ -70,15 +71,16 @@ def main(n_scenes: int = 6) -> None:
         cons = OcclusionOrder.constraints_from_grouping(res, sub)
         n_tj = len(res.t_junctions)
         # E4: 假 T 结率 —— T 结位置距 GT 深度跳变 ≤5px 的比例
-        d = np.log(np.maximum(depth, 1e-3))
-        thr = np.log(1.15)
-        gtb = np.zeros(depth.shape, dtype=bool)
-        gtb[:, 1:] |= np.abs(np.diff(d, axis=1)) > thr
-        gtb[1:, :] |= np.abs(np.diff(d, axis=0)) > thr
-        gtb &= valid
+        d = mx.log(mx.maximum(mx.array(depth, dtype=mx.float32), 1e-3))
+        thr = math.log(1.15)
+        gx = mx.abs(mx.diff(d, axis=1)) > thr
+        gy = mx.abs(mx.diff(d, axis=0)) > thr
+        gtb = mx.pad(gx, [(0, 0), (0, 1)]) | mx.pad(gx, [(0, 0), (1, 0)])
+        gtb = gtb | mx.pad(gy, [(0, 1), (0, 0)]) | mx.pad(gy, [(1, 0), (0, 0)])
+        gtb = gtb & mx.array(valid, dtype=mx.bool_)
         from scipy import ndimage
 
-        gtb_d = ndimage.binary_dilation(gtb, iterations=5)
+        gtb_d = ndimage.binary_dilation(np.asarray(gtb), iterations=5)
         n_real = sum(
             1 for t in res.t_junctions
             if int(round(t.pos[0])) < H and int(round(t.pos[1])) < W
@@ -113,16 +115,18 @@ def main(n_scenes: int = 6) -> None:
                 r0 = min(max(r0, 0), H - 1)
                 c0 = min(max(c0, 0), W - 1)
                 r1, c1 = min(r0 + 3, H), min(c0 + 3, W)
-                return np.median(depth[r0:r1, c0:c1])
+                return float(mx.median(
+                    mx.array(depth[r0:r1, c0:c1], dtype=mx.float32)
+                ))
             z_loc_f = _patch(pr - 3 * nr, pc - 3 * nc2)
             z_loc_b = _patch(pr + 3 * nr, pc + 3 * nc2)
-            if np.isfinite(z_loc_f) and np.isfinite(z_loc_b):
+            if math.isfinite(z_loc_f) and math.isfinite(z_loc_b):
                 tot_loc += 1
                 ok_loc += 1 if z_loc_f < z_loc_b else 0
             fr, be = cn.front, cn.behind
             cu, cv = int(round(cn.pos[1])), int(round(cn.pos[0]))
             at_real = (0 <= cv < H and 0 <= cu < W
-                       and gtb_d[cv, cu])
+                       and bool(gtb_d[cv, cu]))
             fr, be = cn.front, cn.behind
             m_f = (sub == fr).reshape(-1) & valid.reshape(-1)
             m_b = (sub == be).reshape(-1) & valid.reshape(-1)

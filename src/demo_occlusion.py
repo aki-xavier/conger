@@ -110,7 +110,7 @@ def main(img_name: str = "12.png") -> None:
     axes[1].set_title("单目深度 (无序数约束)")
     axes[2].imshow(np.array(fr_oc.render), cmap="viridis")
     axes[2].set_title("单目深度 + 序数约束")
-    diff = np.array(fr_oc.render - fr_no.render)
+    diff = fr_oc.render - fr_no.render  # MLX 计算, imshow 走 __array__ 桥
     im3 = axes[3].imshow(diff, cmap="RdBu", vmin=-np.abs(diff).max(),
                          vmax=np.abs(diff).max())
     axes[3].set_title("约束修正场 (红=前移 蓝=后移)")

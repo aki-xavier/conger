@@ -49,8 +49,8 @@ def main(n_images: int = 10) -> None:
         name = hp.stem
         rgb, depth = load_h5(str(hp))
         _, enh, cue = run_ours(rgb)
-        z_rel = np.asarray(cue.mean)
-        p_mask = np.asarray(cue.precision) > 0.01
+        z_rel = cue.mean
+        p_mask = cue.precision > 0.01
         valid = depth > 0.01
         sc = depth_metrics(z_rel, depth, valid & p_mask)
         rows.append((name, sc))

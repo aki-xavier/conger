@@ -33,20 +33,23 @@ def sample_features(rgb: np.ndarray, max_pix: int = 20000) -> np.ndarray:
     rw = RieszWavelet(lum)
     x = np.asarray(VBGMM.feature_matrix(rw.features()), dtype=np.float64)
     if x.shape[0] > max_pix:
-        idx = np.linspace(0, x.shape[0] - 1, max_pix).astype(int)
-        x = x[idx]
+        idx = mx.linspace(0, x.shape[0] - 1, max_pix).astype(mx.int32)
+        x = np.asarray(x)[np.asarray(idx)]
     return x
 
 
 def diag(features: np.ndarray, label: str) -> dict:
-    """z 标准化 → 相关矩阵/特征值 → 冗余报告。"""
-    mu, sd = features.mean(0), features.std(0) + 1e-9
-    z = (features - mu) / sd
-    corr = np.corrcoef(z.T)  # (7,7)
-    eig = np.linalg.eigvalsh(corr)
-    eig = eig[::-1]
-    cum = np.cumsum(eig) / eig.sum()
-    cond = eig.max() / max(eig.min(), 1e-12)
+    """z 标准化 → 相关矩阵/特征值 → 冗余报告 (全 MLX)。"""
+    zf = mx.array(features, dtype=mx.float32)
+    mu = mx.mean(zf, axis=0)
+    sd = mx.std(zf, axis=0) + 1e-9
+    z = (zf - mu) / sd
+    zc = z - mx.mean(z, axis=0)
+    corr = (zc.T @ zc) / zc.shape[0]  # 相关矩阵 (特征已单位方差)
+    eig = mx.linalg.eigh(corr, stream=mx.cpu)[0][::-1]  # 升序 → 降序
+    cum = mx.cumsum(eig) / mx.sum(eig)
+    cond = float(eig[0]) / max(float(eig[-1]), 1e-12)
+    corr = np.asarray(corr)  # 仅打印/可视化用 (互操作桥)
     print(f"\n== {label} (n={features.shape[0]} 像素) ==")
     print(f"  相关矩阵 (行/列 = {FEATS}):")
     print("      " + " ".join(f"{n[:4]:>5}" for n in FEATS))

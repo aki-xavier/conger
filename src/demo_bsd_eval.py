@@ -47,11 +47,10 @@ def gt_boundaries(mat_path: str) -> list[np.ndarray]:
 
 
 def our_boundary(regions: np.ndarray) -> np.ndarray:
-    """我们的区域标签图 → 二值边界图。"""
-    b = np.zeros_like(regions, dtype=bool)
-    b[:-1] |= regions[:-1] != regions[1:]
-    b[:, :-1] |= regions[:, :-1] != regions[:, 1:]
-    return b
+    """我们的区域标签图 → 二值边界图 (MLX, 复用共享 region_boundary)。"""
+    from demo_eval_common import region_boundary
+
+    return np.asarray(region_boundary(regions))
 
 
 def run_ours_hierarchy(rgb):
@@ -112,8 +111,10 @@ def main(n_images: int = 20) -> None:
               + f" | best={max(sc.values()):.3f} "
               f"({(time.perf_counter() - t0) / 60:.0f}min)")
 
-    ods = {t: float(np.mean([sc[t] for _, sc in rows])) for t in TAUS}
-    ois = float(np.mean([max(sc.values()) for _, sc in rows]))
+    import statistics
+
+    ods = {t: statistics.fmean([sc[t] for _, sc in rows]) for t in TAUS}
+    ois = statistics.fmean([max(sc.values()) for _, sc in rows])
     print("\n== 汇总 ==")
     for t, v in ods.items():
         print(f"  固定 τ={t}: 平均 F1 = {v:.3f} (≈ODS)")

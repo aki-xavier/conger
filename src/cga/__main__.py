@@ -9,7 +9,6 @@ meet 接受直接形式输入。
 import math
 
 import mlx.core as mx
-import numpy as np
 
 from cga import (
     Circle,
@@ -144,9 +143,9 @@ def main() -> None:
     )
 
     # to_matrix 与 sandwich 作用一致
-    Hm = np.array(M.to_matrix())
-    p_h = Hm @ np.array([1, 0, 0, 1.0])
-    check("motor_to_matrix", np.allclose(p_h[:3], [1, 1, 0], atol=1e-4))
+    Hm = mx.array(M.to_matrix())
+    p_h = Hm @ mx.array([1, 0, 0, 1.0])
+    check("motor_to_matrix", bool(mx.allclose(p_h[:3], mx.array([1, 1, 0]), atol=1e-4)))
 
     # exp/log roundtrip 与 motor 插值 (Motor.exp(B, s): exp(-s·B), s 带符号)
     R90 = Motor.rotor((0, 0, 1), math.pi / 2)

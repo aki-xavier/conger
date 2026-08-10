@@ -9,6 +9,8 @@
 """
 
 
+import math
+
 import matplotlib.pyplot as plt
 import mlx.core as mx
 import numpy as np
@@ -58,49 +60,73 @@ def run_ours(rgb: np.ndarray | mx.array) -> tuple:
     return hier, enh, cue
 
 
-def depth_metrics(z_pred: np.ndarray, z_gt: np.ndarray, valid: np.ndarray) -> dict:
+def _spearman(a: mx.array, b: mx.array) -> float:
+    """Spearman 秩相关 (全 MLX): 秩 = 双重 argsort, 相关 = 手写。"""
+    ra = mx.argsort(mx.argsort(a)).astype(mx.float32)
+    rb = mx.argsort(mx.argsort(b)).astype(mx.float32)
+    ma = mx.mean(ra)
+    mb = mx.mean(rb)
+    cov = mx.sum((ra - ma) * (rb - mb))
+    va = mx.sum((ra - ma) ** 2)
+    vb = mx.sum((rb - mb) ** 2)
+    return float(cov / mx.sqrt(va * vb + 1e-9))
+
+
+def depth_metrics(
+    z_pred: np.ndarray | mx.array,
+    z_gt: np.ndarray | mx.array,
+    valid: np.ndarray | mx.array,
+) -> dict:
     """单目深度线索 vs GT: 逐图尺度对齐后 δ1/δ2/δ3/RMSE/log-RMSE + Spearman。
     z_pred 为相对线索 (任意尺度); 对齐 = 有效像素上最小二乘 ẑ=a·z+b。
-    valid 为参与评估的像素掩码 (GT 有效 ∩ 线索有精度)。"""
-    v = valid & np.isfinite(z_pred) & np.isfinite(z_gt) & (z_gt > 0)
-    n = int(v.sum())
+    全 MLX (铁规则: 矩阵计算一律 MLX; 入参 numpy 在入口转 mx)。"""
+    zp = mx.array(z_pred, dtype=mx.float32)
+    zg = mx.array(z_gt, dtype=mx.float32)
+    vd = mx.array(valid, dtype=mx.bool_)
+    v = vd & mx.isfinite(zp) & mx.isfinite(zg) & (zg > 0)
+    n = int(mx.sum(v))
     if n < 100:
         return {"n": n, "delta1": float("nan"), "delta2": float("nan"),
                 "delta3": float("nan"), "rmse": float("nan"),
                 "log_rmse": float("nan"), "spearman": float("nan"),
                 "sp_region": float("nan")}
-    p, g = z_pred[v], z_gt[v]
-    # 尺度对齐 (最小二乘, 含截距吸收直流)
-    a, b = np.polyfit(p, g, 1)
+    key = mx.where(v.reshape(-1), mx.arange(v.size), v.size)
+    idx = mx.argsort(key)[:n]
+    p, g = zp.reshape(-1)[idx], zg.reshape(-1)[idx]
+    # 尺度对齐: 正规方程 lstsq (ẑ = a·p + b) —— MLX 无 lstsq, 解 AᵀA
+    nf = float(n)
+    sp_ = float(mx.sum(p))
+    sg = float(mx.sum(g))
+    spp = float(mx.sum(p * p))
+    spg = float(mx.sum(p * g))
+    denom = nf * spp - sp_ * sp_
+    a = (nf * spg - sp_ * sg) / denom
+    b = (spp * sg - sp_ * spg) / denom
     pred = a * p + b
     err = pred - g
-    rmse = float(np.sqrt(np.mean(err**2)))
-    log_rmse = float(np.sqrt(np.mean((np.log(pred) - np.log(g)) ** 2)))
-    ratio = np.maximum(pred / g, g / pred)
-    delta1 = float(np.mean(ratio < 1.25))
-    delta2 = float(np.mean(ratio < 1.25**2))
-    delta3 = float(np.mean(ratio < 1.25**3))
-    # Spearman 秩相关 (免对齐, 测单调性; 手写秩相关, 免 scipy 类型依赖)
-    rp = np.argsort(np.argsort(p)).astype(np.float64)
-    rg = np.argsort(np.argsort(g)).astype(np.float64)
-    sp = float(np.corrcoef(rp, rg)[0, 1])
-    # 区域级 Spearman (线索承诺口径: 区域级序数骨架, 16×16 块中位
-    # 数聚合后测秩; 像素级测的是逐像素承诺, 比模块承诺更严)
+    rmse = float(mx.sqrt(mx.mean(err**2)))
+    log_rmse = float(mx.sqrt(mx.mean((mx.log(pred) - mx.log(g)) ** 2)))
+    ratio = mx.maximum(pred / g, g / pred)
+    delta1 = float(mx.mean(ratio < 1.25))
+    delta2 = float(mx.mean(ratio < 1.25**2))
+    delta3 = float(mx.mean(ratio < 1.25**3))
+    sp = _spearman(p, g)
+    # 区域级 Spearman (线索承诺口径: 16×16 块中位数聚合后测秩)
     sp_region = float("nan")
     bs = 16
-    Hh, Ww = z_pred.shape
+    Hh, Ww = zg.shape
     bp, bg = [], []
     for r0 in range(0, Hh, bs):
         for c0 in range(0, Ww, bs):
-            m = valid[r0 : r0 + bs, c0 : c0 + bs]
-            if int(m.sum()) < 8:
+            mv = vd[r0 : r0 + bs, c0 : c0 + bs]
+            if int(mx.sum(mv)) < 8:
                 continue
-            bp.append(np.median(z_pred[r0 : r0 + bs, c0 : c0 + bs][m]))
-            bg.append(np.median(z_gt[r0 : r0 + bs, c0 : c0 + bs][m]))
+            key2 = mx.where(mv.reshape(-1), mx.arange(mv.size), mv.size)
+            idx2 = mx.argsort(key2)[: int(mx.sum(mv))]
+            bp.append(mx.median(zp[r0 : r0 + bs, c0 : c0 + bs].reshape(-1)[idx2]))
+            bg.append(mx.median(zg[r0 : r0 + bs, c0 : c0 + bs].reshape(-1)[idx2]))
     if len(bp) >= 8:
-        rp2 = np.argsort(np.argsort(np.array(bp))).astype(np.float64)
-        rg2 = np.argsort(np.argsort(np.array(bg))).astype(np.float64)
-        sp_region = float(np.corrcoef(rp2, rg2)[0, 1])
+        sp_region = _spearman(mx.stack(bp), mx.stack(bg))
     return {"n": n, "delta1": delta1, "delta2": delta2, "delta3": delta3,
             "rmse": rmse, "log_rmse": log_rmse, "spearman": sp,
             "sp_region": sp_region}
@@ -114,11 +140,12 @@ def edge_f1(enh: mx.array, gt_edges: np.ndarray, tol: int = 3) -> dict[float, fl
     }
 
 
-def region_boundary(regions: np.ndarray) -> np.ndarray:
-    """区域标签图 → 二值边界图。"""
-    b = np.zeros_like(regions, dtype=bool)
-    b[:-1] |= regions[:-1] != regions[1:]
-    b[:, :-1] |= regions[:, :-1] != regions[:, 1:]
+def region_boundary(regions: np.ndarray | mx.array) -> mx.array:
+    """区域标签图 → 二值边界图 (MLX)。"""
+    r = mx.array(regions)
+    h, w = r.shape
+    b = mx.pad(r[:-1] != r[1:], [(0, 1), (0, 0)])
+    b = b | mx.pad(r[:, :-1] != r[:, 1:], [(0, 0), (0, 1)])
     return b
 
 
@@ -135,33 +162,35 @@ def occlusion_boundary_recall(
     不惩罚, 正是 BSDS-F1 与该口径的关键差异 (BSDS 惩罚碎裂, 项目
     下游 (场景图合并) 对碎裂自愈; 漏遮挡界 = 漏 T 结 = 深度序错,
     才是致命)。返回 (recall, GT 边界像素数)。"""
-    from scipy import ndimage
-
-    d = np.log(np.maximum(depth, 1e-3))
-    thr = np.log(1.0 + rel_jump)
-    gtb = np.zeros(depth.shape, dtype=bool)
-    gx = np.abs(np.diff(d, axis=1))
-    gtb[:, 1:] |= gx > thr
-    gtb[:, :-1] |= gx > thr
-    gy = np.abs(np.diff(d, axis=0))
-    gtb[1:, :] |= gy > thr
-    gtb[:-1, :] |= gy > thr
-    gtb &= valid
-    n_gt = int(gtb.sum())
+    d = mx.log(mx.maximum(mx.array(depth, dtype=mx.float32), 1e-3))
+    thr = math.log(1.0 + rel_jump)
+    gx = mx.abs(mx.diff(d, axis=1)) > thr  # (H,W-1)
+    gy = mx.abs(mx.diff(d, axis=0)) > thr  # (H-1,W)
+    # 双向传播 (像素两侧任一侧跳变即边界); pad 而非 ArrayAt (无 __ior__)
+    gtb = mx.pad(gx, [(0, 0), (0, 1)]) | mx.pad(gx, [(0, 0), (1, 0)])
+    gtb = gtb | mx.pad(gy, [(0, 1), (0, 0)]) | mx.pad(gy, [(1, 0), (0, 0)])
+    gtb = gtb & mx.array(valid, dtype=mx.bool_)
+    n_gt = int(mx.sum(gtb))
     if n_gt < 50:
         return float("nan"), n_gt
     ob = region_boundary(regions)
-    hit = ndimage.binary_dilation(ob, iterations=tol) & gtb
+    # scipy.ndimage 膨胀: MLX 无形态学算子, 属"不能使用 mlx"例外
+    from scipy import ndimage
+
+    ob_np = np.asarray(ob)
+    hit = ndimage.binary_dilation(ob_np, iterations=tol) & np.asarray(gtb)
     return float(hit.sum() / n_gt), n_gt
 
 
 def aggregate(rows: list[tuple[str, dict]]) -> dict:
-    """行列表 → 汇总 (逐指标均值, nan 忽略)。"""
+    """行列表 → 汇总 (逐指标均值, nan 忽略)。纯 Python 标量统计。"""
+    import statistics
+
     keys = list(rows[0][1].keys())
     out = {}
     for k in keys:
-        vals = [sc[k] for _, sc in rows if np.isfinite(sc[k])]
-        out[k] = float(np.mean(vals)) if vals else float("nan")
+        vals = [sc[k] for _, sc in rows if math.isfinite(sc[k])]
+        out[k] = statistics.fmean(vals) if vals else float("nan")
     return out
 
 

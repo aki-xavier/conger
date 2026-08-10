@@ -11,6 +11,7 @@ constraints_from_grouping → 对 GT 深度验证序正确率)。
 用法: PYTHONPATH=src .venv/bin/python3 src/demo_occlusion_synth.py
 """
 
+import math
 import time
 
 import mlx.core as mx
@@ -67,16 +68,18 @@ def main() -> None:
 
     # 序正确率: front/behind 区域在 GT 深度的中位
     ok = tot = 0
-    sub_np = np.asarray(sub)
-    zm_np = np.asarray(zmap)
+    sub_mx = mx.array(sub)
+    zm_mx = mx.array(zmap, dtype=mx.float32)
     for cn in cons:
-        m_f = (sub_np == cn.front) & (zm_np > 0)
-        m_b = (sub_np == cn.behind) & (zm_np > 0)
-        nf, nb = int(m_f.sum()), int(m_b.sum())
+        m_f = (sub_mx == cn.front) & (zm_mx > 0)
+        m_b = (sub_mx == cn.behind) & (zm_mx > 0)
+        nf, nb = int(mx.sum(m_f)), int(mx.sum(m_b))
         if nf < 10 or nb < 10:
             continue
-        zf = np.median(zm_np[m_f])
-        zb = np.median(zm_np[m_b])
+        kf = mx.argsort(mx.where(m_f.reshape(-1), mx.arange(m_f.size), m_f.size))[:nf]
+        kb = mx.argsort(mx.where(m_b.reshape(-1), mx.arange(m_b.size), m_b.size))[:nb]
+        zf = float(mx.median(zm_mx.reshape(-1)[kf]))
+        zb = float(mx.median(zm_mx.reshape(-1)[kb]))
         tot += 1
         ok += 1 if zf < zb else 0
         print(f"  约束@{int(cn.pos[0])},{int(cn.pos[1])}: "
@@ -87,12 +90,15 @@ def main() -> None:
           f"({'≈1: 映射逻辑通' if ok / max(tot, 1) > 0.7 else '≈0.5: 映射有 bug'})")
 
     # E4 对照: T 结落在板边 (深度跳变) 的比例
-    d = np.log(np.maximum(np.asarray(zmap), 1e-3))
-    thr = np.log(1.15)
-    gtb_np = np.zeros(zmap.shape, dtype=bool)
-    gtb_np[:, 1:] |= np.abs(np.diff(d, axis=1)) > thr
-    gtb_np[1:, :] |= np.abs(np.diff(d, axis=0)) > thr
+    d = mx.log(mx.maximum(zm_mx, 1e-3))
+    thr = math.log(1.15)
+    gx = mx.abs(mx.diff(d, axis=1)) > thr
+    gy = mx.abs(mx.diff(d, axis=0)) > thr
+    gtb = mx.pad(gx, [(0, 0), (0, 1)]) | mx.pad(gx, [(0, 0), (1, 0)])
+    gtb = gtb | mx.pad(gy, [(0, 1), (0, 0)]) | mx.pad(gy, [(1, 0), (0, 0)])
     from scipy import ndimage
+
+    gtb_np = np.asarray(gtb)
 
     gtb_d = ndimage.binary_dilation(gtb_np, iterations=5)
     n_real = sum(
