@@ -46,8 +46,9 @@ from utils import Utils
 _NBINS = 8
 _NBINS_CONT = 5
 
-# χ² 临界值 (α=0.05), dof 1..16 —— (bins_i−1)(bins_j−1) ≤ (8−1)² 用不到,
-# 实际 ≤ (5−1)²=16 (连续-连续)。硬编码避免 scipy 依赖。
+# χ² 临界值 (α=0.05), dof 1..16 精确表; dof>16 用 Wilson-Hilferty
+# 近似 (z=1.6449, 误差 <2%) —— 离散-离散对 dof 可达 (8−1)²=49。
+# 硬编码避免 scipy 依赖。
 _CHI2_05: tuple[float, ...] = (
     3.841, 5.991, 7.815, 9.488, 11.070, 12.592, 14.067, 15.507,
     16.919, 18.307, 19.675, 21.026, 22.362, 23.685, 24.996, 26.296,
@@ -80,10 +81,15 @@ class GaussLeaf(Node):
 
 @dataclass(frozen=True)
 class CatLeaf(Node):
-    """单变量分类叶 (离散列), logp (K,) 经 Laplace 平滑。"""
+    """单变量分类叶 (离散列), logp (K,) 经 Laplace 平滑。
+
+    counts (K,) 原始计数 (可选): 增量学习的叶支撑判定用
+    count>0 (Laplace 平滑后 logp 无法反推零计数值)。
+    """
 
     var: int
     logp: mx.array
+    counts: mx.array | None = None
 
     def eval_log(self, x: mx.array) -> mx.array:
         idx = x[:, self.var].astype(mx.int32)
@@ -323,7 +329,7 @@ def _learn(
     # 查询变量驱动: 节点含离散列且行码混杂 → Sum 按码空间分裂
     code_cols = [cc for cc in cols if cc in disc_cols]
     if code_cols and _rows_code_mixed(xr, code_cols):
-        r0, r1 = _split_rows(xr, code_cols, on_codes=True)
+        r0, r1 = _split_rows(xr, code_cols)
         r0 = [rows[i] for i in r0]  # 局部下标 → 全局行号
         r1 = [rows[i] for i in r1]
         if len(r0) < min_n or len(r1) < min_n:
@@ -357,7 +363,7 @@ def _learn(
                 for comp in comps
             )
         )
-    r0, r1 = _split_rows(xr, cols, on_codes=False)
+    r0, r1 = _split_rows(xr, cols)
     r0 = [rows[i] for i in r0]  # 局部下标 → 全局行号
     r1 = [rows[i] for i in r1]
     if len(r0) < min_n or len(r1) < min_n:
@@ -389,6 +395,59 @@ def _rows_code_mixed(xr: mx.array, code_cols: list[int]) -> bool:
     return False
 
 
+# ── 结构增量辅助 (叶收集 / 叶替换) ──────────────────────────────
+
+
+def leaf_blocks(
+    node: Node, path: tuple[int, ...] = ()
+) -> list[tuple[Node, tuple[int, ...]]]:
+    """收集所有叶块 (对角乘积) 及其从根的路径 (子索引序列)。
+
+    用于增量学习: 叶块 = 可独立生长的结构单元。"""
+    if isinstance(node, (GaussLeaf, CatLeaf)):
+        return [(node, path)]
+    if isinstance(node, Product) and all(
+        isinstance(c, (GaussLeaf, CatLeaf)) for c in node.children
+    ):
+        return [(node, path)]
+    out: list[tuple[Node, tuple[int, ...]]] = []
+    if isinstance(node, Sum):
+        for i, c in enumerate(node.children):
+            out.extend(leaf_blocks(c, path + (i,)))
+    else:
+        assert isinstance(node, Product)  # 非叶 Product: 全部分量
+        for i, c in enumerate(node.children):
+            out.extend(leaf_blocks(c, path + (i,)))
+    return out
+
+
+def replace_leaf(
+    root: Node, path: tuple[int, ...], new: Node
+) -> Node:
+    """沿 path 重建树, 把叶替换为 new (frozen dataclass 不可变 →
+    路径上节点逐层重建)。结构增量: 叶缓冲满 → 局部子树生长。"""
+    if not path:
+        # 被替换目标必须是叶块 (叶或全叶 Product): 防路径漂移
+        # (树中间层重排导致替换到错误节点会静默腐蚀结构)
+        is_leaf_block = isinstance(root, (GaussLeaf, CatLeaf)) or (
+            isinstance(root, Product)
+            and all(isinstance(c, (GaussLeaf, CatLeaf)) for c in root.children)
+        )
+        assert is_leaf_block, f"替换目标非叶块: {type(root).__name__}"
+        return new
+    i, *rest = path
+    rest_t = tuple(rest)
+    if isinstance(root, Sum):
+        children = list(root.children)
+        children[i] = replace_leaf(children[i], rest_t, new)
+        return Sum(tuple(children), root.log_w)
+    if isinstance(root, Product):
+        children = list(root.children)
+        children[i] = replace_leaf(children[i], rest_t, new)
+        return Product(tuple(children))
+    return root
+
+
 def _diag(
     X: mx.array,
     rows: list[int],
@@ -409,7 +468,7 @@ def _diag(
             )
             # Laplace: 未见类别保底, 防后验硬零
             logp = mx.log((cnt + 1.0) / (float(mx.sum(cnt)) + k))
-            leaves.append(CatLeaf(c, logp))
+            leaves.append(CatLeaf(c, logp, cnt))
         else:
             sd = float(mx.maximum(mx.std(v), sigma_floor))
             leaves.append(GaussLeaf(c, float(mx.mean(v)), sd))
@@ -462,11 +521,18 @@ def _gtest(binned: mx.array, alpha: float = 0.05) -> mx.array:
     term = mx.where(jp > 0, jp * inner, 0.0)
     g = 2.0 * mx.sum(term, axis=(2, 3))  # (c, c)
     k = mx.sum(m > 0, axis=1)  # (c,) 每列非空 bin 数
-    dof = mx.clip((k[:, None] - 1) * (k[None, :] - 1), 0, 16)
-    thr = mx.take(
+    dof = (k[:, None] - 1) * (k[None, :] - 1)  # (c,c) float
+    dof = mx.maximum(dof, 0.0)
+    thr_tab = mx.take(
         mx.array(_CHI2_05, dtype=mx.float32),
         mx.clip(dof - 1, 0, 15).astype(mx.int32),
     )
+    # dof>16: Wilson-Hilferty χ²_0.95(d) ≈ d·(1−2/9d+z·√(2/9d))³
+    # (ddof 钳 1 防 dof=0 除零 —— 该分支会被 where 丢弃但 NaN 不雅)
+    z = 1.6448536
+    ddof = mx.maximum(dof, 1.0)
+    thr_wh = ddof * (1.0 - 2.0 / (9.0 * ddof) + z * mx.sqrt(2.0 / (9.0 * ddof))) ** 3
+    thr = mx.where(dof <= 16, thr_tab, thr_wh)
     return (g > thr) & (dof >= 1)
 
 
@@ -498,13 +564,12 @@ def _components(dep: mx.array) -> list[list[int]]:
 
 
 def _split_rows(
-    xr: mx.array, cols: list[int], on_codes: bool, iters: int = 12
+    xr: mx.array, cols: list[int], iters: int = 12
 ) -> tuple[list[int], list[int]]:
     """k=2 均值聚类 (z-score, 最远对初始化) → 两簇行下标。
 
-    on_codes=True: 距离只用离散 (查询) 列 —— 分裂按码空间 Voronoi,
-    混合分量码同质; False: 用全部列 (经典 learnSPN)。退化保护:
-    一簇为空 → 返回 ([], all) 由调用方转基例。
+    cols 由调用方选: 码列 (查询变量驱动, 分裂按码空间 Voronoi) 或全部列
+    (经典 learnSPN)。退化保护: 一簇为空 → 返回 ([], all) 由调用方转基例。
     """
     data = xr[:, mx.array(cols, dtype=mx.int32)]
     mu = mx.mean(data, axis=0, keepdims=True)
@@ -578,7 +643,7 @@ def _selftest() -> None:
     assert abs(float(mx.exp(post[1]).sum()) - 1.0) < 1e-5, "后验行未归一"
     print("  ok  混合后验: 类标签从连续证据恢复, 行归一")
 
-    # 5) 码先验注入: P(c|x) ∝ P(x|c)·P(c), 先验改变后验但保持归一
+    # 4) 码先验注入: P(c|x) ∝ P(x|c)·P(c), 先验改变后验但保持归一
     prior = mx.array([math.log(0.9), math.log(0.1)])  # 强偏好类 0
     post_p = spn3.posterior(feats, codes, log_prior=prior)
     assert abs(float(mx.exp(post_p).sum(axis=1)[1]) - 1.0) < 1e-5, "先验注入后未归一"
@@ -586,7 +651,7 @@ def _selftest() -> None:
     assert float(post_p[1, 0]) > float(post[1, 0]), "先验未提高类 0 后验"
     print("  ok  码先验: P(c|x) ∝ P(x|c)·P(c), 注入后行归一仍成立")
 
-    # 4) 序列化 roundtrip: save → load → eval 逐位一致
+    # 5) 序列化 roundtrip: save → load → eval 逐位一致
     import os
     import tempfile
 
