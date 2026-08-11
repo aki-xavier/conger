@@ -33,6 +33,7 @@ from cga.engine import (
     CylinderGeometry,
     DirectionalLight,
     Mesh,
+    MeshBasicMaterial,
     MeshStandardMaterial,
     PerspectiveCamera,
     Renderer,
@@ -56,13 +57,38 @@ N_KIND, N_GX, N_GY, N_SIZE = 3, 8, 6, 2
 Z0S = (2.5, 3.0, 3.5, 4.0)  # 图元中心世界 z, 4 档 → 单目深度线索 (近大远小)
 N_Z = len(Z0S)
 N_CODES = N_KIND * N_GX * N_GY * N_SIZE * N_Z  # 1152
-FEAT_CH = ("log_mag", "phase_coh", "ori_R")  # 判别力前三 (经验标定见旧 vbgmm)
-N_FEAT = len(FEAT_CH) * N_GX * N_GY  # 144
-CODE_COLS = tuple(range(N_FEAT, N_FEAT + 5))
-CARD = dict(zip(CODE_COLS, (N_KIND, N_GX, N_GY, N_SIZE, N_Z)))
+# FeatureMaps 全 11 通道 (log_e 是 (H,W,S) 3D 逐尺度能量, 不入池化管线)
+# 特征配置: (图像源, Riesz 通道) 列表, 双通路 L / L+HS (旧项目双通路延续)
+FEAT_L = (
+    ("lum", "log_mag"), ("lum", "phase_coh"), ("lum", "ori_R"),
+)
+FEAT_HS = (
+    ("sat", "log_mag"), ("sat", "phase_coh"), ("sat", "ori_R"),
+    ("hue", "log_mag"), ("hue", "phase_coh"), ("hue", "ori_R"),
+)
+FEAT_LHS = FEAT_L + FEAT_HS
+feat_spec = FEAT_L  # 默认; --feat lhs 加色度, hs 仅色度 (消融)
+n_feat = len(feat_spec) * N_GX * N_GY  # 144 / 432
+code_cols = tuple(range(n_feat, n_feat + 5))
+card = dict(zip(code_cols, (N_KIND, N_GX, N_GY, N_SIZE, N_Z)))
 
-OBJ_COLOR = 0xE8E8E8  # 浅色物体 / 深色背景 → 亮度高对比, Riesz 边缘强
-BG_COLOR = 0x141414
+# 彩色化: 三种 kind 不同色相 (颜色成为合法判别线索, 色度通路才有信息)
+kind_colors = (0xC0392B, 0x27AE60, 0x2980B9)  # sphere 红 / cylinder 绿 / box 蓝
+bg_color = 0x141414
+# 等亮度消融 (--equal-luma): 三色与背景同为亮度 0.10 (frame_lum 权重),
+# L 通路完全失效; 物体换 MeshBasicMaterial 去掉光照明暗 → 轮廓只剩色度可辨
+EQ_KIND_COLORS = (0x550000, 0x002B00, 0x0000E0)
+EQ_BG_COLOR = 0x1A1A1A
+equal_luma = False
+
+# 遮挡 T 结 (--occlusion): 固定黄色竖柱遮挡物 (z=3.5, 图中央)。主图元
+# z<3.5 且位置重叠 → 遮住黄柱 (黄面积 < F0); z≥3.5 → 黄完整。序数先验:
+# 黄面积缺失 = 主图元在前 (遮挡逻辑的工程化, prior.md 物理先验)。
+OCC_BOX = (0.5, 1.4, 0.5)
+OCC_GRID = (4, 3)
+OCC_Z = 3.5
+OCC_COLOR = 0xF1C40F
+occlusion = False
 
 
 # ── 场景码 ⇄ cga Scene ───────────────────────────────────────────
@@ -110,16 +136,40 @@ def code_to_scene(code: tuple[int, int, int, int, int]) -> Scene:
         geom = CylinderGeometry(s, length=2.2 * s)  # 有限柱: 竖向可观测
     else:
         geom = BoxGeometry(2 * s, 2 * s, 2 * s)
-    scene = Scene(background=Color(BG_COLOR))
+    scene = Scene(background=Color(bg_color))
     scene.add(AmbientLight(Color(0xFFFFFF), 0.5))
     scene.add(DirectionalLight(Color(0xFFFFFF), 0.7, direction=(0.3, -0.7, 0.4)))
+    if equal_luma:
+        # 等亮度: 无明暗 (Basic 材质不接光照) → L 图均匀, 轮廓仅存于色度
+        material = MeshBasicMaterial(Color(kind_colors[kind]))
+    else:
+        material = MeshStandardMaterial(Color(kind_colors[kind]), roughness=0.55)
     scene.add(
         Mesh(
             geom,
-            MeshStandardMaterial(Color(OBJ_COLOR), roughness=0.55),
+            material,
             position=(x, y, Z0S[z]),
         )
     )
+    if occlusion:
+        # 固定遮挡物: 黄色竖柱 (后添加 → 同深度时 z-buffer 赢)
+        uo = (OCC_GRID[0] + 0.5) * W / N_GX
+        vo = (OCC_GRID[1] + 0.5) * H / N_GY
+        zco = CAM_Z - OCC_Z
+        xo = (uo - (W - 1) / 2.0) * zco / FX
+        yo = ((H - 1) / 2.0 - vo) * zco / FY
+        oc_mat = (
+            MeshBasicMaterial(Color(OCC_COLOR))
+            if equal_luma
+            else MeshStandardMaterial(Color(OCC_COLOR), roughness=0.55)
+        )
+        scene.add(
+            Mesh(
+                BoxGeometry(*OCC_BOX),
+                oc_mat,
+                position=(xo, yo, OCC_Z),
+            )
+        )
     return scene
 
 
@@ -142,32 +192,107 @@ def frame_lum(frame: mx.array) -> mx.array:
     return 0.299 * rgb[..., 0] + 0.587 * rgb[..., 1] + 0.114 * rgb[..., 2]
 
 
+def frame_hs(frame: mx.array) -> tuple[mx.array, mx.array]:
+    """(H,W,4) uint8 → (H, S) 色度图, 各 [0,1)。RGB→HSV 公式, mlx where 链。
+
+    H 是环形量 (0/1 相接): Riesz 对 H 图滤波在色相跳变处响应,
+    wrap 只影响 0/1 边界像素带, 块池化后影响可忽略。
+    """
+    rgb = frame[..., :3].astype(mx.float32) / 255.0
+    r, g, b = rgb[..., 0], rgb[..., 1], rgb[..., 2]
+    mxv = mx.maximum(mx.maximum(r, g), b)
+    mn = mx.minimum(mx.minimum(r, g), b)
+    d = mxv - mn
+    s = mx.where(mxv > 1e-6, d / mx.maximum(mxv, 1e-6), 0.0)
+    max_r = r == mxv
+    max_g = g == mxv
+    h6 = mx.where(max_r, (g - b) / mx.maximum(d, 1e-9), 0.0)
+    h6 = mx.where(max_g, (b - r) / mx.maximum(d, 1e-9) + 2.0, h6)
+    h6 = mx.where((~max_r) & (~max_g), (r - g) / mx.maximum(d, 1e-9) + 4.0, h6)
+    h = mx.where(d < 1e-6, 0.0, h6 / 6.0)  # 灰: 色相无定义 → 0
+    return h, s
+
+
 def block_pool(fm: mx.array) -> mx.array:
     """(H,W) → (N_GY, N_GX) 块均值 (与场景网格对齐)。"""
     return fm.reshape(N_GY, H // N_GY, N_GX, W // N_GX).mean(axis=(1, 3))
 
 
 def feature_labels() -> list[str]:
-    """特征列语义名: 通道@(gx,gy), 与 block_pool 列序一致 (通道主序)。"""
+    """特征列语义名: 源:通道@(gx,gy), 与 block_pool 列序一致 (源-通道主序)。"""
     return [
-        f"{ch}@({gx},{gy})"
-        for ch in FEAT_CH
+        f"{src}:{ch}@({gx},{gy})"
+        for src, ch in feat_spec
         for gy in range(N_GY)
         for gx in range(N_GX)
     ]
 
 
-def features_of_lum(
-    lum: mx.array, rw: RieszWavelet | None
+def features_of_frame(
+    frame: mx.array, rw: RieszWavelet | None
 ) -> tuple[mx.array, RieszWavelet]:
-    """亮度图 → 特征向量 (N_FEAT,)。复用 RieszWavelet 实例 (核只建一次)。"""
+    """渲染帧 → 特征向量 (n_feat,)。
+
+    按 feat_spec 对 (亮度/饱和度/色相) 各源图做 Riesz 并块池化拼接;
+    单个 RieszWavelet 实例顺序 update (核只建一次)。
+    """
+    lum = frame_lum(frame)
+    hue, sat = frame_hs(frame)
+    if equal_luma:
+        # 传感器噪声底: 等亮度残差对比 (~0.6 灰度级) 在真实相机被
+        # 噪声淹没 → L 通路失效; S 轮廓 (0↔1 强对比) 不受影响 → HS 补位
+        lum = lum + mx.random.normal(shape=lum.shape, scale=0.02)
+    imgs = {"lum": lum, "sat": sat, "hue": hue}
     if rw is None:
-        rw = RieszWavelet(lum)
-    else:
-        rw.update(lum)
-    f = rw.features()
-    vec = mx.concatenate([block_pool(getattr(f, ch)).reshape(-1) for ch in FEAT_CH])
-    return vec, rw
+        rw = RieszWavelet(imgs[feat_spec[0][0]])
+    parts = []
+    for src, ch in feat_spec:
+        rw.update(imgs[src])
+        f = rw.features()
+        parts.append(block_pool(getattr(f, ch)).reshape(-1))
+    return mx.concatenate(parts), rw
+
+
+def yellow_area(frame: mx.array) -> float:
+    """黄色遮挡物像素数 (色相阈值: 黄 H≈0.12, S>0.4)。"""
+    h, s = frame_hs(frame)
+    mask = (s > 0.4) & (h > 0.07) & (h < 0.18)
+    return float(mx.sum(mask))
+
+
+def occlusion_prior(frames: list[mx.array]) -> mx.array:
+    """遮挡序数先验 (per-sample, N_CODES 每帧): 黄柱面积缺失
+    (< 0.85·F0) ⟹ 主图元遮住黄柱 ⟹ 主不比遮挡物后 ⟹ 排除 z=4.0
+    (其余档中性) —— 遮挡逻辑 (prior.md 物理先验): A 遮 B ⟹ A 在前。
+    注意: z=3.5 同深时主图元先渲染 (z-buffer 严格 <) 也遮黄, 故不排除。"""
+    f0 = _occluder_f0()
+    lp = mx.zeros((len(frames), N_CODES))
+    for i, fr in enumerate(frames):
+        if yellow_area(fr) < 0.85 * f0:
+            for j in range(N_CODES):
+                if idx_to_code(j)[4] == 3:  # z=4.0: 主在后, 不可能遮黄柱
+                    lp[i, j] = math.log(0.1)
+    return lp
+
+
+def _occluder_f0() -> float:
+    """黄柱无遮挡时的黄色像素数 (固定值, 离线预计算)。"""
+    renderer, cam = make_renderer()
+    scene = Scene(background=Color(bg_color))
+    scene.add(AmbientLight(Color(0xFFFFFF), 0.5))
+    scene.add(DirectionalLight(Color(0xFFFFFF), 0.7, direction=(0.3, -0.7, 0.4)))
+    uo = (OCC_GRID[0] + 0.5) * W / N_GX
+    vo = (OCC_GRID[1] + 0.5) * H / N_GY
+    zco = CAM_Z - OCC_Z
+    xo = (uo - (W - 1) / 2.0) * zco / FX
+    yo = ((H - 1) / 2.0 - vo) * zco / FY
+    oc_mat = (
+        MeshBasicMaterial(Color(OCC_COLOR))
+        if equal_luma
+        else MeshStandardMaterial(Color(OCC_COLOR), roughness=0.55)
+    )
+    scene.add(Mesh(BoxGeometry(*OCC_BOX), oc_mat, position=(xo, yo, OCC_Z)))
+    return yellow_area(renderer.render(scene, cam))
 
 
 # ── 数据构建 (含缓存) ────────────────────────────────────────────
@@ -176,10 +301,17 @@ def features_of_lum(
 def build_data(
     n_train: int, n_test: int, use_cache: bool
 ) -> tuple[mx.array, mx.array, mx.array, mx.array]:
-    """→ (Xtr, Ctr, Xte, Cte): 特征 (n, N_FEAT) + 码 (n, 4), 均 float32。"""
+    """→ (Xtr, Ctr, Xte, Cte): 特征 (n, n_feat) + 码 (n, 4), 均 float32。"""
     cache = Path(__file__).resolve().parent.parent / "artifacts"
     cache.mkdir(exist_ok=True)
-    tag = f"inv_{H}x{W}_g{N_GX}x{N_GY}_{n_train}_{n_test}.npz"
+    feat_tag = "".join(f"{s[:2]}{c[:2]}" for s, c in feat_spec)  # 特征集变化 → 新缓存
+    col_tag = "".join(f"{c:x}" for c in kind_colors)  # 配色变化 → 新缓存
+    eq_tag = "eqn" if equal_luma else "std"  # 等亮度+噪声底 → 新缓存
+    occ_tag = "occ" if occlusion else "noc"  # 遮挡物 → 新缓存
+    tag = (
+        f"inv_{H}x{W}_g{N_GX}x{N_GY}_{feat_tag}_{col_tag}_{eq_tag}_{occ_tag}"
+        f"_{n_train}_{n_test}.npz"
+    )
     path = cache / tag
     if use_cache and path.exists():
         d = mx.load(str(path))
@@ -196,7 +328,10 @@ def build_data(
         for i in idxs:
             scene = code_to_scene(idx_to_code(i))
             frame = renderer.render(scene, cam)
-            vec, rw = features_of_lum(frame_lum(frame), rw)
+            vec, rw = features_of_frame(frame, rw)
+            # 逐帧立即求值: MLX 惰性求值会把 4000 帧的计算图累积到
+            # 一次性 eval, 超 Metal 显存 (499000) 上限
+            mx.eval(vec)
             out.append(vec)
         return mx.stack(out)
 
@@ -247,23 +382,29 @@ def evaluate(pred_i: list[int], gt_i: list[int]) -> dict[str, float]:
 def build_prior(name: str) -> mx.array | None:
     """码先验 log P(c) (外部知识注入, 对应 docs/prior.md 先验体系)。
 
-    flat: 均匀先验 (None, 纯数据似然); edge: 一般视角先验 ——
-    图元中心不该贴图像边缘 (gx∈{0,7} 或 gy∈{0,5} 权重压低);
-    familiar: 熟悉尺寸先验 —— 大尺寸更常见 (size 偏态 0.7/0.3)。
-    返回 (N_CODES,) log 权重; softmax 归一在后验内部完成。
+    name 可逗号组合 (如 "edge,familiar"): 各先验 log 相加 (= 概率相乘)。
+      flat: 均匀先验 (None, 纯数据似然);
+      edge: 一般视角 —— 图元中心不该贴图像边缘 (gx∈{0,7} 或 gy∈{0,5});
+      familiar: 熟悉尺寸 —— 大尺寸更常见 (size 偏态 0.7/0.3);
+    log 权重在 posterior 内 softmax 归一。
     """
-    if name == "flat":
+    names = [n.strip() for n in name.split(",")]
+    if names == ["flat"] or "occlusion" in names:
+        # occlusion 是 per-sample 先验, 由 occlusion_prior() 逐帧构造
         return None
     w = mx.ones(N_CODES)
-    for i in range(N_CODES):
-        _, gx, gy, size, _ = idx_to_code(i)
-        if name == "edge":
-            if gx in (0, N_GX - 1) or gy in (0, N_GY - 1):
-                w[i] = 0.3
-        elif name == "familiar":
-            w[i] = 0.7 if size == 1 else 0.3
-        else:
-            raise ValueError(f"未知先验: {name}")
+    for n in names:
+        if n == "flat":
+            continue
+        for i in range(N_CODES):
+            _, gx, gy, size, _ = idx_to_code(i)
+            if n == "edge":
+                if gx in (0, N_GX - 1) or gy in (0, N_GY - 1):
+                    w[i] *= 0.3
+            elif n == "familiar":
+                w[i] *= 0.7 if size == 1 else 0.3
+            else:
+                raise ValueError(f"未知先验: {n}")
     return mx.log(w)
 
 
@@ -302,7 +443,15 @@ def baseline_template(
         templates.append(mx.sum(x_tr[idx], axis=0) / cnt)
         present.append(i)
     tm = mx.stack(templates)  # (P, V)
-    dd = mx.sum((x_te[:, None, :] - tm[None, :, :]) ** 2, axis=2)
+    # 距离矩阵 (n_test,P,V) 分块且逐块立即求值: 惰性图全量累积
+    # 会超 Metal 显存上限 (528 维时全批更是直接超限)
+    dd_parts = []
+    chunk = 20
+    for i in range(0, x_te.shape[0], chunk):
+        d = mx.sum((x_te[i : i + chunk, None, :] - tm[None, :, :]) ** 2, axis=2)
+        mx.eval(d)
+        dd_parts.append(d)
+    dd = mx.concatenate(dd_parts)
     pred = [present[int(mx.argmin(d))] for d in dd]
     return sum(p == g for p, g in zip(pred, te, strict=True)) / len(te)
 
@@ -401,7 +550,115 @@ def plot_metrics(acc: dict[str, float], base: dict[str, float], out: Path) -> No
     plt.close(fig)
 
 
+# ── 多帧运动先验 (--sequence) ──────────────────────────────────
+
+
+def gen_sequence(seed: int, n_frames: int) -> list[tuple[int, ...]]:
+    """运动序列: 起始码随机, gx/gy 每帧 ±1 格随机游走 (运动连续性),
+    kind/size/z 固定 (物体属性不变, prior.md 时间一致性/不变性假设)。"""
+    key = mx.random.key(seed)
+    code = list(idx_to_code(int(mx.random.randint(0, N_CODES, shape=(1,), key=key))))
+    seq = [tuple(code)]
+    for _ in range(1, n_frames):
+        key, k1, k2 = mx.random.split(key, 3)
+        dx = int(mx.random.randint(-1, 2, shape=(1,), key=k1))
+        dy = int(mx.random.randint(-1, 2, shape=(1,), key=k2))
+        code[1] = min(N_GX - 1, max(0, code[1] + dx))
+        code[2] = min(N_GY - 1, max(0, code[2] + dy))
+        seq.append(tuple(code))
+    return seq
+
+
+def temporal_preds() -> list[list[int]]:
+    """转移图: T(c'|c) 高 ⟺ 同 kind/size/z 且 |Δgx|+|Δgy|≤1 (运动连续性)。
+    返回每个 c' 的前驱列表 (P(c_t|c_{t-1}) 非零的 c_{t-1})。"""
+    preds: list[list[int]] = [[] for _ in range(N_CODES)]
+    for c in range(N_CODES):
+        k, gx, gy, s, z = idx_to_code(c)
+        for dgx in (-1, 0, 1):
+            for dgy in (-1, 0, 1):
+                nx, ny = gx + dgx, gy + dgy
+                if 0 <= nx < N_GX and 0 <= ny < N_GY:
+                    preds[code_to_idx((k, nx, ny, s, z))].append(c)
+    return preds
+
+
+def run_sequence(
+    spn: SPN,
+    mu: mx.array,
+    sd: mx.array,
+    n_seqs: int,
+    n_frames: int,
+    seq_seed: int,
+) -> None:
+    """序列推理: 逐帧 SPN 后验, 对比单帧 MAP vs 贝叶斯前向滤波
+    (马尔可夫时间先验, prior.md 运动连续性: P(c_t|c_{t-1}) 同属性+邻域)。"""
+    renderer, cam = make_renderer()
+    rw: RieszWavelet | None = None
+    codes = all_codes()
+    preds = temporal_preds()
+    log_off = math.log(0.01)
+    keys = ("code", "kind", "gx", "gy", "size", "z")
+    acc_single: dict[str, float] = {k: 0.0 for k in keys}
+    acc_filter: dict[str, float] = {k: 0.0 for k in keys}
+    total = 0
+    for s in range(n_seqs):
+        seq = gen_sequence(seq_seed + s, n_frames)
+        prev_post: mx.array | None = None
+        for code in seq:
+            scene = code_to_scene(code)
+            vec, rw = features_of_frame(renderer.render(scene, cam), rw)
+            x = (vec - mu) / sd  # (1, V), 训练 z-score 统计
+            like = spn.posterior(x, codes)[0]  # (K,) log 似然
+            pred1 = int(mx.argmax(like))
+            if prev_post is not None:
+                # 贝叶斯滤波: P(c_t|I) ∝ P(I_t|c_t)·Σ_{c_{t-1}} T·P(c_{t-1})
+                agg = mx.full((N_CODES,), log_off)
+                for c in range(N_CODES):
+                    agg[c] = mx.logsumexp(prev_post[preds[c]])
+                post_f = like + agg
+                post_f = post_f - mx.logsumexp(post_f)
+            else:
+                post_f = like
+            pred2 = int(mx.argmax(post_f))
+            acc_single["code"] += pred1 == code_to_idx(code)
+            acc_filter["code"] += pred2 == code_to_idx(code)
+            c1, c2 = idx_to_code(pred1), idx_to_code(pred2)
+            for name, ci in (("kind", 0), ("gx", 1), ("gy", 2), ("size", 3), ("z", 4)):
+                acc_single[name] += c1[ci] == code[ci]
+                acc_filter[name] += c2[ci] == code[ci]
+            prev_post = post_f
+            total += 1
+    fmt = "  ".join(f"{k} {acc_single[k]/total:.3f}" for k in keys)
+    fmt2 = "  ".join(f"{k} {acc_filter[k]/total:.3f}" for k in keys)
+    print(f"  单帧    : {fmt}")
+    print(f"  时序滤波: {fmt2}")
+    assert acc_filter["code"] / total > acc_single["code"] / total, (
+        "时序先验应提升码准确率"
+    )
+    print(
+        f"  码准确率: 单帧 {acc_single['code']/total:.3f} → "
+        f"滤波 {acc_filter['code']/total:.3f}"
+    )
+    print("demo_inverse: 序列自检 ✓")
+
+
 # ── 主流程 ────────────────────────────────────────────────────────
+
+
+def _configure(feat: str, eq_luma: bool = False, occ: bool = False) -> None:
+    """按特征通路/等亮度/遮挡模式配置全局布局。"""
+    global feat_spec, n_feat, code_cols, card, equal_luma, occlusion, \
+        kind_colors, bg_color
+    feat_spec = {"l": FEAT_L, "lhs": FEAT_LHS, "hs": FEAT_HS}[feat]
+    n_feat = len(feat_spec) * N_GX * N_GY
+    code_cols = tuple(range(n_feat, n_feat + 5))
+    card = dict(zip(code_cols, (N_KIND, N_GX, N_GY, N_SIZE, N_Z)))
+    equal_luma = eq_luma
+    occlusion = occ
+    if eq_luma:
+        kind_colors = EQ_KIND_COLORS  # noqa: F811
+        bg_color = EQ_BG_COLOR  # noqa: F811
 
 
 def main(
@@ -410,14 +667,22 @@ def main(
     model_path: Path | None,
     tree: bool,
     prior_name: str,
+    min_n: int | None,
+    feat: str,
+    equal_luma: bool,
+    sigma_floor: float,
+    occlusion: bool,
+    sequence: int,
 ) -> None:
+    _configure(feat, equal_luma, occlusion)
     # 全量: 4000 训练 (码空间 1152, ≈3.5 样本/码); quick: 600 功能自检
     n_train = 600 if quick else 4000
     n_test = 80 if quick else 200
-    min_n = 8 if quick else 3  # 叶最小行数: 小 = 叶码纯 (后验锐)
+    if min_n is None:
+        min_n = 8 if quick else 3  # 叶最小行数: 小 = 叶码纯 (后验锐)
     print(
         f"[1/5] 数据: train {n_train} / test {n_test} "
-        f"(cache={'on' if use_cache else 'off'})"
+        f"(cache={'on' if use_cache else 'off'}, min_n={min_n})"
     )
     x_tr, c_tr, x_te, c_te = build_data(n_train, n_test, use_cache)
 
@@ -434,7 +699,12 @@ def main(
         print("[2/5] learn_spn 结构学习 ...")
         xj = mx.concatenate([x_tr, c_tr], axis=1)
         spn = learn_spn(
-            xj, disc_cols=set(CODE_COLS), card=CARD, min_n=min_n, max_depth=14
+            xj,
+            disc_cols=set(code_cols),
+            card=card,
+            min_n=min_n,
+            max_depth=14,
+            sigma_floor=sigma_floor,
         )
         print(f"      根节点: {type(spn.root).__name__}")
         if model_path is not None:
@@ -442,7 +712,16 @@ def main(
             print(f"      模型已保存 → {model_path}")
 
     print("[3/5] 推理: 枚举场景码后验")
-    post = spn.posterior(x_te, all_codes())  # (n_test, N_CODES) log 后验
+    # 分块: 全批 (200×1152×149) 输入矩阵 + 25 棵 eval 图同时构建会超
+    # Metal 显存上限; 逐块 mx.eval (立即求值, 图小) 再拼接, 结果同全批
+    codes = all_codes()
+    chunk = 8
+    parts = []
+    for i in range(0, n_test, chunk):
+        p = spn.posterior(x_te[i : i + chunk], codes)
+        mx.eval(p)  # 立即求值, 释放该块 eval 图
+        parts.append(p)
+    post = mx.concatenate(parts)  # (n_test, N_CODES) log 后验
     assert mx.all(mx.isfinite(post)), "后验含 NaN/inf"
     pred_i = mx.argmax(post, axis=1).tolist()
     gt_i = [code_to_idx(tuple(int(v) for v in row)) for row in c_te.tolist()]
@@ -463,7 +742,16 @@ def main(
     print(f"      基线: majority {base_maj:.3f} / template {base_tpl:.3f}")
 
     prior = build_prior(prior_name)
+    if occlusion and prior_name == "occlusion":
+        # 遮挡序数先验是 per-sample 的: 重渲染测试帧检测黄柱面积缺失
+        renderer, cam = make_renderer()
+        frames = []
+        for row in c_te.tolist():
+            scene = code_to_scene(idx_to_code(code_to_idx(tuple(int(v) for v in row))))
+            frames.append(renderer.render(scene, cam))
+        prior = occlusion_prior(frames)  # (n_test, N_CODES)
     if prior is not None:
+        # occlusion 是 (M,K) 逐样本; 其余是 (K,) 广播
         post_p = spn.posterior(x_te, all_codes(), log_prior=prior)
         pred_p = mx.argmax(post_p, axis=1).tolist()
         acc_p = evaluate(pred_p, gt_i)
@@ -479,15 +767,20 @@ def main(
     plot_panel(x_te, post, gt_i, pred_i, artifacts / "inverse_panel.png")
     plot_metrics(acc, base, artifacts / "inverse_metrics.png")
 
+    if sequence > 0:
+        print("\n[6/5] 多帧运动先验 (prior.md 运动与时间先验)")
+        run_sequence(spn, mu, sd, n_seqs=10, n_frames=sequence, seq_seed=0)
+        return
+
     if tree:
         labels = dict(enumerate(feature_labels()))
-        labels.update(dict(zip(CODE_COLS, ("kind", "gx", "gy", "size", "z"))))
+        labels.update(dict(zip(code_cols, ("kind", "gx", "gy", "size", "z"))))
         code_names = {
-            CODE_COLS[0]: dict(enumerate(KINDS)),
-            CODE_COLS[1]: {i: f"gx={i}" for i in range(N_GX)},
-            CODE_COLS[2]: {i: f"gy={i}" for i in range(N_GY)},
-            CODE_COLS[3]: {i: f"s={SIZES[i]}" for i in range(N_SIZE)},
-            CODE_COLS[4]: {i: f"z={Z0S[i]}" for i in range(N_Z)},
+            code_cols[0]: dict(enumerate(KINDS)),
+            code_cols[1]: {i: f"gx={i}" for i in range(N_GX)},
+            code_cols[2]: {i: f"gy={i}" for i in range(N_GY)},
+            code_cols[3]: {i: f"s={SIZES[i]}" for i in range(N_SIZE)},
+            code_cols[4]: {i: f"z={Z0S[i]}" for i in range(N_Z)},
         }
         txt = spn.tree_str(labels, code_names)
         print(txt)
@@ -513,6 +806,18 @@ def main(
     # ── 自检断言 (阈值按 2026-08-11 实测标定, 留安全余量) ────────────
     # 全量 N=4000/min_n=3 (码空间 1152): 见当日全量运行记录
     # quick  N=600/min_n=8: 见当日 quick 运行记录
+    if equal_luma:
+        # 等亮度消融断言: 亮度通路失效 / 色度通路补位 (对照实验)
+        if feat == "l":
+            assert acc["code"] < 0.05, (
+                f"等亮度下 L 通路应失效 (轮廓不可见), 实测 {acc['code']:.3f}"
+            )
+        else:
+            assert acc["code"] > 0.30, (
+                f"等亮度下 HS 应补位, 实测 {acc['code']:.3f}"
+            )
+        print("demo_inverse: 等亮度消融自检 ✓ (L 失效 / HS 补位)")
+        return
     if quick:
         # quick N=600/min_n=8 实测: code 0.025 kind 0.40 gx 0.55
         # gy 0.64 size 0.55 z 0.35
@@ -549,11 +854,49 @@ if __name__ == "__main__":
         help="打印 SPN 树结构 (带语义列名) 并存 artifacts/spn_tree.txt",
     )
     ap.add_argument(
+        "--min-n",
+        type=int,
+        default=None,
+        help="叶最小行数 (结构复杂度先验); 缺省 quick=8 / 全量=3",
+    )
+    ap.add_argument(
+        "--feat",
+        default="l",
+        choices=("l", "lhs", "hs"),
+        help="特征通路: l=亮度 3 通道; lhs=亮度+色度 HS 双通路 (432 维); "
+        "hs=仅色度 (消融, 验证颜色线索独立承载信息)",
+    )
+    ap.add_argument(
+        "--equal-luma",
+        action="store_true",
+        help="等亮度模式: 三色与背景同为亮度 0.10 且无明暗 → L 通路失效, "
+        "展示 HS 补位 (断言: l 应失效, lhs 应补位)",
+    )
+    ap.add_argument(
+        "--sigma-floor",
+        type=float,
+        default=1e-6,
+        help="高斯叶 σ 下限 (平滑性先验, prior.md); 0.05-0.1 缓解 σ→0 过拟合",
+    )
+    ap.add_argument(
+        "--occlusion",
+        action="store_true",
+        help="遮挡场景: 固定黄色竖柱 + 序数先验 (--prior occlusion 注入,"
+        "黄柱被遮 ⟹ 主图元在前)",
+    )
+    ap.add_argument(
+        "--sequence",
+        type=int,
+        default=0,
+        help="多帧运动先验: 每序列帧数 (>0 启用), gx/gy 随机游走,"
+        "时序平滑注入上一帧转移先验",
+    )
+    ap.add_argument(
         "--prior",
         default="flat",
-        choices=("flat", "edge", "familiar"),
-        help="推理时注入的码先验 (贝叶斯 P(S)): flat=均匀, "
-        "edge=一般视角(图元不贴边), familiar=熟悉尺寸(size 偏态)",
+        help="推理时注入的码先验 (贝叶斯 P(S)), 逗号组合如 'edge,familiar': "
+        "flat=均匀, edge=一般视角(不贴边), familiar=熟悉尺寸(size 偏态), "
+        "occlusion=遮挡序数 (需 --occlusion)",
     )
     args = ap.parse_args()
     model = Path(args.model) if args.model else None
@@ -563,4 +906,10 @@ if __name__ == "__main__":
         model_path=model,
         tree=args.tree,
         prior_name=args.prior,
+        min_n=args.min_n,
+        feat=args.feat,
+        equal_luma=args.equal_luma,
+        sigma_floor=args.sigma_floor,
+        occlusion=args.occlusion,
+        sequence=args.sequence,
     )

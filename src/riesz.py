@@ -277,7 +277,9 @@ class RieszWavelet:
             k2 = self.k2
             sig2 = (1.4826 * mad) ** 2 * n_freq / k2[-1]  # type: ignore # 图像噪声方差
             floor = 3.0 * sig2 * k2 / n_freq  # (S,) 逐尺度噪声能量
-            e = e * e / (e + floor)
+            # 0/0 防护: 全零输入 (等亮度 hue 图等) 时 floor=0 → e*e/(e+0) 为 NaN
+            denom = e + floor
+            e = mx.where(denom > 0, e * e / denom, 0.0)
 
         total = mx.sum(e, axis=-1)
         safe_total = mx.maximum(total, 1e-12)

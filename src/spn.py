@@ -98,8 +98,12 @@ class Product(Node):
 
     def eval_log(self, x: mx.array) -> mx.array:
         acc = self.children[0].eval_log(x)
-        for c in self.children[1:]:
+        for i, c in enumerate(self.children[1:], 1):
             acc = acc + c.eval_log(x)
+            if i % 128 == 0:
+                # 图截断: 长加法链 (533 叶/块) 整图惰性执行会超
+                # Metal 显存峰值, 每 128 步强制求值释放中间量
+                mx.eval(acc)
         return acc
 
 
@@ -254,7 +258,7 @@ class SPN:
         feats (M, Vf) 连续观测 (列布局的连续部分); codes (K, C) 离散码
         全枚举 → (M, K) log 后验, 行归一。列布局: [feats | codes]。
 
-        log_prior (K,): 码先验 log P(c) (外部知识注入, 如一般视角/
+        log_prior (K,) 或 (M, K): 码先验 log P(c) (外部知识注入, 如一般视角/
         熟悉尺寸/视平线)。None = 均匀先验 (纯数据似然)。实现即
         贝叶斯公式的 P(S) 项: logp += log_prior 再行归一。
         """
@@ -265,7 +269,10 @@ class SPN:
         x = mx.concatenate([fe, co], axis=1)
         logp = self.root.eval_log(x).reshape(m, k)
         if log_prior is not None:
-            logp = logp + log_prior[None, :]
+            if log_prior.ndim == 1:
+                logp = logp + log_prior[None, :]
+            else:
+                logp = logp + log_prior
         return logp - mx.logsumexp(logp, axis=1, keepdims=True)
 
 
@@ -279,15 +286,20 @@ def learn_spn(
     min_n: int = 24,
     max_depth: int = 12,
     alpha: float = 0.05,
+    sigma_floor: float = 1e-6,
 ) -> SPN:
     """X (N, V) float32。disc_cols: 离散列 (分类叶/查询变量); card:
-    离散列基数 (缺省从数据取 max+1)。返回 SPN。"""
+    离散列基数 (缺省从数据取 max+1)。sigma_floor: 高斯叶 σ 下限
+    (平滑性先验, 见 prior.md 紧凑性/平滑性) —— 防确定性渲染 σ→0
+    过拟合, 是 MAP 正则 (隐式 Gaussian prior on σ)。返回 SPN。"""
     n, v = X.shape
     if card is None:
         card = {c: int(mx.max(X[:, c])) + 1 for c in disc_cols}
     rows = list(range(n))
     cols = list(range(v))
-    root = _learn(X, rows, cols, 0, disc_cols, card, min_n, max_depth, alpha)
+    root = _learn(
+        X, rows, cols, 0, disc_cols, card, min_n, max_depth, alpha, sigma_floor
+    )
     return SPN(root, v)
 
 
@@ -301,10 +313,11 @@ def _learn(
     min_n: int,
     max_depth: int,
     alpha: float,
+    sigma_floor: float,
 ) -> Node:
     n, c = len(rows), len(cols)
     if c == 1 or n < min_n or depth >= max_depth:
-        return _diag(X, rows, cols, disc_cols, card)
+        return _diag(X, rows, cols, disc_cols, card, sigma_floor)
     xr = X[mx.array(rows, dtype=mx.int32)]
 
     # 查询变量驱动: 节点含离散列且行码混杂 → Sum 按码空间分裂
@@ -314,18 +327,18 @@ def _learn(
         r0 = [rows[i] for i in r0]  # 局部下标 → 全局行号
         r1 = [rows[i] for i in r1]
         if len(r0) < min_n or len(r1) < min_n:
-            return _diag(X, rows, cols, disc_cols, card)
+            return _diag(X, rows, cols, disc_cols, card, sigma_floor)
         n0, n1 = len(r0), len(r1)
         log_w = mx.log(mx.array([n0 / n, n1 / n], dtype=mx.float32))
         return Sum(
             (
                 _learn(
                     X, r0, cols, depth + 1,
-                    disc_cols, card, min_n, max_depth, alpha,
+                    disc_cols, card, min_n, max_depth, alpha, sigma_floor,
                 ),
                 _learn(
                     X, r1, cols, depth + 1,
-                    disc_cols, card, min_n, max_depth, alpha,
+                    disc_cols, card, min_n, max_depth, alpha, sigma_floor,
                 ),
             ),
             log_w,
@@ -339,7 +352,7 @@ def _learn(
             tuple(
                 _learn(
                     X, rows, [cols[i] for i in comp], depth + 1,
-                    disc_cols, card, min_n, max_depth, alpha,
+                    disc_cols, card, min_n, max_depth, alpha, sigma_floor,
                 )
                 for comp in comps
             )
@@ -348,16 +361,18 @@ def _learn(
     r0 = [rows[i] for i in r0]  # 局部下标 → 全局行号
     r1 = [rows[i] for i in r1]
     if len(r0) < min_n or len(r1) < min_n:
-        return _diag(X, rows, cols, disc_cols, card)
+        return _diag(X, rows, cols, disc_cols, card, sigma_floor)
     n0, n1 = len(r0), len(r1)
     log_w = mx.log(mx.array([n0 / n, n1 / n], dtype=mx.float32))
     return Sum(
         (
             _learn(
-                X, r0, cols, depth + 1, disc_cols, card, min_n, max_depth, alpha
+                X, r0, cols, depth + 1, disc_cols, card, min_n, max_depth,
+                alpha, sigma_floor,
             ),
             _learn(
-                X, r1, cols, depth + 1, disc_cols, card, min_n, max_depth, alpha
+                X, r1, cols, depth + 1, disc_cols, card, min_n, max_depth,
+                alpha, sigma_floor,
             ),
         ),
         log_w,
@@ -380,6 +395,7 @@ def _diag(
     cols: list[int],
     disc_cols: set[int],
     card: dict[int, int],
+    sigma_floor: float,
 ) -> Node:
     """基例: 每列一个叶 (对角)。离散列分类叶, 连续列高斯叶。"""
     xr = X[mx.array(rows, dtype=mx.int32)]
@@ -395,7 +411,7 @@ def _diag(
             logp = mx.log((cnt + 1.0) / (float(mx.sum(cnt)) + k))
             leaves.append(CatLeaf(c, logp))
         else:
-            sd = float(mx.maximum(mx.std(v), 1e-6))
+            sd = float(mx.maximum(mx.std(v), sigma_floor))
             leaves.append(GaussLeaf(c, float(mx.mean(v)), sd))
     if len(leaves) == 1:
         return leaves[0]
