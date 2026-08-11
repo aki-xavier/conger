@@ -228,3 +228,4 @@ artifacts/*.jpg
 *.pth
 *.npz
 artifacts/*.pkl
+artifacts/*.txt

@@ -1,13 +1,15 @@
 [project]
 name = "conger"
 version = "0.1.0"
-description = "Add your description here"
+description = "SPN 逆渲染研究: cga 渲染 → Riesz 特征 → SPN 反演 3D 场景码"
 readme = "README.md"
 requires-python = ">=3.14"
 dependencies = [
     "matplotlib>=3.11.1",
     "mlx>=0.32.0",
     "cga",  # 独立项目 ~/code/cga (path source, 见 [tool.uv.sources])
+    "numpy>=2.4.6",
+    "pillow>=12.3.0",
 ]
 
 [tool.uv.sources]

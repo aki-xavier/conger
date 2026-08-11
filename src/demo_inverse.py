@@ -6,8 +6,8 @@
 
 训练数据: 均匀随机采样场景码 → cga engine 渲染 144×144 → Riesz 特征
 (深度通道改走亮度: engine 无深度输出) 块池化 8×6×3 通道 → 联合矩阵
-[特征(144) | 码(4)] → learn_spn。
-推理: 枚举 288 个场景码, SPN 后验 argmax → 重建 cga 场景 (三维建模)。
+[特征(144) | 码(5)] → learn_spn。
+推理: 枚举 1152 个场景码, SPN 后验 argmax → 重建 cga 场景 (三维建模)。
 
 评估: 码准确率 / 逐变量准确率 / 多数类与最近模板基线 / GT vs 重建渲染。
 
@@ -43,6 +43,7 @@ from cga.engine import (
 
 from riesz import RieszWavelet
 from spn import SPN, learn_spn
+from utils import Utils
 
 # ── 场景目录 ──────────────────────────────────────────────────────
 H = W = 144
@@ -67,7 +68,9 @@ FEAT_HS = (
     ("hue", "log_mag"), ("hue", "phase_coh"), ("hue", "ori_R"),
 )
 FEAT_LHS = FEAT_L + FEAT_HS
-feat_spec = FEAT_L  # 默认; --feat lhs 加色度, hs 仅色度 (消融)
+# RGB 原始数据对照 (块均值, 3×48=144 维, 与 Riesz 同规模)
+FEAT_RGB = (("rgb", "r"), ("rgb", "g"), ("rgb", "b"))
+feat_spec = FEAT_L  # 默认; --feat lhs 加色度, hs 仅色度 (消融), rgb 原始数据
 n_feat = len(feat_spec) * N_GX * N_GY  # 144 / 432
 code_cols = tuple(range(n_feat, n_feat + 5))
 card = dict(zip(code_cols, (N_KIND, N_GX, N_GY, N_SIZE, N_Z)))
@@ -89,6 +92,14 @@ OCC_GRID = (4, 3)
 OCC_Z = 3.5
 OCC_COLOR = 0xF1C40F
 occlusion = False
+# 光照: 默认右上光; 多光照训练 (--multi-light) 用 5 方向池轮流渲染
+# → SPN 学到光照不变; --test-light 用池外顶光验证真泛化
+LIGHT_DIRS = ((0.3, -0.7, 0.4), (-0.6, -0.4, 0.7), (0.6, -0.4, 0.7),
+              (-0.3, 0.7, 0.4), (0.0, 0.0, 1.0))
+TEST_LIGHT_DIR = (0.0, -1.0, 0.0)  # 池外: 正上方顶光
+light_dir = LIGHT_DIRS[0]
+test_light = False
+multi_light = False
 
 
 # ── 场景码 ⇄ cga Scene ───────────────────────────────────────────
@@ -138,7 +149,8 @@ def code_to_scene(code: tuple[int, int, int, int, int]) -> Scene:
         geom = BoxGeometry(2 * s, 2 * s, 2 * s)
     scene = Scene(background=Color(bg_color))
     scene.add(AmbientLight(Color(0xFFFFFF), 0.5))
-    scene.add(DirectionalLight(Color(0xFFFFFF), 0.7, direction=(0.3, -0.7, 0.4)))
+    ld = TEST_LIGHT_DIR if test_light else light_dir
+    scene.add(DirectionalLight(Color(0xFFFFFF), 0.7, direction=ld))
     if equal_luma:
         # 等亮度: 无明暗 (Basic 材质不接光照) → L 图均匀, 轮廓仅存于色度
         material = MeshBasicMaterial(Color(kind_colors[kind]))
@@ -230,7 +242,7 @@ def feature_labels() -> list[str]:
 
 def features_of_frame(
     frame: mx.array, rw: RieszWavelet | None
-) -> tuple[mx.array, RieszWavelet]:
+) -> tuple[mx.array, RieszWavelet | None]:
     """渲染帧 → 特征向量 (n_feat,)。
 
     按 feat_spec 对 (亮度/饱和度/色相) 各源图做 Riesz 并块池化拼接;
@@ -241,12 +253,19 @@ def features_of_frame(
     if equal_luma:
         # 传感器噪声底: 等亮度残差对比 (~0.6 灰度级) 在真实相机被
         # 噪声淹没 → L 通路失效; S 轮廓 (0↔1 强对比) 不受影响 → HS 补位
+        # (无 key = 全局 RNG, 每帧新噪声; 复现性由数据缓存保证)
         lum = lum + mx.random.normal(shape=lum.shape, scale=0.02)
     imgs = {"lum": lum, "sat": sat, "hue": hue}
-    if rw is None:
+    if rw is None and feat_spec[0][0] != "rgb":
         rw = RieszWavelet(imgs[feat_spec[0][0]])
     parts = []
     for src, ch in feat_spec:
+        if src == "rgb":
+            # 原始 RGB 块均值: 不经 Riesz (对照实验, 光照敏感)
+            rgb = frame[..., :3].astype(mx.float32) / 255.0
+            idx = {"r": 0, "g": 1, "b": 2}[ch]
+            parts.append(block_pool(rgb[..., idx]).reshape(-1))
+            continue
         rw.update(imgs[src])
         f = rw.features()
         parts.append(block_pool(getattr(f, ch)).reshape(-1))
@@ -301,15 +320,16 @@ def _occluder_f0() -> float:
 def build_data(
     n_train: int, n_test: int, use_cache: bool
 ) -> tuple[mx.array, mx.array, mx.array, mx.array]:
-    """→ (Xtr, Ctr, Xte, Cte): 特征 (n, n_feat) + 码 (n, 4), 均 float32。"""
+    """→ (Xtr, Ctr, Xte, Cte): 特征 (n, n_feat) + 码 (n, 5), 均 float32。"""
     cache = Path(__file__).resolve().parent.parent / "artifacts"
     cache.mkdir(exist_ok=True)
     feat_tag = "".join(f"{s[:2]}{c[:2]}" for s, c in feat_spec)  # 特征集变化 → 新缓存
     col_tag = "".join(f"{c:x}" for c in kind_colors)  # 配色变化 → 新缓存
     eq_tag = "eqn" if equal_luma else "std"  # 等亮度+噪声底 → 新缓存
     occ_tag = "occ" if occlusion else "noc"  # 遮挡物 → 新缓存
+    lt_tag = "ml" if multi_light else "sl"  # 多光照 → 新缓存
     tag = (
-        f"inv_{H}x{W}_g{N_GX}x{N_GY}_{feat_tag}_{col_tag}_{eq_tag}_{occ_tag}"
+        f"inv_{H}x{W}_g{N_GX}x{N_GY}_{feat_tag}_{col_tag}_{eq_tag}_{occ_tag}_{lt_tag}"
         f"_{n_train}_{n_test}.npz"
     )
     path = cache / tag
@@ -324,8 +344,12 @@ def build_data(
 
     def feats_of(idxs: list[int]) -> mx.array:
         nonlocal rw
+        global light_dir
         out = []
-        for i in idxs:
+        for n, i in enumerate(idxs):
+            # 多光照训练: 每帧轮流取方向池 (确定性, 缓存可复现)
+            if multi_light:
+                light_dir = LIGHT_DIRS[n % len(LIGHT_DIRS)]
             scene = code_to_scene(idx_to_code(i))
             frame = renderer.render(scene, cam)
             vec, rw = features_of_frame(frame, rw)
@@ -389,8 +413,13 @@ def build_prior(name: str) -> mx.array | None:
     log 权重在 posterior 内 softmax 归一。
     """
     names = [n.strip() for n in name.split(",")]
-    if names == ["flat"] or "occlusion" in names:
-        # occlusion 是 per-sample 先验, 由 occlusion_prior() 逐帧构造
+    if "occlusion" in names:
+        # occlusion 是 per-sample 先验, 由 occlusion_prior() 逐帧构造,
+        # 与全局 (K,) 先验形状不兼容 → 不可组合
+        if len(names) > 1:
+            raise ValueError("occlusion 先验不可与其他先验组合 (per-sample)")
+        return None
+    if names == ["flat"]:
         return None
     w = mx.ones(N_CODES)
     for n in names:
@@ -439,7 +468,7 @@ def baseline_template(
         cnt = int(mx.sum(sel))
         if cnt == 0:
             continue
-        idx = Utils_nonzero(sel)
+        idx = Utils.nonzero(sel)
         templates.append(mx.sum(x_tr[idx], axis=0) / cnt)
         present.append(i)
     tm = mx.stack(templates)  # (P, V)
@@ -456,14 +485,6 @@ def baseline_template(
     return sum(p == g for p, g in zip(pred, te, strict=True)) / len(te)
 
 
-def Utils_nonzero(sel: mx.array) -> mx.array:
-    """布尔掩码 → 索引 (MLX 无布尔索引; 选中位按下标, 未选中按 N)。"""
-    flat = sel.reshape(-1)
-    k = int(mx.sum(flat))
-    key = mx.where(flat, mx.arange(flat.shape[0]), flat.shape[0])
-    return mx.argsort(key)[:k]
-
-
 # ── 可视化 ────────────────────────────────────────────────────────
 
 
@@ -476,6 +497,7 @@ def plot_panel(
 ) -> None:
     """3 个测试样本: GT/Pred 渲染 + log_mag 块图 + P(gx,gy) 热图。"""
     renderer, cam = make_renderer()
+    rw: RieszWavelet | None = None
     n_show = min(3, len(gt_i))
     picks = (
         [0, len(gt_i) // 2, len(gt_i) - 1] if len(gt_i) >= 3 else list(range(n_show))
@@ -484,8 +506,8 @@ def plot_panel(
     if n_show == 1:
         axes = axes[None, :]
     cols = [
-        "GT render", "GT log_mag blocks", "Pred render",
-        "Pred log_mag blocks", "P(gx,gy|img)",
+        "GT render", f"GT {feat_spec[0][1]} blocks", "Pred render",
+        f"Pred {feat_spec[0][1]} blocks", "P(gx,gy|img)",
     ]
     for row, i in enumerate(picks):
         gt_scene = code_to_scene(idx_to_code(gt_i[i]))
@@ -496,7 +518,10 @@ def plot_panel(
         axes[row, 2].imshow(f_pd[..., :3].astype(mx.int32))
         lg = x_te[i, :N_GX * N_GY].reshape(N_GY, N_GX)
         axes[row, 1].imshow(lg, cmap="viridis")
-        lg_p = x_te[i, :N_GX * N_GY].reshape(N_GY, N_GX)
+        # Pred 特征块: 从重建渲染重算 (与 GT 同管线, 首通道块)
+        vec_pd, rw = features_of_frame(f_pd, rw)
+        mx.eval(vec_pd)
+        lg_p = vec_pd[: N_GX * N_GY].reshape(N_GY, N_GX)
         axes[row, 3].imshow(lg_p, cmap="viridis")
         pg = post[i].reshape(N_KIND, N_GX, N_GY, N_SIZE, N_Z)
         pgy = mx.exp(
@@ -643,19 +668,61 @@ def run_sequence(
     print("demo_inverse: 序列自检 ✓")
 
 
+def run_test_light(spn: SPN, mu: mx.array, sd: mx.array, n_test: int) -> None:
+    """光照变化评估: 用变化光照 (--test-light) 重渲染测试码 → 特征 → 后验。
+    对比同一模型在正常光照下的准确率, 检验 Riesz 光照归一化鲁棒性。"""
+    global test_light
+    te = mx.random.randint(0, N_CODES, shape=(n_test,), key=mx.random.key(99)).tolist()
+    renderer, cam = make_renderer()
+    rw: RieszWavelet | None = None
+    test_light = True
+    try:
+        feats = []
+        for i in te:
+            scene = code_to_scene(idx_to_code(i))
+            vec, rw = features_of_frame(renderer.render(scene, cam), rw)
+            mx.eval(vec)
+            feats.append(vec)
+    finally:
+        test_light = False
+    x_te = (mx.stack(feats) - mu) / sd
+    codes = all_codes()
+    parts = []
+    for i in range(0, n_test, 8):
+        p = spn.posterior(x_te[i : i + 8], codes)
+        mx.eval(p)
+        parts.append(p)
+    post = mx.concatenate(parts)
+    pred = mx.argmax(post, axis=1).tolist()
+    gt = [code_to_idx(idx_to_code(i)) for i in te]
+    acc = evaluate(pred, gt)
+    print(
+        f"  光照变化测试: 码 {acc['code']:.3f}  kind {acc['kind']:.3f}  "
+        f"gx {acc['gx']:.3f}  gy {acc['gy']:.3f}  size {acc['size']:.3f}  "
+        f"z {acc['z']:.3f}"
+    )
+    if multi_light:
+        # 多光照增广应显著优于单光照的池外泛化 (单光照实测 0.080)
+        assert acc["code"] > 0.15, f"多光照池外泛化不足 {acc['code']:.3f}"
+    print("demo_inverse: 光照鲁棒性评估 ✓")
+
+
 # ── 主流程 ────────────────────────────────────────────────────────
 
 
-def _configure(feat: str, eq_luma: bool = False, occ: bool = False) -> None:
-    """按特征通路/等亮度/遮挡模式配置全局布局。"""
+def _configure(
+    feat: str, eq_luma: bool = False, occ: bool = False, ml: bool = False
+) -> None:
+    """按特征通路/等亮度/遮挡/多光照模式配置全局布局。"""
     global feat_spec, n_feat, code_cols, card, equal_luma, occlusion, \
-        kind_colors, bg_color
-    feat_spec = {"l": FEAT_L, "lhs": FEAT_LHS, "hs": FEAT_HS}[feat]
+        kind_colors, bg_color, multi_light
+    feat_spec = {"l": FEAT_L, "lhs": FEAT_LHS, "hs": FEAT_HS, "rgb": FEAT_RGB}[feat]
     n_feat = len(feat_spec) * N_GX * N_GY
     code_cols = tuple(range(n_feat, n_feat + 5))
     card = dict(zip(code_cols, (N_KIND, N_GX, N_GY, N_SIZE, N_Z)))
     equal_luma = eq_luma
     occlusion = occ
+    multi_light = ml
     if eq_luma:
         kind_colors = EQ_KIND_COLORS  # noqa: F811
         bg_color = EQ_BG_COLOR  # noqa: F811
@@ -673,8 +740,10 @@ def main(
     sigma_floor: float,
     occlusion: bool,
     sequence: int,
+    test_light: bool,
+    multi_light: bool,
 ) -> None:
-    _configure(feat, equal_luma, occlusion)
+    _configure(feat, equal_luma, occlusion, multi_light)
     # 全量: 4000 训练 (码空间 1152, ≈3.5 样本/码); quick: 600 功能自检
     n_train = 600 if quick else 4000
     n_test = 80 if quick else 200
@@ -771,6 +840,10 @@ def main(
         print("\n[6/5] 多帧运动先验 (prior.md 运动与时间先验)")
         run_sequence(spn, mu, sd, n_seqs=10, n_frames=sequence, seq_seed=0)
         return
+    if test_light:
+        print("\n[6/5] 光照鲁棒性评估 (训练右上光, 测试左侧光)")
+        run_test_light(spn, mu, sd, n_test)
+        return
 
     if tree:
         labels = dict(enumerate(feature_labels()))
@@ -818,7 +891,13 @@ def main(
             )
         print("demo_inverse: 等亮度消融自检 ✓ (L 失效 / HS 补位)")
         return
-    if quick:
+    if multi_light:
+        # 多光照模式实测: 正常 0.360 (5 光照分摊样本) / 池外 0.265
+        assert acc["code"] > 0.30, f"多光照: 码准确率过低 {acc['code']:.3f}"
+        assert acc["kind"] > 0.70, f"多光照: kind 过低 {acc['kind']:.3f}"
+        assert acc["gx"] > 0.85, f"多光照: gx 过低 {acc['gx']:.3f}"
+        assert acc["z"] > 0.50, f"多光照: z 过低 {acc['z']:.3f}"
+    elif quick:
         # quick N=600/min_n=8 实测: code 0.025 kind 0.40 gx 0.55
         # gy 0.64 size 0.55 z 0.35
         assert acc["code"] > 0.02, f"quick: 码准确率过低 {acc['code']:.3f}"
@@ -862,9 +941,9 @@ if __name__ == "__main__":
     ap.add_argument(
         "--feat",
         default="l",
-        choices=("l", "lhs", "hs"),
-        help="特征通路: l=亮度 3 通道; lhs=亮度+色度 HS 双通路 (432 维); "
-        "hs=仅色度 (消融, 验证颜色线索独立承载信息)",
+        choices=("l", "lhs", "hs", "rgb"),
+        help="特征通路: l=亮度 Riesz 3 通道; lhs=亮度+色度 HS 双通路 (432 维); "
+        "hs=仅色度 (消融); rgb=原始 RGB 块均值对照 (光照敏感)",
     )
     ap.add_argument(
         "--equal-luma",
@@ -892,6 +971,18 @@ if __name__ == "__main__":
         "时序平滑注入上一帧转移先验",
     )
     ap.add_argument(
+        "--test-light",
+        action="store_true",
+        help="光照鲁棒性评估: 测试集换光照方向 (需 --model), 检验 "
+        "Riesz gain_control 归一化 vs 原始 RGB",
+    )
+    ap.add_argument(
+        "--multi-light",
+        action="store_true",
+        help="多光照训练: 5 方向池轮流渲染 (数据增广 → 光照不变); "
+        "配合 --test-light 用池外顶光验证泛化",
+    )
+    ap.add_argument(
         "--prior",
         default="flat",
         help="推理时注入的码先验 (贝叶斯 P(S)), 逗号组合如 'edge,familiar': "
@@ -912,4 +1003,6 @@ if __name__ == "__main__":
         sigma_floor=args.sigma_floor,
         occlusion=args.occlusion,
         sequence=args.sequence,
+        test_light=args.test_light,
+        multi_light=args.multi_light,
     )

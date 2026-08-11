@@ -38,8 +38,7 @@ from utils import Utils
 #        ② 相干特征扣白噪底线 (coherence_floor 类级缓存标定)
 #        ▼
 #     FeatureMaps (11 张 (H,W) + log_e (H,W,S), 不可变)
-#        → vbgmm.feature_matrix() 选列组装 (统计融合)
-#        → edgemap.EdgePrior 用 mean_ori/ori_R/energy (空间几何)
+#        → demo_inverse.features_of_frame() 选通道块池化 (SPN 逆渲染)
 
 
 @dataclass(slots=True)
@@ -74,7 +73,7 @@ class RieszScale:
 class FeatureMaps(NamedTuple):
     """RieszWavelet.features() 的输出: 跨尺度谱统计特征, 逐像素。
     11 张 (H,W) float32 特征图 + log_e (H,W,S)。不可变记录,
-    不预组特征矩阵 —— 选列组装是下游的事 (见 vbgmm.feature_matrix)。"""
+    不预组特征矩阵 —— 选列组装是下游的事 (见 demo_inverse)。"""
 
     log_mag: mx.array  # log Σe_s 减邻域均值 —— 局部对比度
     slope: mx.array  # log e_s 对 octave 的最小二乘斜率 —— 幂律衰减
@@ -184,8 +183,8 @@ class RieszWavelet:
         self.safe_r = mx.maximum(mx.sqrt(self.radius), 1e-12)
         self.dc_kernel = mx.exp(-0.5 * self.radius / sigma_f**2)  # type: ignore
 
-        # 各向同性径向高斯带通, 与 gabor.py 同一核族; Riesz 框架下
-        # 角度分解不再用方向核, 而用 Riesz 乘子 (见 calc_scales)。
+        # 各向同性径向高斯带通; Riesz 框架下
+        # 角度分解不再用方向核, 而用 Riesz 乘子 (见 update)。
         bw = self.bandwidth
         sigma_f_rel = (2.0**bw - 1.0) / (
             (2.0**bw + 1.0) * math.sqrt(2.0 * math.log(2.0))
@@ -265,8 +264,8 @@ class RieszWavelet:
 
         返回 FeatureMaps (NamedTuple, 不可变): 以上 11 张 (H,W) 特征图
         + log_e (H,W,S)。不预组特征矩阵 —— 选哪几列、什么顺序是下游
-        的事 (vbgmm 按 FEAT_NAMES 自行 stack)。核能量 k2/n_freq 初始化
-        时已缓存, x/xc 等 S 维小量每帧重算但开销可忽略。
+        的事 (demo_inverse 按 feat_spec 选通道块池化)。核能量 k2/n_freq
+        初始化时已缓存, x/xc 等 S 维小量每帧重算但开销可忽略。
         """
         e = mx.stack([s.energy for s in self.scales], axis=-1)  # (H,W,S)
 

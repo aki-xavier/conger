@@ -33,6 +33,8 @@ dependencies = [
     { name = "cga" },
     { name = "matplotlib" },
     { name = "mlx" },
+    { name = "numpy" },
+    { name = "pillow" },
 ]
 
 [package.metadata]
@@ -40,6 +42,8 @@ requires-dist = [
     { name = "cga", editable = "../cga" },
     { name = "matplotlib", specifier = ">=3.11.1" },
     { name = "mlx", specifier = ">=0.32.0" },
+    { name = "numpy", specifier = ">=2.4.6" },
+    { name = "pillow", specifier = ">=12.3.0" },
 ]
 
 [[package]]
