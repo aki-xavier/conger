@@ -33,7 +33,10 @@ EM 当 demo 出明显欠拟合时。
 from __future__ import annotations
 
 import math
+import pickle
 from dataclasses import dataclass
+from pathlib import Path
+from typing import Any
 
 import mlx.core as mx
 
@@ -119,15 +122,141 @@ class SPN:
         self.root = root
         self.n_vars = n_vars
 
+    def save(self, path: str | Path, extra: dict[str, Any] | None = None) -> None:
+        """pickle 存盘 (节点全是 dataclass, mx.array 可序列化)。
+
+        extra: 与模型配套的非 SPN 状态 (如特征 z-score 统计 mu/sd),
+        加载时原样返回 —— 推理与训练必须用同一预处理。
+        """
+        with open(path, "wb") as f:
+            pickle.dump({"spn": self, "extra": extra or {}}, f)
+
+    @staticmethod
+    def load(path: str | Path) -> tuple[SPN, dict[str, Any]]:
+        """save 的逆操作 → (SPN, extra)。"""
+        with open(path, "rb") as f:
+            d = pickle.load(f)
+        return d["spn"], d["extra"]
+
+    def tree_str(
+        self,
+        labels: dict[int, str] | None = None,
+        code_names: dict[int, dict[int, str]] | None = None,
+    ) -> str:
+        """树结构文本可视化 (缩进层级), 带节点语义解释。
+
+        labels: 列号→名称 (如 "log_mag@(3,2)" / "kind")。
+        code_names: 码列→{值:语义名} (如 {144: {0:"sphere",1:"cylinder",
+        2:"box"}}, 145: {i:f"gx={i}"}})。给出后: 叶块追加主码组合
+        (≈ box gx=3 gy=0 s=0.6), Sum 追加分裂轴 (两子代表码首次分歧
+        的码列与值), Product 标注变量独立分解。
+        """
+        lines: list[str] = []
+        code_cols = sorted(code_names) if code_names else []
+
+        def leaf_block(node: Node) -> str | None:
+            """叶块 → 摘要行; 非叶块 (含 Sum) → None。"""
+            if isinstance(node, (GaussLeaf, CatLeaf)):
+                leaves = [node]
+            elif isinstance(node, Product) and all(
+                isinstance(c, (GaussLeaf, CatLeaf)) for c in node.children
+            ):
+                leaves = list(node.children)
+            else:
+                return None
+            gs = [n for n in leaves if isinstance(n, GaussLeaf)]
+            cs = [n for n in leaves if isinstance(n, CatLeaf)]
+            parts = [f"Gauss×{len(gs)}"]
+            if gs:
+                sig = sorted(n.sigma for n in gs)
+                parts.append(f"σmed={sig[len(sig)//2]:.3f}")
+            for c in cs:
+                name = labels.get(c.var, str(c.var)) if labels else str(c.var)
+                lp = c.logp.tolist()
+                top = sorted(range(len(lp)), key=lambda i: -lp[i])[:4]
+                dist = " ".join(f"{v}:{math.exp(lp[v]):.2f}" for v in top)
+                parts.append(f"Cat({name}) {dist}")
+            return "LeafBlock " + " | ".join(parts)
+
+        def block_rep(node: Node) -> tuple[int, ...] | None:
+            """叶块主码: 每个码列取 argmax 值; 无码叶 → None。"""
+            if not code_cols:
+                return None
+            if isinstance(node, (GaussLeaf, CatLeaf)):
+                leaves = [node]
+            elif isinstance(node, Product) and all(
+                isinstance(c, (GaussLeaf, CatLeaf)) for c in node.children
+            ):
+                leaves = list(node.children)
+            else:
+                return None
+            cats = {c.var: c for c in leaves if isinstance(c, CatLeaf)}
+            if not cats:
+                return None
+            return tuple(int(mx.argmax(cats[col].logp)) for col in code_cols)
+
+        def human(rep: tuple[int, ...] | None) -> str:
+            """主码 → 语义串, 如 "box gx=3 gy=0 s=0.6"。"""
+            if rep is None or not code_names:
+                return ""
+            return " ".join(
+                code_names[col].get(v, str(v)) for col, v in zip(code_cols, rep)
+            )
+
+        def split_axis(reps: list[tuple[int, ...] | None]) -> str:
+            """Sum 分裂轴: 两子代表码首次分歧的码列与值对比。"""
+            if len(reps) < 2 or reps[0] is None or reps[1] is None or not code_names:
+                return ""
+            for col, (va, vb) in zip(code_cols, zip(reps[0], reps[1])):
+                if va != vb:
+                    na = labels.get(col, str(col)) if labels else str(col)
+                    lhs = code_names[col].get(va, va)
+                    rhs = code_names[col].get(vb, vb)
+                    return f"| 分裂轴 {na}: {lhs} ↔ {rhs}"
+            return "| 分裂轴: 码分布相近 (主要靠特征)"
+
+        def rec(node: Node, depth: int) -> tuple[int, ...] | None:
+            pad = "  " * depth
+            blk = leaf_block(node)
+            if blk is not None:
+                rep = block_rep(node)
+                lines.append(pad + blk + ("  ≈ " + human(rep) if rep else ""))
+                return rep
+            if isinstance(node, Sum):
+                reps = [rec(c, depth + 1) for c in node.children]
+                w = mx.exp(node.log_w).tolist()
+                lines.append(
+                    pad + "Sum w=" + ",".join(f"{x:.3f}" for x in w)
+                    + "  " + split_axis(reps)
+                )
+                best = max(range(len(w)), key=lambda i: w[i])
+                return reps[best]
+            assert isinstance(node, Product)
+            reps = [rec(c, depth + 1) for c in node.children]
+            lines.append(pad + "Product  | 变量独立分解")
+            return next((r for r in reps if r is not None), None)
+
+        rec(self.root, 0)
+        return "\n".join(lines)
+
     def eval_log(self, x: mx.array) -> mx.array:
         """证据批 (M, V) → log 密度 (M,)。"""
         return self.root.eval_log(x)
 
-    def posterior(self, feats: mx.array, codes: mx.array) -> mx.array:
-        """贝叶斯反演: P(码 | 特征)。
+    def posterior(
+        self,
+        feats: mx.array,
+        codes: mx.array,
+        log_prior: mx.array | None = None,
+    ) -> mx.array:
+        """贝叶斯反演: P(码 | 特征) ∝ P(特征 | 码)·P(码)。
 
         feats (M, Vf) 连续观测 (列布局的连续部分); codes (K, C) 离散码
         全枚举 → (M, K) log 后验, 行归一。列布局: [feats | codes]。
+
+        log_prior (K,): 码先验 log P(c) (外部知识注入, 如一般视角/
+        熟悉尺寸/视平线)。None = 均匀先验 (纯数据似然)。实现即
+        贝叶斯公式的 P(S) 项: logp += log_prior 再行归一。
         """
         m, vf = feats.shape
         k, c = codes.shape
@@ -135,6 +264,8 @@ class SPN:
         co = mx.tile(codes[None, :, :], (m, 1, 1)).reshape(m * k, c)
         x = mx.concatenate([fe, co], axis=1)
         logp = self.root.eval_log(x).reshape(m, k)
+        if log_prior is not None:
+            logp = logp + log_prior[None, :]
         return logp - mx.logsumexp(logp, axis=1, keepdims=True)
 
 
@@ -431,7 +562,33 @@ def _selftest() -> None:
     assert abs(float(mx.exp(post[1]).sum()) - 1.0) < 1e-5, "后验行未归一"
     print("  ok  混合后验: 类标签从连续证据恢复, 行归一")
 
+    # 5) 码先验注入: P(c|x) ∝ P(x|c)·P(c), 先验改变后验但保持归一
+    prior = mx.array([math.log(0.9), math.log(0.1)])  # 强偏好类 0
+    post_p = spn3.posterior(feats, codes, log_prior=prior)
+    assert abs(float(mx.exp(post_p).sum(axis=1)[1]) - 1.0) < 1e-5, "先验注入后未归一"
+    # x=0 处似然两分类相近, 先验应把后验推向类 0
+    assert float(post_p[1, 0]) > float(post[1, 0]), "先验未提高类 0 后验"
+    print("  ok  码先验: P(c|x) ∝ P(x|c)·P(c), 注入后行归一仍成立")
+
+    # 4) 序列化 roundtrip: save → load → eval 逐位一致
+    import os
+    import tempfile
+
+    fd, tmp = tempfile.mkstemp(suffix=".pkl")
+    os.close(fd)
+    try:
+        spn3.save(tmp, {"mu": mx.array([0.5]), "sd": mx.array([1.0])})
+        spn4, extra = SPN.load(tmp)
+        xq = mx.array([[-4.0, 0.0], [4.0, 1.0]])
+        a = spn3.eval_log(xq)
+        b = spn4.eval_log(xq)
+        assert mx.all(mx.abs(a - b) < 1e-6), "roundtrip 后 eval 不一致"
+        assert float(extra["mu"][0]) == 0.5, "extra 未随模型保存"
+    finally:
+        os.unlink(tmp)
+    print("  ok  序列化: save → load → eval 一致, extra 随存")
+
 
 if __name__ == "__main__":
     _selftest()
-    print("spn.py: 3 组自检 ✓")
+    print("spn.py: 5 组自检 ✓")
