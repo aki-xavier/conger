@@ -368,16 +368,11 @@ class InverseApp:
                 print("inverse: nb 消融模式 (断言按 spn 标定, 跳过)")
             return
         if cfg.equal_luma:
-            # 等亮度消融断言: 亮度通路失效 / 色度通路补位 (对照实验)
-            if cfg.feat == "l":
-                assert acc["code"] < 0.05, (
-                    f"等亮度下 L 通路应失效 (轮廓不可见), 实测 {acc['code']:.3f}"
-                )
-            else:
-                assert acc["code"] > 0.30, (
-                    f"等亮度下 HS 应补位, 实测 {acc['code']:.3f}"
-                )
-            print("inverse: 等亮度消融自检 ✓ (L 失效 / HS 补位)")
+            # 等亮度: L 通路失效 (噪声淹没), 复数色相通路补位 (对照实验)
+            assert acc["code"] > 0.30, (
+                f"等亮度下色度通路应补位, 实测 {acc['code']:.3f}"
+            )
+            print("inverse: 等亮度消融自检 ✓ (色度补位)")
             return
         if cfg.multi_light:
             # 多光照模式实测: 正常 0.360 (5 光照分摊样本) / 池外 0.265
@@ -436,13 +431,6 @@ class InverseApp:
             help="叶最小行数 (spn 结构复杂度先验); 缺省 quick=8 / 全量=3",
         )
         ap.add_argument(
-            "--feat",
-            default="l",
-            choices=("l", "lhs", "hs", "rgb"),
-            help="特征通路: l=亮度 Riesz 3 通道; lhs=亮度+色度 HS 双通路; "
-            "hs=仅色度 (消融); rgb=原始 RGB 对照 (光照敏感)",
-        )
-        ap.add_argument(
             "--equal-luma",
             action="store_true",
             help="等亮度模式: 三色与背景同为亮度 0.10 且无明暗 → L 通路失效, "
@@ -489,7 +477,6 @@ class InverseApp:
         a = ap.parse_args()
         return InverseConfig(
             model=a.model,
-            feat=a.feat,
             quick=a.quick,
             use_cache=not a.no_cache,
             model_path=Path(a.model_path) if a.model_path else None,

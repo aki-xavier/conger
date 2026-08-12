@@ -16,7 +16,6 @@ class InverseConfig:
     """运行配置 (一切开关的唯一家); 派生量全是 property, 无游离全局。"""
 
     model: str = "nb"  # nb=全分辨率逐码贝叶斯; spn=池化+结构学习
-    feat: str = "l"  # l=亮度 Riesz 3 通道; lhs=+色度; hs=仅色度; rgb=原始
     quick: bool = False
     use_cache: bool = True
     model_path: Path | None = None
@@ -37,12 +36,8 @@ class InverseConfig:
 
     @property
     def feat_spec(self) -> tuple[tuple[str, str], ...]:
-        return {
-            "l": FeatureExtractor.FEAT_L,
-            "lhs": FeatureExtractor.FEAT_LHS,
-            "hs": FeatureExtractor.FEAT_HS,
-            "rgb": FeatureExtractor.FEAT_RGB,
-        }[self.feat]
+        """唯一特征集: L + 复数色相 (3 源 × 3 通道 = 9)。"""
+        return FeatureExtractor.FEAT
 
     @property
     def n_feat(self) -> int:

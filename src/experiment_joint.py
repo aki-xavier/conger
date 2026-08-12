@@ -67,25 +67,14 @@ class JointExperiment:
         return [pool[int(i)] for i in idx.tolist()]
 
     def feats_of(
-        self, scenes: list[Scene], renderer, cam, rw: RieszWavelet
+        self, scenes: list[Scene], renderer, cam, rw: RieszWavelet | None
     ) -> tuple[mx.array, mx.array]:
-        """场景序列 → (全分辨率 (n,62208), 池化 (n,144))。"""
-        fe = FeatureExtractor
+        """场景序列 → (全分辨率 (n, 9×20736), 池化 (n, 9×48))。"""
+        ex = FeatureExtractor(self.cfg)
         full, pooled = [], []
         for scene in scenes:
             frame = renderer.render(scene, cam)
-            rw.update(fe.frame_lum(frame))
-            f = rw.features()
-            v = mx.concatenate(
-                [f.log_mag.reshape(-1), f.phase_coh.reshape(-1), f.ori_R.reshape(-1)]
-            )
-            p = mx.concatenate(
-                [
-                    fe.block_pool(f.log_mag).reshape(-1),
-                    fe.block_pool(f.phase_coh).reshape(-1),
-                    fe.block_pool(f.ori_R).reshape(-1),
-                ]
-            )
+            v, p, rw = ex.of_frame_pair(frame, rw)
             mx.eval(v, p)  # 逐帧求值, 防惰性图累积
             full.append(v)
             pooled.append(p)
@@ -113,7 +102,7 @@ class JointExperiment:
         cache = Path(__file__).resolve().parent.parent / "artifacts"
         cache.mkdir(exist_ok=True)
         path = cache / (
-            f"joint_{self.N_TRAIN}_{self.N_STREAM}_{self.N_EVAL}_"
+            f"joint_chr_{self.N_TRAIN}_{self.N_STREAM}_{self.N_EVAL}_"
             f"{self.N_PROBE}.safetensors"
         )
         if path.exists():

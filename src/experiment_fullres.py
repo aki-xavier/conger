@@ -64,27 +64,16 @@ class FullresExperiment:
         return [pool[int(i)] for i in idx.tolist()]
 
     def feats_of(
-        self, idxs: list[int], renderer, cam, rw: RieszWavelet
+        self, idxs: list[int], renderer, cam, rw: RieszWavelet | None
     ) -> tuple[mx.array, mx.array]:
-        """帧序列 → (全分辨率特征 (n,62208), 池化特征 (n,144))。"""
-        fe = FeatureExtractor
+        """帧序列 → (全分辨率 (n, 9×20736), 池化 (n, 9×48))。"""
+        ex = FeatureExtractor(InverseConfig())
         full, pooled = [], []
         for i in idxs:
             frame = renderer.render(
                 self.codebook.to_scene(Codebook.idx_to_code(i)), cam
             )
-            rw.update(fe.frame_lum(frame))
-            f = rw.features()
-            v = mx.concatenate(
-                [f.log_mag.reshape(-1), f.phase_coh.reshape(-1), f.ori_R.reshape(-1)]
-            )
-            p = mx.concatenate(
-                [
-                    fe.block_pool(f.log_mag).reshape(-1),
-                    fe.block_pool(f.phase_coh).reshape(-1),
-                    fe.block_pool(f.ori_R).reshape(-1),
-                ]
-            )
+            v, p, rw = ex.of_frame_pair(frame, rw)
             mx.eval(v, p)  # 逐帧求值, 防惰性图累积爆显存
             full.append(v)
             pooled.append(p)
@@ -94,7 +83,7 @@ class FullresExperiment:
         """渲染 + 特征 (含缓存) → (全res/池化 × 训/测seen/测unseen, 码×3)。"""
         cache = Path(__file__).resolve().parent.parent / "artifacts"
         cache.mkdir(exist_ok=True)
-        tag = f"fullres_{self.N_TRAIN}_{self.N_TEST}.safetensors"
+        tag = f"fullres_chr_{self.N_TRAIN}_{self.N_TEST}.safetensors"
         path = cache / tag
         keys = (
             "xf_tr", "xf_ts", "xf_tu", "xp_tr", "xp_ts", "xp_tu",

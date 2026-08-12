@@ -62,11 +62,19 @@ class Evaluator:
             templates.append(mx.sum(x_tr[idx], axis=0) / cnt)
             present.append(i)
         tm = mx.stack(templates)  # (P, V)
-        # 距离矩阵分块且逐块立即求值: 惰性图全量累积会超 Metal 显存上限
+        # 距离用展开式 ||x−t||² = x² −2x·t + t²: 广播差分会产生
+        # (chunk, P, V) 中间量, 全分辨率 V=186K 时超 Metal 显存上限
+        # (实测 17GB); 展开式只有 (chunk, P) 输出, 任意 V 安全
+        t2 = mx.sum(tm * tm, axis=1)  # (P,)
         dd_parts = []
         chunk = 20
         for i in range(0, x_te.shape[0], chunk):
-            d = mx.sum((x_te[i : i + chunk, None, :] - tm[None, :, :]) ** 2, axis=2)
+            xb = x_te[i : i + chunk]
+            d = (
+                mx.sum(xb * xb, axis=1, keepdims=True)
+                - 2.0 * (xb @ tm.T)
+                + t2[None, :]
+            )
             mx.eval(d)
             dd_parts.append(d)
         dd = mx.concatenate(dd_parts)

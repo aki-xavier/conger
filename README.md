@@ -27,6 +27,6 @@ python experiment_fullres.py   # 全分辨率三臂 + 未见码泛化探针
 python experiment_joint.py     # 开放集门控双轨 + 提升
 ```
 
-demo 选项: `--feat l|lhs|hs|rgb` (特征通路)、`--equal-luma` (等亮度消融)、`--occlusion` (遮挡+序数先验)、`--sequence N` (运动先验)、`--multi-light`/`--test-light` (光照泛化)、`--prior edge,familiar` (码先验)、`--tree` (树语义可视化)。
+demo 选项: `--equal-luma` (等亮度消融, 特征为唯一 L+复数色相 9 通路)、`--occlusion` (遮挡+序数先验)、`--sequence N` (运动先验)、`--multi-light`/`--test-light` (光照泛化)、`--prior edge,familiar` (码先验)、`--tree` (树语义可视化)。
 
 依赖: mlx / matplotlib / numpy / pillow + 本地 path 依赖 [cga](../cga) (渲染引擎)。

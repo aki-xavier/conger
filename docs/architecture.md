@@ -70,10 +70,9 @@ flowchart LR
         GL & CL & PR & SM --> SPNM["spn.py: SPN<br/>推理 + safetensors 序列化"]
         SPNM --> LR["spn_learner.py"] & ON["online_spn.py"]
     end
-    subgraph DEMO["demo 族"]
+    subgraph DEMO["inverse 族"]
         CBK["codebook.py"] --> FEX["feature_extractor.py"] --> DCFG["inverse_config.py"]
-        CBK & FEX & DCFG --> DB["data_builder.py"] & PRI["priors.py"]
-            & EV["evaluator.py"] & SR["sequence_runner.py"]
+        CBK & FEX & DCFG --> DB["data_builder.py"] & PRI["priors.py"] & EV["evaluator.py"] & SR["sequence_runner.py"]
         DB & PRI & EV & SR --> APP["inverse_app.py: InverseApp"]
         APP --> ENTRY["inverse.py<br/>薄 CLI 入口"]
     end
