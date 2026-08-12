@@ -1,4 +1,9 @@
-"""SPN 逆渲染 demo: cga engine 渲染合成场景 → Riesz 特征 → SPN 反推 3D 场景码。
+"""逆渲染 demo: cga engine 渲染合成场景 → Riesz 特征 → 反推 3D 场景码。
+
+双模型 (--model):
+  nb  (默认) 全分辨率逐码对角高斯贝叶斯 (code_bayes.CodeBayes) —— 不池化,
+      精确可增量, 码簿任务最优 (实测 0.965 vs spn 0.470, 秒级 vs 分钟级);
+  spn 池化 (8×6) + learnSPN 结构学习 —— 组合泛化/消融研究对照。
 
 场景: 暗背景 + 单个浅色图元 (sphere / cylinder / box), 中心投影在 8×6
 网格上、尺寸两档 —— 场景码 (kind, gx, gy, size) 即 cga 三维建模的
@@ -11,7 +16,7 @@
 
 评估: 码准确率 / 逐变量准确率 / 多数类与最近模板基线 / GT vs 重建渲染。
 
-运行: cd src && python demo_inverse.py [--quick] [--no-cache]
+运行: cd src && python demo_inverse.py [--model nb|spn] [--quick] [--no-cache]
 自检: --quick 内置断言 (小数据集 + 阈值按全量运行标定)。
 """
 
@@ -41,6 +46,7 @@ from cga.engine import (
     SphereGeometry,
 )
 
+from code_bayes import CodeBayes
 from riesz import RieszWavelet
 from spn import SPN, learn_spn
 from utils import Utils
@@ -71,7 +77,8 @@ FEAT_LHS = FEAT_L + FEAT_HS
 # RGB 原始数据对照 (块均值, 3×48=144 维, 与 Riesz 同规模)
 FEAT_RGB = (("rgb", "r"), ("rgb", "g"), ("rgb", "b"))
 feat_spec = FEAT_L  # 默认; --feat lhs 加色度, hs 仅色度 (消融), rgb 原始数据
-n_feat = len(feat_spec) * N_GX * N_GY  # 144 / 432
+full_res = False  # --model nb: 不池化, 全分辨率 (逐码贝叶斯方向)
+n_feat = len(feat_spec) * N_GX * N_GY  # 144 / 432 (全分辨率 ×H×W 倍)
 code_cols = tuple(range(n_feat, n_feat + 5))
 card = dict(zip(code_cols, (N_KIND, N_GX, N_GY, N_SIZE, N_Z)))
 
@@ -245,7 +252,8 @@ def features_of_frame(
 ) -> tuple[mx.array, RieszWavelet | None]:
     """渲染帧 → 特征向量 (n_feat,)。
 
-    按 feat_spec 对 (亮度/饱和度/色相) 各源图做 Riesz 并块池化拼接;
+    按 feat_spec 对 (亮度/饱和度/色相) 各源图做 Riesz 并拼接;
+    池化 (块均值 8×6) 或全分辨率 (full_res, nb 模型用)。
     单个 RieszWavelet 实例顺序 update (核只建一次)。
     """
     lum = frame_lum(frame)
@@ -261,14 +269,16 @@ def features_of_frame(
     parts = []
     for src, ch in feat_spec:
         if src == "rgb":
-            # 原始 RGB 块均值: 不经 Riesz (对照实验, 光照敏感)
+            # 原始 RGB: 不经 Riesz (对照实验, 光照敏感)
             rgb = frame[..., :3].astype(mx.float32) / 255.0
             idx = {"r": 0, "g": 1, "b": 2}[ch]
-            parts.append(block_pool(rgb[..., idx]).reshape(-1))
+            m = rgb[..., idx]
+            parts.append(m.reshape(-1) if full_res else block_pool(m).reshape(-1))
             continue
         rw.update(imgs[src])
         f = rw.features()
-        parts.append(block_pool(getattr(f, ch)).reshape(-1))
+        m = getattr(f, ch)
+        parts.append(m.reshape(-1) if full_res else block_pool(m).reshape(-1))
     return mx.concatenate(parts), rw
 
 
@@ -328,9 +338,10 @@ def build_data(
     eq_tag = "eqn" if equal_luma else "std"  # 等亮度+噪声底 → 新缓存
     occ_tag = "occ" if occlusion else "noc"  # 遮挡物 → 新缓存
     lt_tag = "ml" if multi_light else "sl"  # 多光照 → 新缓存
+    res_tag = "fr" if full_res else "pl"  # 全分辨率/池化 → 新缓存
     tag = (
-        f"inv_{H}x{W}_g{N_GX}x{N_GY}_{feat_tag}_{col_tag}_{eq_tag}_{occ_tag}_{lt_tag}"
-        f"_{n_train}_{n_test}.npz"
+        f"inv_{H}x{W}_g{N_GX}x{N_GY}_{feat_tag}_{col_tag}_{eq_tag}_{occ_tag}_"
+        f"{lt_tag}_{res_tag}_{n_train}_{n_test}.npz"
     )
     path = cache / tag
     if use_cache and path.exists():
@@ -505,9 +516,12 @@ def plot_panel(
     fig, axes = plt.subplots(n_show, 5, figsize=(17, 3.4 * n_show))
     if n_show == 1:
         axes = axes[None, :]
+    ch = n_feat // len(feat_spec)  # 每通道尺寸: 池化 48 / 全分辨率 20736
+    fshape = (N_GY, N_GX) if ch == N_GX * N_GY else (H, W)
+    unit = "blocks" if ch == N_GX * N_GY else "map"
     cols = [
-        "GT render", f"GT {feat_spec[0][1]} blocks", "Pred render",
-        f"Pred {feat_spec[0][1]} blocks", "P(gx,gy|img)",
+        "GT render", f"GT {feat_spec[0][1]} {unit}", "Pred render",
+        f"Pred {feat_spec[0][1]} {unit}", "P(gx,gy|img)",
     ]
     for row, i in enumerate(picks):
         gt_scene = code_to_scene(idx_to_code(gt_i[i]))
@@ -516,12 +530,12 @@ def plot_panel(
         f_pd = renderer.render(pd_scene, cam)
         axes[row, 0].imshow(f_gt[..., :3].astype(mx.int32))
         axes[row, 2].imshow(f_pd[..., :3].astype(mx.int32))
-        lg = x_te[i, :N_GX * N_GY].reshape(N_GY, N_GX)
+        lg = x_te[i, :ch].reshape(fshape)
         axes[row, 1].imshow(lg, cmap="viridis")
-        # Pred 特征块: 从重建渲染重算 (与 GT 同管线, 首通道块)
+        # Pred 特征图: 从重建渲染重算 (与 GT 同管线, 首通道)
         vec_pd, rw = features_of_frame(f_pd, rw)
         mx.eval(vec_pd)
-        lg_p = vec_pd[: N_GX * N_GY].reshape(N_GY, N_GX)
+        lg_p = vec_pd[:ch].reshape(fshape)
         axes[row, 3].imshow(lg_p, cmap="viridis")
         pg = post[i].reshape(N_KIND, N_GX, N_GY, N_SIZE, N_Z)
         pgy = mx.exp(
@@ -609,7 +623,7 @@ def temporal_preds() -> list[list[int]]:
 
 
 def run_sequence(
-    spn: SPN,
+    net: SPN | CodeBayes,
     mu: mx.array,
     sd: mx.array,
     n_seqs: int,
@@ -634,7 +648,7 @@ def run_sequence(
             scene = code_to_scene(code)
             vec, rw = features_of_frame(renderer.render(scene, cam), rw)
             x = (vec - mu) / sd  # (1, V), 训练 z-score 统计
-            like = spn.posterior(x, codes)[0]  # (K,) log 似然
+            like = net.posterior(x, codes)[0]  # (K,) log 似然
             pred1 = int(mx.argmax(like))
             if prev_post is not None:
                 # 贝叶斯滤波: P(c_t|I) ∝ P(I_t|c_t)·Σ_{c_{t-1}} T·P(c_{t-1})
@@ -668,7 +682,9 @@ def run_sequence(
     print("demo_inverse: 序列自检 ✓")
 
 
-def run_test_light(spn: SPN, mu: mx.array, sd: mx.array, n_test: int) -> None:
+def run_test_light(
+    net: SPN | CodeBayes, mu: mx.array, sd: mx.array, n_test: int
+) -> None:
     """光照变化评估: 用变化光照 (--test-light) 重渲染测试码 → 特征 → 后验。
     对比同一模型在正常光照下的准确率, 检验 Riesz 光照归一化鲁棒性。"""
     global test_light
@@ -689,7 +705,7 @@ def run_test_light(spn: SPN, mu: mx.array, sd: mx.array, n_test: int) -> None:
     codes = all_codes()
     parts = []
     for i in range(0, n_test, 8):
-        p = spn.posterior(x_te[i : i + 8], codes)
+        p = net.posterior(x_te[i : i + 8], codes)
         mx.eval(p)
         parts.append(p)
     post = mx.concatenate(parts)
@@ -711,13 +727,15 @@ def run_test_light(spn: SPN, mu: mx.array, sd: mx.array, n_test: int) -> None:
 
 
 def _configure(
-    feat: str, eq_luma: bool = False, occ: bool = False, ml: bool = False
+    feat: str, eq_luma: bool = False, occ: bool = False, ml: bool = False,
+    model: str = "nb",
 ) -> None:
-    """按特征通路/等亮度/遮挡/多光照模式配置全局布局。"""
+    """按特征通路/等亮度/遮挡/多光照/模型配置全局布局。"""
     global feat_spec, n_feat, code_cols, card, equal_luma, occlusion, \
-        kind_colors, bg_color, multi_light
+        kind_colors, bg_color, multi_light, full_res
     feat_spec = {"l": FEAT_L, "lhs": FEAT_LHS, "hs": FEAT_HS, "rgb": FEAT_RGB}[feat]
-    n_feat = len(feat_spec) * N_GX * N_GY
+    full_res = model == "nb"  # 逐码贝叶斯不池化 (SPN 结构学习需要低维)
+    n_feat = len(feat_spec) * (H * W if full_res else N_GX * N_GY)
     code_cols = tuple(range(n_feat, n_feat + 5))
     card = dict(zip(code_cols, (N_KIND, N_GX, N_GY, N_SIZE, N_Z)))
     equal_luma = eq_luma
@@ -742,8 +760,9 @@ def main(
     sequence: int,
     test_light: bool,
     multi_light: bool,
+    model: str,
 ) -> None:
-    _configure(feat, equal_luma, occlusion, multi_light)
+    _configure(feat, equal_luma, occlusion, multi_light, model)
     # 全量: 4000 训练 (码空间 1152, ≈3.5 样本/码); quick: 600 功能自检
     n_train = 600 if quick else 4000
     n_test = 80 if quick else 200
@@ -751,23 +770,45 @@ def main(
         min_n = 8 if quick else 3  # 叶最小行数: 小 = 叶码纯 (后验锐)
     print(
         f"[1/5] 数据: train {n_train} / test {n_test} "
-        f"(cache={'on' if use_cache else 'off'}, min_n={min_n})"
+        f"(cache={'on' if use_cache else 'off'}, model={model}, min_n={min_n})"
     )
     x_tr, c_tr, x_te, c_te = build_data(n_train, n_test, use_cache)
+    tr_codes = [
+        code_to_idx(tuple(int(v) for v in row)) for row in c_tr.tolist()
+    ]
 
-    # 模型: 存在 → 加载 (跳过学习, 用模型内 mu/sd); 否则训练并保存
+    # 模型: 存在 → 加载; 否则训练并保存。nb 用原始特征 (无预处理),
+    # spn 用 z-score (mu/sd 随模型保存, 加载时复用)
+    net: SPN | CodeBayes
+    mu: mx.array | None
+    sd: mx.array | None
     if model_path is not None and model_path.exists():
         print(f"[2/5] 加载模型 {model_path}")
-        spn, extra = SPN.load(model_path)
-        mu, sd = extra["mu"], extra["sd"]
-        # 评估基线仍需要标准化的 x_tr; 用模型内统计, 与训练时一致
-        x_tr, x_te = (x_tr - mu) / sd, (x_te - mu) / sd
+        if model == "nb":
+            net, extra = CodeBayes.load(model_path)
+        else:
+            net, extra = SPN.load(model_path)
+        mu, sd = extra.get("mu"), extra.get("sd")
+        if mu is not None:
+            x_tr, x_te = (x_tr - mu) / sd, (x_te - mu) / sd
+    elif model == "nb":
+        assert mx.all(mx.isfinite(x_tr)), "特征含 NaN/inf"
+        print("[2/5] CodeBayes 逐码充分统计 (全分辨率, 精确可增量) ...")
+        net = CodeBayes.fit(
+            x_tr,
+            mx.array(tr_codes, dtype=mx.int32),
+            cards=(N_KIND, N_GX, N_GY, N_SIZE, N_Z),
+        )
+        mu = sd = None
+        if model_path is not None:
+            net.save(model_path)
+            print(f"      模型已保存 → {model_path}")
     else:
         x_tr, x_te, mu, sd = standardize(x_tr, x_te)
         assert mx.all(mx.isfinite(x_tr)), "特征含 NaN/inf"
         print("[2/5] learn_spn 结构学习 ...")
         xj = mx.concatenate([x_tr, c_tr], axis=1)
-        spn = learn_spn(
+        net = learn_spn(
             xj,
             disc_cols=set(code_cols),
             card=card,
@@ -775,10 +816,13 @@ def main(
             max_depth=14,
             sigma_floor=sigma_floor,
         )
-        print(f"      根节点: {type(spn.root).__name__}")
+        print(f"      根节点: {type(net.root).__name__}")
         if model_path is not None:
-            spn.save(model_path, {"mu": mu, "sd": sd})
+            net.save(model_path, {"mu": mu, "sd": sd})
             print(f"      模型已保存 → {model_path}")
+    if mu is None:  # nb 无预处理: 恒等占位 (run_sequence/test_light 复用)
+        mu = mx.zeros((1, n_feat))
+        sd = mx.ones((1, n_feat))
 
     print("[3/5] 推理: 枚举场景码后验")
     # 分块: 全批 (200×1152×149) 输入矩阵 + 25 棵 eval 图同时构建会超
@@ -787,7 +831,7 @@ def main(
     chunk = 8
     parts = []
     for i in range(0, n_test, chunk):
-        p = spn.posterior(x_te[i : i + chunk], codes)
+        p = net.posterior(x_te[i : i + chunk], codes)
         mx.eval(p)  # 立即求值, 释放该块 eval 图
         parts.append(p)
     post = mx.concatenate(parts)  # (n_test, N_CODES) log 后验
@@ -797,9 +841,6 @@ def main(
 
     print("[4/5] 评估 + 基线")
     acc = evaluate(pred_i, gt_i)
-    tr_codes = [
-        code_to_idx(tuple(int(v) for v in row)) for row in c_tr.tolist()
-    ]
     base_maj = baseline_majority(tr_codes, gt_i)
     base_tpl = baseline_template(x_tr, c_tr, x_te, gt_i)
     base = {"majority": base_maj, "template": base_tpl}
@@ -821,7 +862,7 @@ def main(
         prior = occlusion_prior(frames)  # (n_test, N_CODES)
     if prior is not None:
         # occlusion 是 (M,K) 逐样本; 其余是 (K,) 广播
-        post_p = spn.posterior(x_te, all_codes(), log_prior=prior)
+        post_p = net.posterior(x_te, all_codes(), log_prior=prior)
         pred_p = mx.argmax(post_p, axis=1).tolist()
         acc_p = evaluate(pred_p, gt_i)
         print(
@@ -838,14 +879,17 @@ def main(
 
     if sequence > 0:
         print("\n[6/5] 多帧运动先验 (prior.md 运动与时间先验)")
-        run_sequence(spn, mu, sd, n_seqs=10, n_frames=sequence, seq_seed=0)
+        run_sequence(net, mu, sd, n_seqs=10, n_frames=sequence, seq_seed=0)
         return
     if test_light:
         print("\n[6/5] 光照鲁棒性评估 (训练右上光, 测试左侧光)")
-        run_test_light(spn, mu, sd, n_test)
+        run_test_light(net, mu, sd, n_test)
         return
 
-    if tree:
+    if tree and model != "spn":
+        print("--tree 仅 spn 模型 (nb 无结构可视化)")
+    if tree and model == "spn":
+        assert isinstance(net, SPN)
         labels = dict(enumerate(feature_labels()))
         labels.update(dict(zip(code_cols, ("kind", "gx", "gy", "size", "z"))))
         code_names = {
@@ -855,7 +899,7 @@ def main(
             code_cols[3]: {i: f"s={SIZES[i]}" for i in range(N_SIZE)},
             code_cols[4]: {i: f"z={Z0S[i]}" for i in range(N_Z)},
         }
-        txt = spn.tree_str(labels, code_names)
+        txt = net.tree_str(labels, code_names)
         print(txt)
         (artifacts / "spn_tree.txt").write_text(txt)
         # 功能分工: 统计各分裂轴 (哪个码维度被哪些 Sum 节点负责)
@@ -876,9 +920,24 @@ def main(
             print(f"  {ax:<5} ×{cnt:>3}  → {func_names.get(ax, ax)}")
         print("树结构 → artifacts/spn_tree.txt")
 
-    # ── 自检断言 (阈值按 2026-08-11 实测标定, 留安全余量) ────────────
+    # ── 自检断言 (阈值按 2026-08-11/12 实测标定, 留安全余量) ────────
     # 全量 N=4000/min_n=3 (码空间 1152): 见当日全量运行记录
     # quick  N=600/min_n=8: 见当日 quick 运行记录
+    if model == "nb":
+        if not equal_luma and not multi_light:
+            # nb 标定 (2026-08-12): 全量 ≈0.96 (模板上限, fullres 实测);
+            # quick N=600 实测 0.287 (码覆盖率上限 1−e^{−0.52}≈0.41 打头)
+            if quick:
+                assert acc["code"] > 0.25, (
+                    f"quick nb: 码准确率过低 {acc['code']:.3f}"
+                )
+            else:
+                assert acc["code"] > 0.90, f"nb: 码准确率过低 {acc['code']:.3f}"
+                assert acc["kind"] > 0.93, f"nb: kind 过低 {acc['kind']:.3f}"
+            print("demo_inverse: nb 自检 ✓")
+        else:
+            print("demo_inverse: nb 消融模式 (断言按 spn 标定, 跳过)")
+        return
     if equal_luma:
         # 等亮度消融断言: 亮度通路失效 / 色度通路补位 (对照实验)
         if feat == "l":
@@ -920,12 +979,19 @@ def main(
 
 if __name__ == "__main__":
     ap = argparse.ArgumentParser()
+    ap.add_argument(
+        "--model",
+        default="nb",
+        choices=("nb", "spn"),
+        help="模型: nb=全分辨率逐码贝叶斯 (默认, 精确可增量, 码簿任务最优); "
+        "spn=池化+结构学习 (组合泛化/消融研究对照)",
+    )
     ap.add_argument("--quick", action="store_true", help="小数据集自检模式")
     ap.add_argument("--no-cache", action="store_true", help="跳过数据缓存读写")
     ap.add_argument(
-        "--model",
+        "--model-path",
         default=None,
-        help="SPN 模型路径 (pickle); 存在则加载跳过学习, 否则训练后保存",
+        help="模型存取路径 (pickle); 存在则加载跳过学习, 否则训练后保存",
     )
     ap.add_argument(
         "--tree",
@@ -973,7 +1039,7 @@ if __name__ == "__main__":
     ap.add_argument(
         "--test-light",
         action="store_true",
-        help="光照鲁棒性评估: 测试集换光照方向 (需 --model), 检验 "
+        help="光照鲁棒性评估: 测试集换光照方向 (需 --model-path), 检验 "
         "Riesz gain_control 归一化 vs 原始 RGB",
     )
     ap.add_argument(
@@ -990,11 +1056,11 @@ if __name__ == "__main__":
         "occlusion=遮挡序数 (需 --occlusion)",
     )
     args = ap.parse_args()
-    model = Path(args.model) if args.model else None
+    model_path = Path(args.model_path) if args.model_path else None
     main(
         quick=args.quick,
         use_cache=not args.no_cache,
-        model_path=model,
+        model_path=model_path,
         tree=args.tree,
         prior_name=args.prior,
         min_n=args.min_n,
@@ -1005,4 +1071,5 @@ if __name__ == "__main__":
         sequence=args.sequence,
         test_light=args.test_light,
         multi_light=args.multi_light,
+        model=args.model,
     )
