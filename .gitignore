@@ -229,3 +229,4 @@ artifacts/*.jpg
 *.npz
 artifacts/*.pkl
 artifacts/*.txt
+artifacts/*.safetensors

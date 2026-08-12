@@ -1,3 +1,4 @@
+import json
 import math
 from pathlib import Path
 
@@ -15,6 +16,14 @@ class Utils:
     def project_root() -> Path:
         """项目根目录 (src/ 的父目录)。"""
         return Path(__file__).resolve().parent.parent
+
+    @staticmethod
+    def st_metadata(path: str | Path) -> dict:
+        """safetensors 明文 JSON 头 (8 字节头长 + JSON; 含 __metadata__
+        自定义槽与各张量的 dtype/shape —— 不解析张量即可检查内容)。"""
+        with open(path, "rb") as f:
+            n = int.from_bytes(f.read(8), "little")
+            return json.loads(f.read(n))
 
     @staticmethod
     def nonzero(sel: mx.array) -> mx.array:

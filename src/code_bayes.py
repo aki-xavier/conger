@@ -28,12 +28,15 @@
 
 from __future__ import annotations
 
+import json
 import math
 import pickle
 from pathlib import Path
 from typing import Any
 
 import mlx.core as mx
+
+from utils import Utils
 
 
 class CodeBayes:
@@ -128,8 +131,8 @@ class CodeBayes:
         log_prior (K,) 或 (M,K): 外部码先验 (与 SPN.posterior 同契约)。
         """
         mu, sg, lp = self.params()
-        idx = self._code_index(codes)
-        logp = self._ll(feats, mu[idx], sg[idx]) + lp[idx][None, :]
+        idx = self.code_index(codes)
+        logp = self.ll(feats, mu[idx], sg[idx]) + lp[idx][None, :]
         if log_prior is not None:
             logp = logp + (log_prior[None, :] if log_prior.ndim == 1 else log_prior)
         return logp - mx.logsumexp(logp, axis=1, keepdims=True)
@@ -140,7 +143,7 @@ class CodeBayes:
         return int(self.n.shape[0])
 
     @staticmethod
-    def _ll(feats: mx.array, mu: mx.array, sg: mx.array) -> mx.array:
+    def ll(feats: mx.array, mu: mx.array, sg: mx.array) -> mx.array:
         """(M,D) × (K,D) → (M,K) 对角高斯 log 密度 (点积展开, 防实体化)。"""
         a = 1.0 / (sg * sg)
         b = mu * a
@@ -150,7 +153,7 @@ class CodeBayes:
     def posterior_all(self, feats: mx.array) -> mx.array:
         """(M,D) → (M, K_total) 全分量 log 后验 (码簿 + 临时), 行归一。"""
         mu, sg, lp = self.params()
-        logp = self._ll(feats, mu, sg) + lp[None, :]
+        logp = self.ll(feats, mu, sg) + lp[None, :]
         return logp - mx.logsumexp(logp, axis=1, keepdims=True)
 
     def gate(self, feats: mx.array) -> tuple[mx.array, mx.array]:
@@ -161,14 +164,14 @@ class CodeBayes:
         全分辨率近确定特征下已知/未知似然差数千 nats, 几乎无 ambiguous
         区; 类别不均衡场合可平移阈值 (本任务不需要)。"""
         mu, sg, _ = self.params()
-        ll = self._ll(feats, mu, sg)
+        ll = self.ll(feats, mu, sg)
         known = (self.n > 0)[None, :]
         best = mx.max(mx.where(known, ll, float("-inf")), axis=1)
         assert self.g is not None and self.g1 is not None and self.g2 is not None
         gmu = self.g + self.g1 / self.n_g
         gvar = self.g2 / self.n_g - (self.g1 / self.n_g) ** 2
         gsg = mx.sqrt(mx.maximum(gvar, self.floor**2))
-        lg = self._ll(feats, gmu[None, :], gsg[None, :])[:, 0]
+        lg = self.ll(feats, gmu[None, :], gsg[None, :])[:, 0]
         score = lg - best
         return score, score > 0
 
@@ -209,7 +212,7 @@ class CodeBayes:
         self.n_g += n
         mx.eval(self.n, self.s1, self.s2, self.c, self.g1, self.g2)
 
-    def _code_index(self, codes: mx.array) -> mx.array:
+    def code_index(self, codes: mx.array) -> mx.array:
         """码元组 (K,C) → 下标 (字典序, 与 cards 顺序一致)。"""
         idx = mx.zeros(codes.shape[0], dtype=mx.int32)
         for j in range(len(self.cards)):
@@ -217,15 +220,56 @@ class CodeBayes:
         return idx
 
     def save(self, path: str | Path, extra: dict[str, Any] | None = None) -> None:
-        """pickle 存盘 (mx.array 可序列化); extra 原样返回。"""
-        with open(path, "wb") as f:
-            pickle.dump({"model": self, "extra": extra or {}}, f)
+        """safetensors 存盘: 张量二进制体 + JSON 明文头 (config 可读,
+        Utils.st_metadata 查看)。.pkl 后缀 → 旧 pickle 格式 (向后兼容)。
+        extra: mx 数组以 extra.* 键入文件, 标量 JSON 化进头。"""
+        if str(path).endswith(".pkl"):
+            with open(path, "wb") as f:
+                pickle.dump({"model": self, "extra": extra or {}}, f)
+            return
+        assert self.g is not None, "absorb 前无存档内容"
+        assert self.s1 is not None and self.s2 is not None
+        assert self.c is not None and self.g1 is not None and self.g2 is not None
+        arrs = {
+            "n": self.n, "s1": self.s1, "s2": self.s2, "c": self.c,
+            "g": self.g, "g1": self.g1, "g2": self.g2,
+        }
+        meta = {
+            "config": json.dumps({
+                "cards": list(self.cards),
+                "dim": self.dim,
+                "floor": self.floor,
+                "n_g": self.n_g,
+            })
+        }
+        for k, v in (extra or {}).items():
+            if isinstance(v, mx.array):
+                arrs[f"extra.{k}"] = v
+            else:
+                meta[f"extra.{k}"] = json.dumps(v)
+        mx.save_safetensors(str(path), arrs, meta)
 
     @staticmethod
     def load(path: str | Path) -> tuple[CodeBayes, dict[str, Any]]:
-        with open(path, "rb") as f:
-            d = pickle.load(f)
-        return d["model"], d["extra"]
+        """save 的逆操作 (按扩展名识别 safetensors/pickle)。"""
+        if str(path).endswith(".pkl"):
+            with open(path, "rb") as f:
+                d = pickle.load(f)
+            return d["model"], d["extra"]
+        d = mx.load(str(path))
+        hd = Utils.st_metadata(path).get("__metadata__", {})
+        cfg = json.loads(hd["config"])
+        m = CodeBayes(tuple(cfg["cards"]), int(cfg["dim"]), float(cfg["floor"]))
+        m.n_g = float(cfg["n_g"])
+        m.n, m.s1, m.s2, m.c = d["n"], d["s1"], d["s2"], d["c"]
+        m.g, m.g1, m.g2 = d["g"], d["g1"], d["g2"]
+        extra: dict[str, Any] = {
+            k[6:]: v for k, v in d.items() if k.startswith("extra.")
+        }
+        extra.update(
+            {k[6:]: json.loads(v) for k, v in hd.items() if k.startswith("extra.")}
+        )
+        return m, extra
 
 
 if __name__ == "__main__":
@@ -269,6 +313,24 @@ if __name__ == "__main__":
     assert abs(float(mx.sum(mx.exp(p4))) - 4.0) < 1e-4, "先验注入后未归一"
     print("  ok  先验注入: 行归一成立 (SPN 契约)")
 
+    # 7) 序列化 roundtrip (safetensors): save → load → 逐位一致
+    import os
+    import tempfile
+
+    fd, tmp = tempfile.mkstemp(suffix=".safetensors")
+    os.close(fd)
+    try:
+        m1.save(tmp, {"mu": mx.array([0.5])})
+        m6, extra6 = CodeBayes.load(tmp)
+        d6 = float(
+            mx.max(mx.abs(m1.posterior_all(X[:6]) - m6.posterior_all(X[:6])))
+        )
+        assert d6 < 1e-6, f"roundtrip 后 posterior 不一致: {d6}"
+        assert float(extra6["mu"][0]) == 0.5, "extra 未随存"
+    finally:
+        os.unlink(tmp)
+    print("  ok  序列化: safetensors roundtrip 逐位一致, extra 随存")
+
     # 5) 提升交接: grow + absorb_stats ≡ 直接 absorb 行 (换基恒等式)
     m4 = CodeBayes.fit(X[:200], lab[:200], cards=(2,))
     idx = m4.grow()
@@ -293,4 +355,4 @@ if __name__ == "__main__":
     assert bool(mx.all(nov_new)), "新类未判新"
     print("  ok  门控: 已知判旧, 新类判新")
 
-    print("code_bayes.py: 6 组自检 ✓")
+    print("code_bayes.py: 7 组自检 ✓")
