@@ -1,103 +1,86 @@
 # conger 架构与流程图
 
-SPN 逆渲染研究: cga engine 渲染合成场景 → Riesz 特征 → 反演 3D 场景码。
-本文档是全部流程的总图; 各模块 docstring 有机制细节, `prior.md` 有先验体系。
+SPN 逆渲染研究: cga engine 渲染合成场景 → Riesz 全分辨率特征 → 连续反演
+3D 场景参数。本文档是全部流程的总图; 各模块 docstring 有机制细节。
 
-## 1. 主链路: 逆渲染 demo (inverse.py)
+## 0. 主线切换 (2026-08-12)
+
+离散场景码体系 (逐码贝叶斯 CodeBayes / 池化 SPN / 码网格 / 码先验 /
+在线 SPN) 已整体退役删除。理由: 位置/尺寸/深度是连续物理量, 离散码
+只是后验求积节点; 逐码机制的索引结构就是码本身, 连续任务下不适用。
+git 历史保留全部旧实现 (最后一次提交 decbb89..7ae963f 区间)。
+
+现行唯一主线: 连续采样 + 全分辨率浅混合 SPN (MixtureSPN)。
+
+## 1. 主链路 (inverse.py)
 
 ```mermaid
 flowchart LR
     subgraph DATA["数据 (DataBuilder)"]
-        CODE["场景码 (kind,gx,gy,size,z)<br/>1152 组合均匀采样"] --> SCENE["Codebook.to_scene<br/>cga Scene"]
+        SAMPLE["连续参数采样 (kind,u,v,s,z)<br/>训练范围内均匀; 外推探针范围外"]
+        --> SCENE["Codebook.to_scene<br/>cga Scene"]
         SCENE --> RENDER["Renderer 渲染<br/>144×144 帧"]
-        RENDER --> FEAT["FeatureExtractor<br/>Riesz log_mag/phase_coh/ori_R"]
+        RENDER --> FEAT["FeatureExtractor<br/>11 通道全分辨率 (V=228K):<br/>L×3 Riesz (gain control)<br/>色度×3 Riesz (无 gc, 保色相幅度)<br/>色度×2 原始 (带符号拮抗)"]
     end
-    FEAT -->|"nb (默认): 全分辨率 62208 维"| CB["CodeBayes.fit<br/>逐码对角高斯<br/>充分统计量精确可增量"]
-    FEAT -->|"spn: 池化 8×6×3 = 144 维"| LEARN["SPNLearner.learn<br/>G 检验 Product /<br/>k-means Sum"]
-    LEARN --> SPN["SPN 树"]
-    CB --> POST
-    SPN --> POST["posterior: 枚举 1152 码<br/>log 后验 + 先验注入<br/>(edge/familiar/occlusion)"]
-    POST --> EVAL["Evaluator<br/>码 + 逐变量准确率"]
-    POST --> RECON["重建: argmax 码<br/>→ to_scene 再渲染"]
-    POST -->|"--sequence"| SEQ["SequenceRunner<br/>贝叶斯前向滤波"]
+    FEAT --> W["PCA 白化 (Gram eigh, CPU)<br/>186K→D≤N−1 无损降维<br/>对角高斯≡原空间全协方差"]
+    W --> EM["逐 kind 分层联合 EM<br/>P(kind)·P(f,t|kind), 各 K/3 分量<br/>方差逆伽马收缩 (Ledoit-Wolf)"]
+    EM --> PRED["predict: 责任度 (特征证据)<br/>E[t|x]=r@t_mu, P(kind|x)=r@onehot"]
+    PRED --> EVAL["Evaluator: 物理单位 RMSE/R²<br/>(基线=训练均值) + kind 准确率<br/>插值 vs 外推分裂"]
+    PRED --> RECON["重建: 预测参数 → to_scene 再渲染"]
 ```
 
-实测: nb 码准确率 0.965 (秒级训练) / spn 0.470 (分钟级, 组合泛化研究对照)。
+实测 (N=4000, K=64): 插值 kind 0.897 / u,v RMSE 6.6px (R²≈0.90) /
+z R² 0.44; s/z 弱是物理 (单目单帧仅乘积可观测 = 熟悉尺寸歧义,
+R²>0 部分来自边界线索)。外推报告制: 核回归边界饱和不完美
+(s/z R² 可为负) —— 核机器上限, 升级路径 mixture of linear experts。
 
-## 2. 开放集: 门控双轨联合系统 (experiment_joint.py)
+## 2. 关键机制决策 (全是实测驱动的判决)
 
 ```mermaid
 flowchart TD
-    F["帧流 (已知码 + 未见码 + 新类别)"] --> G{"CodeBayes.gate<br/>等先验似然比:<br/>全局兜底分量 vs 最佳已知分量"}
-    G -->|"已知 (≈99%)"| FAST["快轨 CodeBayes<br/>posterior_all argmax 回答<br/>+ 自标注吸收 (精确统计)"]
-    G -->|未见| SLOW["慢轨 SPN (池化)<br/>变量级回答 kind/gx/gy<br/>(组合泛化)"]
-    SLOW --> PROMOTE["提升: grow 临时分量<br/>+ absorb 首帧统计<br/>(交接格式 = 充分统计量)"]
-    PROMOTE -->|"码簿 +1, 后续帧自动转快轨"| FAST
-    FAST --> OUT["统一输出: 码 + 后验"]
-    SLOW --> OUT2["未知标记 + 变量边缘"]
+    Q1["kind 曾 0.47"] --> A1["病理 1: kind 与连续因子独立采样,<br/>无约束 EM 按位置聚类 → 分量结构性混色"]
+    A1 --> F1["修复 1: 逐 kind 分层拟合<br/>(生成结构 P(kind)·P(f,t|kind))"]
+    F1 --> A2["病理 2: 能量特征符号盲 + 对比度归一化<br/>→ 色相幅度比 (kind 主线索) 被前端抹掉"]
+    A2 --> F2["修复 2: 色度关 gain_control +<br/>2 个带符号原始色度通道"]
+    F2 --> A3["病理 3: 相邻像素强相关, 对角高斯<br/>把相关维当独立选票 → 色度被亮度淹没"]
+    A3 --> F3["修复 3: PCA 白化 (白化对角 ≡ 原始全协方差)"]
+    F3 --> A4["病理 4: 高维小样本, 分量方差在零空间<br/>维撞地板 → 责任度被零空间抖动主导"]
+    A4 --> F4["修复 4: 方差逆伽马收缩<br/>(等效 20 虚样本, nk≫20 纯数据)"]
 ```
 
-实测: 提升覆盖 86.5% 后码 acc 0.861, 分量纯度 1.000; 码簿外新类别 (圆盘)
-判新 100% 且 SPN 位置泛化 gx 0.41 / gy 0.74。
-
-## 3. 在线学习: OnlineSPN 吸收-生长-修订 (online_spn.py)
+## 3. 模块结构 (一文件一类)
 
 ```mermaid
 flowchart LR
-    B["新批样本"] --> E["E 步: 软路由<br/>叶后验 = 路径先验 × 叶似然"]
-    E --> M["M 步: 统计常驻累加<br/>叶 (n,μ,M2) / 码联合计数表 / Sum 计数"]
-    M --> R["refresh: 参数重建<br/>(Chan 合并防 float32 抵消)"]
-    R --> G{"叶码计数<br/>≥ 下限?"}
-    G -->|是| SPLIT["生长: 码空间加权 k-means 分裂<br/>子叶继承 5% 伪计数先验<br/>+ 当批行按码分组播种"]
-    G -->|否| KEEP["叶保持, 下批再查"]
-    SPLIT --> B
-    KEEP --> B
-    M -.->|"稀疏调度 (--rev-at)"| REV["⑤ 修订: reservoir (Vitter R)<br/>SPNLearner 重构 + 重吸收"]
-```
-
-实测 (N=4000, 5 批): 纯在线 = 全量 × 0.82; 加中途单次修订 (cap=2048)
-= ×0.98 (0.460 vs 0.470), 时间省 30%+。高频修订反而 ×0.61
-(证据丢失税) —— 修订要稀疏。
-
-## 4. 模块结构 (一文件一类)
-
-```mermaid
-flowchart LR
-    subgraph SPNF["SPN 族"]
-        NODE["node.py: Node<br/>(多态契约)"] --> LEAF["leaf.py: Leaf"]
-        LEAF --> GL["gauss_leaf.py"] & CL["cat_leaf.py"]
-        NODE --> PR["product.py"] & SM["sum_node.py"]
-        GL & CL & PR & SM --> SPNM["spn.py: SPN<br/>推理 + safetensors 序列化"]
-        SPNM --> LR["spn_learner.py"] & ON["online_spn.py"]
+    subgraph CORE["逆渲染族"]
+        CBK["codebook.py<br/>连续采样+投影"] --> FEX["feature_extractor.py<br/>11 通道"] --> DCFG["inverse_config.py"]
+        CBK & FEX & DCFG --> DB["data_builder.py"] & EV["evaluator.py"]
+        DB & EV --> APP["inverse_app.py: InverseApp"]
+        APP --> ENTRY["inverse.py 薄入口"]
     end
-    subgraph DEMO["inverse 族"]
-        CBK["codebook.py"] --> FEX["feature_extractor.py"] --> DCFG["inverse_config.py"]
-        CBK & FEX & DCFG --> DB["data_builder.py"] & PRI["priors.py"] & EV["evaluator.py"] & SR["sequence_runner.py"]
-        DB & PRI & EV & SR --> APP["inverse_app.py: InverseApp"]
-        APP --> ENTRY["inverse.py<br/>薄 CLI 入口"]
-    end
-    subgraph FRONT["前端 / 模型"]
+    subgraph FRONT["前端"]
         RS["riesz_scale.py"] & FM["feature_maps.py"] --> RW["riesz.py: RieszWavelet"]
-        CBM["code_bayes.py: CodeBayes"]
+        RW --> FEX
     end
-    EXP["experiment_incremental / fullres / joint<br/>(各一个实验类)"]
-    RW --> FEX
-    SPNM & CBM --> APP
-    LR & ON --> EXP
+    MSP["mixture_spn.py: MixtureSPN<br/>白化+分层 EM+条件期望+序列化<br/>内嵌 4 组黑盒自检"] --> APP
+    RW --> ST["riesz_selftest.py"]
 ```
 
-依赖方向全部单向; codebook/feature_extractor 仅 TYPE_CHECKING 引
-InverseConfig 防环; 反序列化工厂 (node_from_records) 在依赖顶点 SPN。
+依赖方向单向; codebook/feature_extractor 仅 TYPE_CHECKING 引
+InverseConfig 防环。
 
-## 5. 持久化 (safetensors)
+## 4. 持久化 (safetensors)
 
-```mermaid
-flowchart LR
-    SAVE["model.save() / 缓存"] --> ST[".safetensors<br/>8B 头长 + JSON 明文头<br/>+ 张量二进制体"]
-    ST --> READ["mx.load (张量)<br/>Utils.st_metadata (头)"]
-    ST -.->|"config: cards/dim/floor/n_vars<br/>人读可检查"| HUMAN["明文元数据"]
-```
+- 数据缓存: `artifacts/mix_*.safetensors` (配置指纹文件名, gitignore);
+- 模型: MixtureSPN.save/load —— 参数张量 (含白化基 basis (V,D),
+  全量模式约 3GB) + rel_floor 入 JSON 明文头; Utils.st_metadata 可查。
+- 注意: 旧 `inv_*`/`fullres_*`/`joint_*` 缓存属已删除的离散体系, 可清。
 
-- 数据缓存: `artifacts/*.safetensors` (gitignore);
-- 模型: SPN 树扁平化 (DFS 先序 + CSR 子索引 + 分类型负载表),
-  CodeBayes 平铺统计量; `.pkl` 后缀走旧 pickle 格式向后兼容。
+## 5. 待办 (研究升级路径, 均未做)
+
+- mixture of linear experts: 块内放开特征↔目标交叉协方差
+  (治外推边界饱和; 低秩 + SVI)
+- DP-SVI 自动定 K (分量数从超参变推断量, 接 structure learning 遗产)
+- online EM (数据量超内存时平移; 旧 OnlineSPN 已是其骨肉)
+- 训练数据全因子重设计 (光位/光色/图元色组合覆盖; 色恒常歧义对
+  拆条件监督 —— 讨论已定调, 未实现)

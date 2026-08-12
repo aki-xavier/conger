@@ -1,39 +1,34 @@
-"""逆渲染 demo: cga engine 渲染合成场景 → Riesz 特征 → 反推 3D 场景码。
+"""逆渲染: cga engine 渲染合成场景 → Riesz 全分辨率特征 → MixtureSPN
+连续反演 3D 场景参数 (kind, u, v, s, z), 重建 cga 场景。
 
-双模型 (InverseConfig.model):
-  nb  (默认) 全分辨率逐码对角高斯贝叶斯 (code_bayes.CodeBayes) —— 不池化,
-      精确可增量, 码簿任务最优 (实测 0.965 vs spn 0.470, 秒级 vs 分钟级);
-  spn 池化 (8×6) + SPNLearner 结构学习 —— 组合泛化/消融研究对照。
+模型: MixtureSPN —— 全分辨率浅混合 SPN (K 个对角高斯块的 Sum, GMR 式
+联合 EM, 条件期望推理 ≡ 核回归)。离散场景码体系 (逐码贝叶斯/池化
+SPN/码网格) 已整体退役: 连续物理量 (位置/尺寸/深度) 的离散化只是
+后验求积, 连续列 + 插值/外推探针才是逆渲染的诚实形态。
 
-场景: 暗背景 + 单个浅色图元 (sphere / cylinder / box), 中心投影在 8×6
-网格上、尺寸两档、深度四档 —— 场景码 (kind, gx, gy, size, z) 即 cga
-三维建模的离散编码 (code → cga Scene 对象可逆)。
+场景: 暗背景 + 单个浅色图元 (sphere/cylinder/box), 位置/尺寸/深度
+连续采样 (训练范围内均匀; 外推测试采样支撑集外区间)。图元色绑定
+kind。
 
-训练数据: 均匀随机采样场景码 → cga engine 渲染 144×144 → Riesz 特征
-(深度通道改走亮度: engine 无深度输出) → 特征矩阵 → 模型。
-推理: 枚举 1152 个场景码, 后验 argmax → 重建 cga 场景 (三维建模)。
-
-评估: 码准确率 / 逐变量准确率 / 多数类与最近模板基线 / GT vs 重建渲染。
+数据: 参数采样 → cga 渲染 144×144 → Riesz 特征 (L + 复数色相
+9 通道全分辨率, V=186624) → 联合 EM。
+推理: 责任度 (特征证据) → E[t|特征] + P(kind|特征)。
+评估: 物理单位 RMSE/R² (基线 = 训练均值预测器), 插值 vs 外推分裂。
 
 结构 (无游离状态: 配置集中 InverseConfig, 机制分属各类):
-  Codebook        码 ⇄ cga 场景 (领域常量 + 投影)
-  InverseConfig      运行配置 (feat/model/消融开关, 派生量全是 property)
-  FeatureExtractor 帧 → 特征向量 (池化或全分辨率)
-  DataBuilder     数据构建 (缓存) 与标准化
-  Priors          码先验工厂 (edge/familiar/occlusion)
-  Evaluator       评估与基线
-  SequenceRunner  多帧运动先验 (贝叶斯滤波)
-  InverseApp         主流程 (训练/推理/评估/可视化/自检)
+  Codebook          连续场景参数 ⇄ cga 场景 (领域常量 + 投影/采样)
+  InverseConfig     运行配置 (开关唯一家, 派生量全 property)
+  FeatureExtractor  帧 → 全分辨率特征向量
+  DataBuilder       数据构建 (缓存)
+  MixtureSPN        浅混合 SPN + 联合 EM + 条件期望 (mixture_spn.py)
+  Evaluator         回归/分类指标
+  InverseApp        主流程 (训练/推理/评估/可视化/自检)
 
-运行: cd src && python inverse.py [--model nb|spn] [--quick] [--no-cache]
-自检: --quick 内置断言 (小数据集 + 阈值按全量运行标定)。
-薄入口: 全部实现见 inverse_app.py (InverseApp) 及其协作类
-(inverse_config/codebook/feature_extractor/data_builder/priors/evaluator/
-sequence_runner)。
-
-运行: cd src && python inverse.py [--model nb|spn] [--quick]
+运行: cd src && python inverse.py [--quick] [--no-cache] [--components K]
+自检: mixture_spn.py 内嵌 (公理性质/EM 恢复/序列化); inverse.py --quick
+      内置断言 (阈值依据见 inverse_app.self_check 注释)。
+薄入口: 全部实现见 inverse_app.py (InverseApp) 及其协作类。
 """
-
 
 from inverse_app import InverseApp
 

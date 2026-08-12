@@ -1,4 +1,5 @@
-"""InverseApp: 逆渲染 demo 主流程 (训练/推理/评估/可视化/自检) + CLI。"""
+"""InverseApp: 逆渲染主流程 (连续版) —— 数据 → EM → 条件期望 →
+物理单位指标 (插值/外推分裂) → 可视化 → 自检 + CLI。"""
 
 from __future__ import annotations
 
@@ -12,481 +13,227 @@ matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 import mlx.core as mx
 
-from code_bayes import CodeBayes
 from codebook import Codebook
 from data_builder import DataBuilder
-from evaluator import Evaluator
+from evaluator import TARGETS, Evaluator
 from feature_extractor import FeatureExtractor
 from inverse_config import InverseConfig
-from priors import Priors
-from riesz import RieszWavelet
-from sequence_runner import SequenceRunner
-from spn import SPN
-from spn_learner import SPNLearner
+from mixture_spn import MixtureSPN
 
 
 class InverseApp:
-    """主流程: 数据 → 训练/加载 → 推理 → 评估 → 可视化 → 自检。"""
+    """主流程: 连续采样数据 → MixtureSPN(EM) → 条件期望 → 插值/外推评估。"""
 
     def __init__(self, cfg: InverseConfig):
         self.cfg = cfg
         self.codebook = Codebook(cfg)
         self.extractor = FeatureExtractor(cfg)
         self.data = DataBuilder(cfg, self.codebook, self.extractor)
-        self.priors = Priors(cfg, self.codebook)
-        self.sequences = SequenceRunner(cfg, self.codebook, self.extractor)
 
     def run(self) -> None:
         cfg = self.cfg
-        cb = self.codebook
-        n_train = 600 if cfg.quick else 4000
-        n_test = 80 if cfg.quick else 200
-        min_n = cfg.min_n
-        if min_n is None:
-            min_n = 8 if cfg.quick else 3  # 叶最小行数: 小 = 叶码纯 (后验锐)
+        n_tr, n_i, n_e = (800, 100, 100) if cfg.quick else (4000, 300, 300)
         print(
-            f"[1/5] 数据: train {n_train} / test {n_test} "
-            f"(cache={'on' if cfg.use_cache else 'off'}, "
-            f"model={cfg.model}, min_n={min_n})"
+            f"[1/4] 数据: train {n_tr} / 插值 {n_i} / 外推 {n_e} "
+            f"(cache={'on' if cfg.use_cache else 'off'}, K={cfg.k_components})"
         )
-        x_tr, c_tr, x_te, c_te = self.data.build(n_train, n_test, cfg.use_cache)
-        tr_codes = [
-            cb.code_to_idx(tuple(int(v) for v in row)) for row in c_tr.tolist()
-        ]
+        f_tr, p_tr, f_ti, p_ti, f_te, p_te = self.data.build(
+            n_tr, n_i, n_e, cfg.use_cache
+        )
+        assert mx.all(mx.isfinite(f_tr)), "特征含 NaN/inf"
+        t_tr = p_tr[:, 1:]
+        k_tr = p_tr[:, 0].astype(mx.int32)
 
-        # 模型: 存在 → 加载; 否则训练并保存。nb 用原始特征 (无预处理),
-        # spn 用 z-score (mu/sd 随模型保存, 加载时复用)
-        net: SPN | CodeBayes
-        mu: mx.array | None
-        sd: mx.array | None
         if cfg.model_path is not None and cfg.model_path.exists():
-            print(f"[2/5] 加载模型 {cfg.model_path}")
-            if cfg.model == "nb":
-                net, extra = CodeBayes.load(cfg.model_path)
-            else:
-                net, extra = SPN.load(cfg.model_path)
-            mu, sd = extra.get("mu"), extra.get("sd")
-            if mu is not None:
-                x_tr, x_te = (x_tr - mu) / sd, (x_te - mu) / sd
-        elif cfg.model == "nb":
-            assert mx.all(mx.isfinite(x_tr)), "特征含 NaN/inf"
-            print("[2/5] CodeBayes 逐码充分统计 (全分辨率, 精确可增量) ...")
-            net = CodeBayes.fit(
-                x_tr,
-                mx.array(tr_codes, dtype=mx.int32),
-                cards=(cb.N_KIND, cb.N_GX, cb.N_GY, cb.N_SIZE, cb.N_Z),
+            print(f"[2/4] 加载模型 {cfg.model_path}")
+            net = MixtureSPN.load(cfg.model_path)
+        else:
+            print(
+                f"[2/4] MixtureSPN 联合 EM (K={cfg.k_components}, "
+                f"≤{cfg.em_iters} 轮, V={f_tr.shape[1]}) ..."
             )
-            mu = sd = None
+            net = MixtureSPN.fit(
+                f_tr, t_tr, k_tr,
+                k=cfg.k_components,
+                iters=cfg.em_iters,
+                rel_floor=cfg.sigma_rel_floor,
+                key=mx.random.key(0),
+            )
             if cfg.model_path is not None:
                 net.save(cfg.model_path)
                 print(f"      模型已保存 → {cfg.model_path}")
-        else:
-            x_tr, x_te, mu, sd = self.data.standardize(x_tr, x_te)
-            assert mx.all(mx.isfinite(x_tr)), "特征含 NaN/inf"
-            print("[2/5] SPNLearner 结构学习 ...")
-            xj = mx.concatenate([x_tr, c_tr], axis=1)
-            net = SPNLearner(
-                disc_cols=set(cfg.code_cols),
-                card=cfg.card,
-                min_n=min_n,
-                max_depth=14,
-                sigma_floor=cfg.sigma_floor,
-            ).learn(xj)
-            print(f"      根节点: {type(net.root).__name__}")
-            if cfg.model_path is not None:
-                net.save(cfg.model_path, {"mu": mu, "sd": sd})
-                print(f"      模型已保存 → {cfg.model_path}")
-        if mu is None:  # nb 无预处理: 恒等占位 (序列/光照评估复用)
-            mu = mx.zeros((1, cfg.n_feat))
-            sd = mx.ones((1, cfg.n_feat))
 
-        print("[3/5] 推理: 枚举场景码后验")
-        # 分块: 全批输入矩阵 × 多棵 eval 图同时构建会超 Metal 显存上限;
-        # 逐块 mx.eval (立即求值, 图小) 再拼接, 结果同全批
-        codes = cb.all_codes()
-        parts = []
-        for i in range(0, n_test, 8):
-            p = net.posterior(x_te[i : i + 8], codes)
-            mx.eval(p)  # 立即求值, 释放该块 eval 图
-            parts.append(p)
-        post = mx.concatenate(parts)  # (n_test, N_CODES) log 后验
-        assert mx.all(mx.isfinite(post)), "后验含 NaN/inf"
-        pred_i = mx.argmax(post, axis=1).tolist()
-        gt_i = [cb.code_to_idx(tuple(int(v) for v in row)) for row in c_te.tolist()]
+        print("[3/4] 推理: 条件期望 E[t|特征]")
+        ti_pred, ki_p, _ = net.predict(f_ti)
+        te_pred, ke_p, _ = net.predict(f_te)
+        ki_pred = mx.argmax(ki_p, axis=1)
+        ke_pred = mx.argmax(ke_p, axis=1)
 
-        print("[4/5] 评估 + 基线")
-        acc = Evaluator.evaluate(pred_i, gt_i)
-        base_maj = Evaluator.baseline_majority(tr_codes, gt_i)
-        base_tpl = Evaluator.baseline_template(x_tr, c_tr, x_te, gt_i)
-        base = {"majority": base_maj, "template": base_tpl}
-        print(
-            f"      码: {acc['code']:.3f}  kind: {acc['kind']:.3f}  "
-            f"gx: {acc['gx']:.3f}  gy: {acc['gy']:.3f}  "
-            f"size: {acc['size']:.3f}  z: {acc['z']:.3f}"
-        )
-        print(f"      基线: majority {base_maj:.3f} / template {base_tpl:.3f}")
+        print("[4/4] 评估 (物理单位; 基线 = 训练均值预测器)")
+        mi = Evaluator.report("插值", p_ti, ti_pred, ki_pred, p_tr)
+        me = Evaluator.report("外推", p_te, te_pred, ke_pred, p_tr)
 
-        prior = self.priors.build(cfg.prior_name)
-        if cfg.occlusion and cfg.prior_name == "occlusion":
-            # 遮挡序数先验是 per-sample 的: 重渲染测试帧检测黄柱面积缺失
-            renderer, cam = Codebook.make_renderer()
-            frames = []
-            for row in c_te.tolist():
-                code = cb.idx_to_code(cb.code_to_idx(tuple(int(v) for v in row)))
-                scene = cb.to_scene(code)
-                frames.append(renderer.render(scene, cam))
-            prior = self.priors.occlusion(frames)  # (n_test, N_CODES)
-        if prior is not None:
-            # occlusion 是 (M,K) 逐样本; 其余是 (K,) 广播
-            post_p = net.posterior(x_te, cb.all_codes(), log_prior=prior)
-            pred_p = mx.argmax(post_p, axis=1).tolist()
-            acc_p = Evaluator.evaluate(pred_p, gt_i)
-            print(
-                f"      注入先验[{cfg.prior_name}]: 码 {acc_p['code']:.3f}  "
-                f"kind {acc_p['kind']:.3f}  gx {acc_p['gx']:.3f}  "
-                f"gy {acc_p['gy']:.3f}  size {acc_p['size']:.3f}  z {acc_p['z']:.3f}"
+        if cfg.test_light:
+            print("  池外光照 (顶光) 重渲染评估:")
+            cfg2 = dataclasses.replace(cfg, test_light=True)
+            db = DataBuilder(cfg2, Codebook(cfg2), FeatureExtractor(cfg2))
+            # 同一组插值参数, 仅换光照重渲染 (cache tag 含 tl 指纹)
+            f_tl = db.feats_of(p_ti)
+            tt_pred, kt_p, _ = net.predict(f_tl)
+            Evaluator.report(
+                "池外光", p_ti, tt_pred, mx.argmax(kt_p, axis=1), p_tr
             )
 
-        print("[5/5] 图 → artifacts/")
         artifacts = Path(__file__).resolve().parent.parent / "artifacts"
         artifacts.mkdir(exist_ok=True)
-        self.plot_panel(x_te, post, gt_i, pred_i, artifacts / "inverse_panel.png")
-        self.plot_metrics(acc, base, artifacts / "inverse_metrics.png")
-
-        if cfg.sequence > 0:
-            print("\n[6/5] 多帧运动先验 (prior.md 运动与时间先验)")
-            self.sequences.run(
-                net, mu, sd, n_seqs=10, n_frames=cfg.sequence, seq_seed=0
-            )
-            return
-        if cfg.test_light:
-            print("\n[6/5] 光照鲁棒性评估 (训练右上光, 测试池外顶光)")
-            self.run_test_light(net, mu, sd, n_test)
-            return
-
-        if cfg.tree:
-            if cfg.model != "spn":
-                print("--tree 仅 spn 模型 (nb 无结构可视化)")
-            else:
-                self.print_tree(net, artifacts)
-
-        self.self_check(acc)
+        self.plot_scatter(p_tr, p_ti, ti_pred, p_te, te_pred,
+                          artifacts / "inverse_scatter.png")
+        self.plot_recon(p_ti, ti_pred, ki_pred, artifacts / "inverse_recon.png")
+        print(f"      图 → {artifacts.name}/ (scatter + recon)")
+        self.self_check(mi, me)
 
     # ── 可视化 ──────────────────────────────────────────────────────
 
-    def plot_panel(
-        self,
-        x_te: mx.array,
-        post: mx.array,
-        gt_i: list[int],
-        pred_i: list[int],
+    @staticmethod
+    def plot_scatter(
+        p_tr: mx.array,
+        p_ti: mx.array, ti_pred: mx.array,
+        p_te: mx.array, te_pred: mx.array,
         out: Path,
     ) -> None:
-        """3 个测试样本: GT/Pred 渲染 + 特征图 + P(gx,gy) 热图。"""
-        cfg = self.cfg
-        cb = self.codebook
-        renderer, cam = Codebook.make_renderer()
-        rw: RieszWavelet | None = None
-        n_show = min(3, len(gt_i))
-        picks = (
-            [0, len(gt_i) // 2, len(gt_i) - 1]
-            if len(gt_i) >= 3
-            else list(range(n_show))
-        )
-        fig, axes = plt.subplots(n_show, 5, figsize=(17, 3.4 * n_show))
-        if n_show == 1:
-            axes = axes[None, :]
-        ch = cfg.n_feat // len(cfg.feat_spec)  # 每通道尺寸
-        fshape = (
-            (cb.N_GY, cb.N_GX) if ch == cb.N_GX * cb.N_GY else (cb.H, cb.W)
-        )
-        unit = "blocks" if ch == cb.N_GX * cb.N_GY else "map"
-        cols = [
-            "GT render",
-            f"GT {cfg.feat_spec[0][1]} {unit}",
-            "Pred render",
-            f"Pred {cfg.feat_spec[0][1]} {unit}",
-            "P(gx,gy|img)",
-        ]
-        for row, i in enumerate(picks):
-            gt_scene = cb.to_scene(cb.idx_to_code(gt_i[i]))
-            pd_scene = cb.to_scene(cb.idx_to_code(pred_i[i]))
-            f_gt = renderer.render(gt_scene, cam)
-            f_pd = renderer.render(pd_scene, cam)
-            axes[row, 0].imshow(f_gt[..., :3].astype(mx.int32))
-            axes[row, 2].imshow(f_pd[..., :3].astype(mx.int32))
-            lg = x_te[i, :ch].reshape(fshape)
-            axes[row, 1].imshow(lg, cmap="viridis")
-            # Pred 特征图: 从重建渲染重算 (与 GT 同管线, 首通道)
-            vec_pd, rw = self.extractor.of_frame(f_pd, rw)
-            mx.eval(vec_pd)
-            lg_p = vec_pd[:ch].reshape(fshape)
-            axes[row, 3].imshow(lg_p, cmap="viridis")
-            pg = post[i].reshape(cb.N_KIND, cb.N_GX, cb.N_GY, cb.N_SIZE, cb.N_Z)
-            pgy = mx.exp(mx.logsumexp(pg, axis=(0, 3, 4)) - mx.logsumexp(pg))
-            axes[row, 4].imshow(pgy.T, cmap="hot", origin="lower")
-            for c in range(5):
-                axes[row, c].set_xticks([])
-                axes[row, c].set_yticks([])
-            ok = "✓" if pred_i[i] == gt_i[i] else "✗"
-            axes[row, 0].set_title(f"GT  code {cb.idx_to_code(gt_i[i])}")
-            axes[row, 2].set_title(f"Pred code {cb.idx_to_code(pred_i[i])} {ok}")
-        for c, name in enumerate(cols):
-            if n_show == 1:
-                axes[0, c].set_xlabel(name, fontsize=9)
-            else:
-                axes[0, c].set_title(name, fontsize=9)
-        fig.suptitle(
-            "inverse rendering: GT (cga 3D model) vs single-image reconstruction",
-            fontsize=12,
-        )
+        """4 目标 GT vs Pred 散点 (插值蓝/外推红) + 训练支撑集边界。"""
+        cb = Codebook
+        fig, axes = plt.subplots(2, 2, figsize=(9, 8))
+        rng = {"s": cb.S_RANGE + cb.S_EXTRA, "z": cb.Z_RANGE + cb.Z_EXTRA}
+        for j, ax in enumerate(axes.flat):
+            nm = TARGETS[j]
+            gi, pi = p_ti[:, j + 1], ti_pred[:, j]
+            ge, pe = p_te[:, j + 1], te_pred[:, j]
+            ax.scatter(gi, pi, s=8, alpha=0.6, label="interp")
+            ax.scatter(ge, pe, s=8, alpha=0.6, c="r", label="extrap")
+            lo = float(mx.min(mx.concatenate([gi, ge])))
+            hi = float(mx.max(mx.concatenate([gi, ge])))
+            ax.plot([lo, hi], [lo, hi], "k--", lw=0.8)
+            if nm in rng:
+                r = rng[nm]
+                for b in (r[0], r[1]):  # 训练支撑集边界 (横纵两向)
+                    ax.axvline(b, c="gray", ls=":", lw=0.8)
+                    ax.axhline(b, c="gray", ls=":", lw=0.8)
+            ax.set_xlabel(f"GT {nm}")
+            ax.set_ylabel(f"pred {nm}")
+            ax.legend(fontsize=8)
+        fig.suptitle("inverse rendering: continuous regression, interp vs extrap")
         fig.tight_layout()
         fig.savefig(out, dpi=110)
         plt.close(fig)
 
-    @staticmethod
-    def plot_metrics(acc: dict[str, float], base: dict[str, float], out: Path) -> None:
-        names = ["code", "kind", "gx", "gy", "size", "z"]
-        vals = [acc[n] for n in names]
-        fig, ax = plt.subplots(figsize=(7.5, 3.6))
-        bars = ax.bar(range(len(names)), vals, color="#4C72B0")
-        for b, v in zip(bars, vals, strict=True):
-            ax.text(
-                b.get_x() + b.get_width() / 2, v + 0.01, f"{v:.2f}",
-                ha="center", fontsize=9,
-            )
-        for j, (name, v) in enumerate(base.items(), start=len(names)):
-            ax.bar(j, v, color="#DD8452")
-            ax.text(j, v + 0.01, f"{v:.2f}", ha="center", fontsize=9)
-        ax.set_xticks(range(len(names) + len(base)))
-        ax.set_xticklabels(names + list(base.keys()))
-        ax.set_ylim(0, 1.05)
-        ax.set_ylabel("accuracy")
-        ax.axhline(1 / Codebook.N_CODES, color="gray", ls=":", lw=1)
-        ax.text(
-            len(names) + len(base) - 0.6, 1 / Codebook.N_CODES + 0.01,
-            "chance", fontsize=8, color="gray",
-        )
-        fig.tight_layout()
-        fig.savefig(out, dpi=110)
-        plt.close(fig)
-
-    def print_tree(self, net: SPN | CodeBayes, artifacts: Path) -> None:
-        """SPN 树结构文本可视化 (带语义列名) + 功能分工统计。"""
-        assert isinstance(net, SPN)
-        cb = self.codebook
-        labels = dict(enumerate(self.extractor.labels()))
-        labels.update(
-            dict(zip(self.cfg.code_cols, ("kind", "gx", "gy", "size", "z")))
-        )
-        code_names = {
-            self.cfg.code_cols[0]: dict(enumerate(cb.KINDS)),
-            self.cfg.code_cols[1]: {i: f"gx={i}" for i in range(cb.N_GX)},
-            self.cfg.code_cols[2]: {i: f"gy={i}" for i in range(cb.N_GY)},
-            self.cfg.code_cols[3]: {i: f"s={cb.SIZES[i]}" for i in range(cb.N_SIZE)},
-            self.cfg.code_cols[4]: {i: f"z={cb.Z0S[i]}" for i in range(cb.N_Z)},
-        }
-        txt = net.tree_str(labels, code_names)
-        print(txt)
-        (artifacts / "spn_tree.txt").write_text(txt)
-        # 功能分工: 统计各分裂轴 (哪个码维度被哪些 Sum 节点负责)
-        import re
-        from collections import Counter
-
-        axes = Counter(re.findall(r"分裂轴 (\w+):", txt))
-        axes.pop("码分布相近", None)
-        func_names = {
-            "kind": "形状辨识 (sphere/cylinder/box)",
-            "z": "深度估计 (近大远小, 单目线索)",
-            "gx": "横向定位",
-            "gy": "纵向定位",
-            "size": "尺寸估计",
-        }
-        print("\n── 功能分工 (Sum 节点数 × 职责) ──")
-        for ax, cnt in axes.most_common():
-            print(f"  {ax:<5} ×{cnt:>3}  → {func_names.get(ax, ax)}")
-        print("树结构 → artifacts/spn_tree.txt")
-
-    def run_test_light(
-        self, net: SPN | CodeBayes, mu: mx.array, sd: mx.array, n_test: int
+    def plot_recon(
+        self, p_gt: mx.array, t_pred: mx.array, kind_pred: mx.array, out: Path
     ) -> None:
-        """光照变化评估: 池外顶光重渲染测试码 → 特征 → 后验。
-        对比同一模型在正常光照下的准确率, 检验鲁棒性。"""
-        cfg = dataclasses.replace(self.cfg, test_light=True)
-        cb2 = Codebook(cfg)
-        extractor2 = FeatureExtractor(cfg)
-        cb = self.codebook
-        te = mx.random.randint(
-            0, cb.N_CODES, shape=(n_test,), key=mx.random.key(99)
-        ).tolist()
+        """3 个插值样本: GT 渲染 vs 预测参数重建渲染 (闭环 sanity)。"""
         renderer, cam = Codebook.make_renderer()
-        rw: RieszWavelet | None = None
-        feats = []
-        for i in te:
-            scene = cb2.to_scene(cb.idx_to_code(i))
-            vec, rw = extractor2.of_frame(renderer.render(scene, cam), rw)
-            mx.eval(vec)
-            feats.append(vec)
-        x_te = (mx.stack(feats) - mu) / sd
-        codes = cb.all_codes()
-        parts = []
-        for i in range(0, n_test, 8):
-            p = net.posterior(x_te[i : i + 8], codes)
-            mx.eval(p)
-            parts.append(p)
-        post = mx.concatenate(parts)
-        pred = mx.argmax(post, axis=1).tolist()
-        gt = [cb.code_to_idx(cb.idx_to_code(i)) for i in te]
-        acc = Evaluator.evaluate(pred, gt)
-        print(
-            f"  光照变化测试: 码 {acc['code']:.3f}  kind {acc['kind']:.3f}  "
-            f"gx {acc['gx']:.3f}  gy {acc['gy']:.3f}  size {acc['size']:.3f}  "
-            f"z {acc['z']:.3f}"
-        )
-        if self.cfg.multi_light:
-            # 多光照增广应显著优于单光照的池外泛化 (单光照实测 0.080)
-            assert acc["code"] > 0.15, f"多光照池外泛化不足 {acc['code']:.3f}"
-        print("inverse: 光照鲁棒性评估 ✓")
-
-    # ── 自检断言 (阈值按 2026-08-11/12 实测标定, 留安全余量) ─────────
-
-    def self_check(self, acc: dict[str, float]) -> None:
-        cfg = self.cfg
-        if cfg.model == "nb":
-            if not cfg.equal_luma and not cfg.multi_light:
-                # nb 标定 (2026-08-12): 全量 ≈0.96 (模板上限, fullres 实测);
-                # quick N=600 实测 0.287 (码覆盖率上限 1−e^{−0.52}≈0.41 打头)
-                if cfg.quick:
-                    assert acc["code"] > 0.25, (
-                        f"quick nb: 码准确率过低 {acc['code']:.3f}"
-                    )
-                else:
-                    assert acc["code"] > 0.90, f"nb: 码准确率过低 {acc['code']:.3f}"
-                    assert acc["kind"] > 0.93, f"nb: kind 过低 {acc['kind']:.3f}"
-                print("inverse: nb 自检 ✓")
-            else:
-                print("inverse: nb 消融模式 (断言按 spn 标定, 跳过)")
-            return
-        if cfg.equal_luma:
-            # 等亮度: L 通路失效 (噪声淹没), 复数色相通路补位 (对照实验)
-            assert acc["code"] > 0.30, (
-                f"等亮度下色度通路应补位, 实测 {acc['code']:.3f}"
+        n = p_gt.shape[0]
+        picks = [0, n // 2, n - 1]
+        fig, axes = plt.subplots(len(picks), 2, figsize=(5, 2.6 * len(picks)))
+        for row, i in enumerate(picks):
+            gt = p_gt[i].tolist()
+            pd = [float(kind_pred[i])] + t_pred[i].tolist()
+            for col, prm in enumerate((gt, pd)):
+                img = renderer.render(self.codebook.to_scene(prm), cam)
+                axes[row, col].imshow(img[..., :3].astype(mx.int32))
+                axes[row, col].set_xticks([])
+                axes[row, col].set_yticks([])
+            axes[row, 0].set_ylabel(
+                f"u{gt[1]:.0f} v{gt[2]:.0f} s{gt[3]:.2f} z{gt[4]:.2f}", fontsize=8
             )
-            print("inverse: 等亮度消融自检 ✓ (色度补位)")
-            return
-        if cfg.multi_light:
-            # 多光照模式实测: 正常 0.360 (5 光照分摊样本) / 池外 0.265
-            assert acc["code"] > 0.30, f"多光照: 码准确率过低 {acc['code']:.3f}"
-            assert acc["kind"] > 0.70, f"多光照: kind 过低 {acc['kind']:.3f}"
-            assert acc["gx"] > 0.85, f"多光照: gx 过低 {acc['gx']:.3f}"
-            assert acc["z"] > 0.50, f"多光照: z 过低 {acc['z']:.3f}"
-        elif cfg.quick:
-            # quick N=600/min_n=8 实测: code 0.025 kind 0.40 gx 0.55
-            # gy 0.64 size 0.55 z 0.35
-            assert acc["code"] > 0.02, f"quick: 码准确率过低 {acc['code']:.3f}"
-            assert acc["kind"] > 0.30, f"quick: kind 过低 {acc['kind']:.3f}"
-            assert acc["gx"] > 0.35, f"quick: gx 过低 {acc['gx']:.3f}"
-            assert acc["gy"] > 0.50, f"quick: gy 过低 {acc['gy']:.3f}"
-            assert acc["size"] > 0.45, f"quick: size 过低 {acc['size']:.3f}"
-            assert acc["z"] > 0.30, f"quick: z 过低 {acc['z']:.3f}"
-        else:
-            # 全量 N=4000/min_n=3 实测 (码空间 1152): code 0.470 kind 0.835
-            # gx 0.895 gy 0.855 size 0.885 z 0.735; template 0.965
-            assert acc["code"] > 0.40, f"码准确率过低 {acc['code']:.3f}"
-            assert acc["kind"] > 0.78, f"kind 过低 {acc['kind']:.3f}"
-            assert acc["gx"] > 0.85, f"gx 过低 {acc['gx']:.3f}"
-            assert acc["gy"] > 0.80, f"gy 过低 {acc['gy']:.3f}"
-            assert acc["size"] > 0.83, f"size 过低 {acc['size']:.3f}"
-            assert acc["z"] > 0.68, f"z 过低 {acc['z']:.3f}"
-        print("inverse: 自检 ✓")
+        axes[0, 0].set_title("GT render")
+        axes[0, 1].set_title("Pred recon")
+        fig.tight_layout()
+        fig.savefig(out, dpi=110)
+        plt.close(fig)
 
+    # ── 自检断言 (阈值依据见各注释; 2026-08-12 全量运行标定) ────────
+
+    def self_check(self, mi: dict[str, float], me: dict[str, float]) -> None:
+        cfg = self.cfg
+        if cfg.equal_luma:
+            # 等亮度: lum 通道变纯噪声, 白化把噪声维放大到单位方差 →
+            # 信号被稀释。实测 quick 上限: 原始色度 1-NN 0.91 / 白化全维
+            # 0.81 / 模型 0.73 (平铺稀疏再损)。阈值 0.65 只防机制崩溃
+            assert mi["kind"] > 0.65, f"等亮度 kind 过低 {mi['kind']:.3f}"
+            print("inverse: 等亮度消融自检 ✓ (kind 色度补位, 回归报告制)")
+            return
+        # 色度绑定 kind → 强线索 (白化 1-NN 上限 0.94); 混合平铺有容量
+        # 损失。阈值 0.75: 2026-08-12 实测 quick 0.87, 留余量;
+        # 低于此 = 机制破坏 (历史病理值 0.47, 见 mixture_spn 白化注释)
+        assert mi["kind"] > 0.75, f"kind 准确率过低 {mi['kind']:.3f}"
+        # 插值位置回归须优于旧离散网格的半档宽 9px (旧网格曾以高准确率
+        # 识别位置; 连续模型连量化误差都打不过则机制失效)。
+        # 实测: quick 8.0/6.7, 全量 6.5/6.3
+        assert mi["u_rmse"] < 9.0, f"插值 u RMSE {mi['u_rmse']:.2f}px"
+        assert mi["v_rmse"] < 9.0, f"插值 v RMSE {mi['v_rmse']:.2f}px"
+        # s/z: 单目单帧仅乘积可观测 (熟悉尺寸歧义), R²>0 的部分来自
+        # 边界线索 (大 s 压缩位置边距)。阈值只防机制崩溃:
+        # 实测 s R² quick 0.17/全量 0.19, z R² quick 0.29/全量 0.41
+        assert mi["s_r2"] > 0.1, f"插值 s R² {mi['s_r2']:.3f}"
+        assert mi["z_r2"] > 0.2, f"插值 z R² {mi['z_r2']:.3f}"
+        # 外推报告制: 核回归边界饱和不完美 (预测漂移, s/z R² 可为负,
+        # 2026-08-12 实测) —— 核机器边界行为的已知上限; 升级路径
+        # mixture of linear experts, 见架构文档
+        print("inverse: 自检 ✓ (外推为报告制, 见 self_check 注释)")
+
+    # ── CLI ─────────────────────────────────────────────────────────
 
     @staticmethod
     def parse_args() -> InverseConfig:
         """CLI → InverseConfig (一切开关的唯一家)。"""
         ap = argparse.ArgumentParser()
-        ap.add_argument(
-            "--model",
-            default="nb",
-            choices=("nb", "spn"),
-            help="模型: nb=全分辨率逐码贝叶斯 (默认, 精确可增量, 码簿任务最优); "
-            "spn=池化+结构学习 (组合泛化/消融研究对照)",
-        )
         ap.add_argument("--quick", action="store_true", help="小数据集自检模式")
         ap.add_argument("--no-cache", action="store_true", help="跳过数据缓存读写")
         ap.add_argument(
             "--model-path",
             default=None,
-            help="模型存取路径 (safetensors); 存在则加载跳过学习, 否则训练后保存",
+            help="模型存取路径 (safetensors); 存在则加载跳过 EM, 否则训练后保存",
         )
         ap.add_argument(
-            "--tree",
-            action="store_true",
-            help="打印 SPN 树结构 (带语义列名) 并存 artifacts/spn_tree.txt",
+            "--components", type=int, default=64, help="混合分量数 K (默认 64)"
         )
+        ap.add_argument("--em-iters", type=int, default=20, help="EM 最大轮数")
         ap.add_argument(
-            "--min-n",
-            type=int,
-            default=None,
-            help="叶最小行数 (spn 结构复杂度先验); 缺省 quick=8 / 全量=3",
+            "--sigma-rel-floor",
+            type=float,
+            default=1e-2,
+            help="σ 带宽下限 (各维全局 std 的相对比例): 核回归带宽, "
+            "插值平滑度旋钮",
         )
         ap.add_argument(
             "--equal-luma",
             action="store_true",
-            help="等亮度模式: 三色与背景同为亮度 0.10 且无明暗 → L 通路失效, "
-            "展示 HS 补位 (断言: l 应失效, lhs 应补位)",
+            help="等亮度消融: 三色与背景同亮度且无明暗 → L 通路失效, 色度补位",
         )
         ap.add_argument(
-            "--sigma-floor",
-            type=float,
-            default=1e-6,
-            help="高斯叶 σ 下限 (spn, 平滑性先验 prior.md)",
-        )
-        ap.add_argument(
-            "--occlusion",
-            action="store_true",
-            help="遮挡场景: 固定黄色竖柱 + 序数先验 (--prior occlusion 注入,"
-            "黄柱被遮 ⟹ 主图元在前)",
-        )
-        ap.add_argument(
-            "--sequence",
-            type=int,
-            default=0,
-            help="多帧运动先验: 每序列帧数 (>0 启用), gx/gy 随机游走,"
-            "时序平滑注入上一帧转移先验",
-        )
-        ap.add_argument(
-            "--test-light",
-            action="store_true",
-            help="光照鲁棒性评估: 测试集换光照方向 (需 --model-path), 检验 "
-            "Riesz gain_control 归一化 vs 原始 RGB",
+            "--occlusion", action="store_true", help="遮挡场景: 固定黄色竖柱"
         )
         ap.add_argument(
             "--multi-light",
             action="store_true",
-            help="多光照训练: 5 方向池轮流渲染 (数据增广 → 光照不变); "
-            "配合 --test-light 用池外顶光验证泛化",
+            help="多光照训练: 5 方向池轮流渲染 (数据增广 → 光照不变)",
         )
         ap.add_argument(
-            "--prior",
-            default="flat",
-            help="推理时注入的码先验 (贝叶斯 P(S)), 逗号组合如 'edge,familiar': "
-            "flat=均匀, edge=一般视角(不贴边), familiar=熟悉尺寸(size 偏态), "
-            "occlusion=遮挡序数 (需 --occlusion)",
+            "--test-light",
+            action="store_true",
+            help="追加池外顶光评估 (同一组插值参数换光照重渲染)",
         )
         a = ap.parse_args()
         return InverseConfig(
-            model=a.model,
             quick=a.quick,
             use_cache=not a.no_cache,
             model_path=Path(a.model_path) if a.model_path else None,
-            tree=a.tree,
-            prior_name=a.prior,
-            min_n=a.min_n,
-            sigma_floor=a.sigma_floor,
+            k_components=a.components,
+            em_iters=a.em_iters,
+            sigma_rel_floor=a.sigma_rel_floor,
             equal_luma=a.equal_luma,
             occlusion=a.occlusion,
-            sequence=a.sequence,
-            test_light=a.test_light,
             multi_light=a.multi_light,
+            test_light=a.test_light,
         )

@@ -1,4 +1,4 @@
-"""FeatureExtractor: 渲染帧 → 特征向量 (池化或全分辨率) + 特征配置。"""
+"""FeatureExtractor: 渲染帧 → 全分辨率特征向量 + 特征配置。"""
 
 from __future__ import annotations
 
@@ -7,7 +7,6 @@ from typing import TYPE_CHECKING, ClassVar
 
 import mlx.core as mx
 
-from codebook import Codebook
 from riesz import RieszWavelet
 
 if TYPE_CHECKING:
@@ -15,18 +14,32 @@ if TYPE_CHECKING:
 
 
 class FeatureExtractor:
-    """渲染帧 → 特征向量 (池化 8×6 块均值或全分辨率, 由 cfg.full_res)。
+    """渲染帧 → 全分辨率特征向量 (9 × H × W)。
+
+    池化已随离散码网格一起退役: 块均值会擦除块内位置信息, 而那是
+    连续回归要的信号。
 
     特征配置 (唯一, L+复数色相双通路): (图像源, Riesz 通道) 列表。
     色度走复数色相 S·e^{i2πH} 的实/虚两个源图 —— H 是环形量, 直接滤波
     H 图会在 0/1 切口产生假边缘 (环绕瑕疵), 复数表示无切口。
+
+    色度源关 gain_control: 色相信息 = chr_re/chr_im 的边缘幅度比,
+    对比度归一化 (Retinex 式局部除能) 会把它抹平 —— kind 就不可辨。
+    代价是色度通道不光照不变; 亮度源保留归一化 (抗光照)。色相辨识
+    与对比度不变性不可兼得, 这是固有的信息出口选择。
+
+    另加两个原始 (未滤波) 色度通道: Riesz 特征是能量量, 符号盲
+    (chr_im 差一个负号的两个色相, 能量特征全同 —— 等亮度绿/蓝
+    实测不可分); 拮抗色信号的符号 = 色相身份, 必须有个带符号的
+    信息出口 (生理上拮抗通道本就是有符号的)。
     """
 
     FEAT: ClassVar[tuple] = (
         ("lum", "log_mag"), ("lum", "phase_coh"), ("lum", "ori_R"),
         ("chr_re", "log_mag"), ("chr_re", "phase_coh"), ("chr_re", "ori_R"),
         ("chr_im", "log_mag"), ("chr_im", "phase_coh"), ("chr_im", "ori_R"),
-    )  # 3 源 × 3 通道 = 9
+        ("chr_re", "raw"), ("chr_im", "raw"),
+    )  # 3 源 × 3 Riesz 通道 + 2 原始色度 = 11
 
     def __init__(self, cfg: InverseConfig):
         self.cfg = cfg
@@ -67,35 +80,17 @@ class FeatureExtractor:
         ang = h * (2.0 * math.pi)
         return s * mx.cos(ang), s * mx.sin(ang)
 
-    @staticmethod
-    def block_pool(fm: mx.array) -> mx.array:
-        """(H,W) → (N_GY, N_GX) 块均值 (与场景网格对齐)。"""
-        cb = Codebook
-        return fm.reshape(cb.N_GY, cb.H // cb.N_GY, cb.N_GX, cb.W // cb.N_GX).mean(
-            axis=(1, 3)
-        )
-
-    def labels(self) -> list[str]:
-        """特征列语义名: 源:通道@(gx,gy), 与池化列序一致 (源-通道主序)。"""
-        cb = Codebook
-        return [
-            f"{src}:{ch}@({gx},{gy})"
-            for src, ch in self.cfg.feat_spec
-            for gy in range(cb.N_GY)
-            for gx in range(cb.N_GX)
-        ]
-
     def of_frame(
         self, frame: mx.array, rw: RieszWavelet | None
     ) -> tuple[mx.array, RieszWavelet | None]:
-        """渲染帧 → 特征向量 (n_feat,)。单 RieszWavelet 实例顺序 update
-        (核只建一次); full_res 时不池化 (nb 模型)。"""
+        """渲染帧 → 全分辨率特征向量 (n_feat,)。单 RieszWavelet 实例
+        顺序 update (核只建一次)。"""
         cfg = self.cfg
         lum = self.frame_lum(frame)
         chr_re, chr_im = self.frame_chroma(frame)
         if cfg.equal_luma:
             # 传感器噪声底: 等亮度残差对比 (~0.6 灰度级) 在真实相机被
-            # 噪声淹没 → L 通路失效; 色度轮廓不受影响 → HS 补位
+            # 噪声淹没 → L 通路失效; 色度轮廓不受影响 → 色度补位
             # (无 key = 全局 RNG, 每帧新噪声; 复现性由数据缓存保证)
             lum = lum + mx.random.normal(shape=lum.shape, scale=0.02)
         imgs = {"lum": lum, "chr_re": chr_re, "chr_im": chr_im}
@@ -103,27 +98,11 @@ class FeatureExtractor:
             rw = RieszWavelet(lum)
         parts = []
         for src, ch in cfg.feat_spec:
+            if ch == "raw":  # 原始源图 (带符号色度, 不过 Riesz)
+                parts.append(imgs[src].reshape(-1))
+                continue
             rw.update(imgs[src])
-            m = getattr(rw.features(), ch)
-            parts.append(
-                m.reshape(-1) if cfg.full_res else self.block_pool(m).reshape(-1)
-            )
+            gc = src == "lum"  # 色度关 gain_control (保色相幅度), 见类 docstring
+            m = getattr(rw.features(gain_control=gc), ch)
+            parts.append(m.reshape(-1))
         return mx.concatenate(parts), rw
-
-    def of_frame_pair(
-        self, frame: mx.array, rw: RieszWavelet | None
-    ) -> tuple[mx.array, mx.array, RieszWavelet | None]:
-        """→ (全分辨率向量, 池化向量, rw): 一次 Riesz 双分辨率输出,
-        实验双臂 (全分辨率模型 + 池化 SPN) 共用 —— 机制单家。"""
-        lum = self.frame_lum(frame)
-        chr_re, chr_im = self.frame_chroma(frame)
-        imgs = {"lum": lum, "chr_re": chr_re, "chr_im": chr_im}
-        if rw is None:
-            rw = RieszWavelet(lum)
-        full, pooled = [], []
-        for src, ch in self.cfg.feat_spec:
-            rw.update(imgs[src])
-            m = getattr(rw.features(), ch)
-            full.append(m.reshape(-1))
-            pooled.append(self.block_pool(m).reshape(-1))
-        return mx.concatenate(full), mx.concatenate(pooled), rw
