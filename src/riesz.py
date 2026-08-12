@@ -39,7 +39,7 @@ from utils import Utils
 #        ② 相干特征扣白噪底线 (coherence_floor 类级缓存标定)
 #        ▼
 #     FeatureMaps (11 张 (H,W) + log_e (H,W,S), 不可变)
-#        → demo_inverse.features_of_frame() 选通道块池化 (SPN 逆渲染)
+#        → feature_extractor.FeatureExtractor.of_frame 选通道组装 (逆渲染)
 
 @dataclass(slots=True)
 class RieszWavelet:
@@ -216,7 +216,7 @@ class RieszWavelet:
 
         返回 FeatureMaps (NamedTuple, 不可变): 以上 11 张 (H,W) 特征图
         + log_e (H,W,S)。不预组特征矩阵 —— 选哪几列、什么顺序是下游
-        的事 (demo_inverse 按 feat_spec 选通道块池化)。核能量 k2/n_freq
+        的事 (inverse 按 feat_spec 选通道块池化)。核能量 k2/n_freq
         初始化时已缓存, x/xc 等 S 维小量每帧重算但开销可忽略。
         """
         e = mx.stack([s.energy for s in self.scales], axis=-1)  # (H,W,S)

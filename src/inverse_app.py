@@ -1,4 +1,4 @@
-"""DemoApp: 逆渲染 demo 主流程 (训练/推理/评估/可视化/自检) + CLI。"""
+"""InverseApp: 逆渲染 demo 主流程 (训练/推理/评估/可视化/自检) + CLI。"""
 
 from __future__ import annotations
 
@@ -15,9 +15,9 @@ import mlx.core as mx
 from code_bayes import CodeBayes
 from codebook import Codebook
 from data_builder import DataBuilder
-from demo_config import DemoConfig
 from evaluator import Evaluator
 from feature_extractor import FeatureExtractor
+from inverse_config import InverseConfig
 from priors import Priors
 from riesz import RieszWavelet
 from sequence_runner import SequenceRunner
@@ -25,10 +25,10 @@ from spn import SPN
 from spn_learner import SPNLearner
 
 
-class DemoApp:
+class InverseApp:
     """主流程: 数据 → 训练/加载 → 推理 → 评估 → 可视化 → 自检。"""
 
-    def __init__(self, cfg: DemoConfig):
+    def __init__(self, cfg: InverseConfig):
         self.cfg = cfg
         self.codebook = Codebook(cfg)
         self.extractor = FeatureExtractor(cfg)
@@ -346,7 +346,7 @@ class DemoApp:
         if self.cfg.multi_light:
             # 多光照增广应显著优于单光照的池外泛化 (单光照实测 0.080)
             assert acc["code"] > 0.15, f"多光照池外泛化不足 {acc['code']:.3f}"
-        print("demo_inverse: 光照鲁棒性评估 ✓")
+        print("inverse: 光照鲁棒性评估 ✓")
 
     # ── 自检断言 (阈值按 2026-08-11/12 实测标定, 留安全余量) ─────────
 
@@ -363,9 +363,9 @@ class DemoApp:
                 else:
                     assert acc["code"] > 0.90, f"nb: 码准确率过低 {acc['code']:.3f}"
                     assert acc["kind"] > 0.93, f"nb: kind 过低 {acc['kind']:.3f}"
-                print("demo_inverse: nb 自检 ✓")
+                print("inverse: nb 自检 ✓")
             else:
-                print("demo_inverse: nb 消融模式 (断言按 spn 标定, 跳过)")
+                print("inverse: nb 消融模式 (断言按 spn 标定, 跳过)")
             return
         if cfg.equal_luma:
             # 等亮度消融断言: 亮度通路失效 / 色度通路补位 (对照实验)
@@ -377,7 +377,7 @@ class DemoApp:
                 assert acc["code"] > 0.30, (
                     f"等亮度下 HS 应补位, 实测 {acc['code']:.3f}"
                 )
-            print("demo_inverse: 等亮度消融自检 ✓ (L 失效 / HS 补位)")
+            print("inverse: 等亮度消融自检 ✓ (L 失效 / HS 补位)")
             return
         if cfg.multi_light:
             # 多光照模式实测: 正常 0.360 (5 光照分摊样本) / 池外 0.265
@@ -403,12 +403,12 @@ class DemoApp:
             assert acc["gy"] > 0.80, f"gy 过低 {acc['gy']:.3f}"
             assert acc["size"] > 0.83, f"size 过低 {acc['size']:.3f}"
             assert acc["z"] > 0.68, f"z 过低 {acc['z']:.3f}"
-        print("demo_inverse: 自检 ✓")
+        print("inverse: 自检 ✓")
 
 
     @staticmethod
-    def parse_args() -> DemoConfig:
-        """CLI → DemoConfig (一切开关的唯一家)。"""
+    def parse_args() -> InverseConfig:
+        """CLI → InverseConfig (一切开关的唯一家)。"""
         ap = argparse.ArgumentParser()
         ap.add_argument(
             "--model",
@@ -487,7 +487,7 @@ class DemoApp:
             "occlusion=遮挡序数 (需 --occlusion)",
         )
         a = ap.parse_args()
-        return DemoConfig(
+        return InverseConfig(
             model=a.model,
             feat=a.feat,
             quick=a.quick,

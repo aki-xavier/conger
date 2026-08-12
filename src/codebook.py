@@ -22,7 +22,7 @@ from cga.engine import (
 )
 
 if TYPE_CHECKING:
-    from demo_config import DemoConfig
+    from inverse_config import InverseConfig
 
 
 class Codebook:
@@ -62,7 +62,7 @@ class Codebook:
     OCC_Z = 3.5
     OCC_COLOR = 0xF1C40F
 
-    def __init__(self, cfg: DemoConfig):
+    def __init__(self, cfg: InverseConfig):
         self.cfg = cfg
 
     @staticmethod

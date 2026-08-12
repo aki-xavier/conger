@@ -8,14 +8,14 @@ import mlx.core as mx
 from cga.engine import AmbientLight, Color, DirectionalLight, Scene
 
 from codebook import Codebook
-from demo_config import DemoConfig
 from feature_extractor import FeatureExtractor
+from inverse_config import InverseConfig
 
 
 class Priors:
     """码先验工厂 (外部知识注入, 对应 docs/prior.md 先验体系)。"""
 
-    def __init__(self, cfg: DemoConfig, codebook: Codebook):
+    def __init__(self, cfg: InverseConfig, codebook: Codebook):
         self.cfg = cfg
         self.codebook = codebook
 

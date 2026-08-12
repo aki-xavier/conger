@@ -34,8 +34,8 @@ from cga.engine import (
 
 from code_bayes import CodeBayes
 from codebook import Codebook
-from demo_config import DemoConfig
 from feature_extractor import FeatureExtractor
+from inverse_config import InverseConfig
 from riesz import RieszWavelet
 from spn_learner import SPNLearner
 
@@ -50,7 +50,7 @@ class JointExperiment:
     SPLIT_SEED = 123  # 码族划分种子 (与 experiment_fullres 一致)
 
     def __init__(self):
-        self.cfg = DemoConfig()
+        self.cfg = InverseConfig()
         self.codebook = Codebook(self.cfg)
         cb = Codebook
         # 码族划分与 experiment_fullres 同种子 (90% 训 / 10% 保留)
@@ -186,7 +186,7 @@ class JointExperiment:
         spn = SPNLearner(disc_cols=set(card), card=card, min_n=3, max_depth=14).learn(
             xj
         )
-        print(f"phase1: 快轨 fit + 慢轨 learn_spn ({time.monotonic()-t0:.0f}s)")
+        print(f"phase1: 快轨 fit + 慢轨 SPNLearner ({time.monotonic()-t0:.0f}s)")
 
         def spn_pred(xp_row: mx.array) -> tuple[int, ...]:
             """慢轨变量级回答: 池化特征 → SPN 后验 argmax 码元组。"""

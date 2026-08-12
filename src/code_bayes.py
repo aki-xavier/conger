@@ -21,7 +21,7 @@
     跨码共享结构更鲁棒。
 
 契约: posterior(feats, codes, log_prior) 与 spn.SPN.posterior 一致
-(demo_inverse 的先验注入/运动序列滤波/遮挡先验零改动复用)。
+(inverse 的先验注入/运动序列滤波/遮挡先验零改动复用)。
 
 本文件自检: `python src/code_bayes.py`。
 """
@@ -313,7 +313,7 @@ if __name__ == "__main__":
     assert abs(float(mx.sum(mx.exp(p4))) - 4.0) < 1e-4, "先验注入后未归一"
     print("  ok  先验注入: 行归一成立 (SPN 契约)")
 
-    # 7) 序列化 roundtrip (safetensors): save → load → 逐位一致
+    # 5) 序列化 roundtrip (safetensors): save → load → 逐位一致
     import os
     import tempfile
 
@@ -331,7 +331,7 @@ if __name__ == "__main__":
         os.unlink(tmp)
     print("  ok  序列化: safetensors roundtrip 逐位一致, extra 随存")
 
-    # 5) 提升交接: grow + absorb_stats ≡ 直接 absorb 行 (换基恒等式)
+    # 6) 提升交接: grow + absorb_stats ≡ 直接 absorb 行 (换基恒等式)
     m4 = CodeBayes.fit(X[:200], lab[:200], cards=(2,))
     idx = m4.grow()
     c1 = X[200]  # 类 1 首行作基准
@@ -348,7 +348,7 @@ if __name__ == "__main__":
     assert d5 < 0.1, f"统计直吸 ≠ 行吸收: {d5}"
     print(f"  ok  提升交接: absorb_stats ≡ absorb (|Δpost| = {d5:.2e})")
 
-    # 6) 门控: 已知行判旧, 全新类 (平移 +8) 判新
+    # 7) 门控: 已知行判旧, 全新类 (平移 +8) 判新
     _, nov_known = m1.gate(X[:50])
     _, nov_new = m1.gate(X[200:250] + 8.0)
     assert not bool(mx.any(nov_known)), "已知行误判新"

@@ -10,7 +10,7 @@ from codebook import Codebook
 from riesz import RieszWavelet
 
 if TYPE_CHECKING:
-    from demo_config import DemoConfig
+    from inverse_config import InverseConfig
 
 
 class FeatureExtractor:
@@ -30,7 +30,7 @@ class FeatureExtractor:
     # RGB 原始数据对照 (块均值, 光照敏感)
     FEAT_RGB: ClassVar[tuple] = (("rgb", "r"), ("rgb", "g"), ("rgb", "b"))
 
-    def __init__(self, cfg: DemoConfig):
+    def __init__(self, cfg: InverseConfig):
         self.cfg = cfg
 
     @staticmethod

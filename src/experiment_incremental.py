@@ -3,7 +3,7 @@
 增量算法 (OnlineSPN, 见 spn.py):
   批 1 SPNLearner 建树 → 每批样本按叶后验 (路径先验 × 叶似然) 软分配
   → 叶统计 (n/μ/M2 中心矩, 码联合计数) 与 Sum 计数永久累加
-  (同结构同数据下 = 批量 MLE, spn.py 自检 6 验证)
+  (同结构同数据下 = 批量 MLE, spn_selftest 自检 6 验证)
   → 叶码计数过显著性下限 → 码空间加权 k-means 分裂
   (子叶继承父叶高斯先验 + 当批行按码分组播种, 软路由自校正分组错误)。
 
@@ -35,9 +35,9 @@ import mlx.core as mx
 
 from codebook import Codebook
 from data_builder import DataBuilder
-from demo_config import DemoConfig
 from evaluator import Evaluator
 from feature_extractor import FeatureExtractor
+from inverse_config import InverseConfig
 from online_spn import OnlineSPN
 from spn_learner import SPNLearner
 
@@ -51,7 +51,7 @@ class IncrementalExperiment:
     def __init__(self, rev_cap: int = 0, rev_at: frozenset[int] = frozenset()):
         self.rev_cap = rev_cap  # reservoir 容量 (0 = 不跑修订臂)
         self.rev_at = rev_at  # 在哪些批后修订 (空 = 每批)
-        self.cfg = DemoConfig(model="spn")  # 池化特征 (结构学习需要低维)
+        self.cfg = InverseConfig(model="spn")  # 池化特征 (结构学习需要低维)
         self.codebook = Codebook(self.cfg)
         self.data = DataBuilder(
             self.cfg, self.codebook, FeatureExtractor(self.cfg)
@@ -154,7 +154,7 @@ class IncrementalExperiment:
         pred = mx.argmax(post, axis=1).tolist()
         return Evaluator.evaluate(pred, self.gt_i)["code"]
 
-    # ── ⑤ 周期全局修订臂 (reservoir + learn_spn 重构 + 重吸收) ──────
+    # ── ⑤ 周期全局修订臂 (reservoir + SPNLearner 重构 + 重吸收) ──────
 
     def run_revision(
         self, x_tr: mx.array, c_tr: mx.array, acc_inc: float, acc_full: float

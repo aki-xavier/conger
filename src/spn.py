@@ -17,7 +17,7 @@
 对离散列全枚举, 求 log-softmax 后验 —— 这是 SPN 相对贝叶斯网络/
 GMM 的卖点: 边缘化天然可求和, 无推理 NP 问题。
 
-契约 (demo_app.py 消费):
+契约 (inverse_app.py 消费):
     X 列布局 = [连续特征列 | 离散码列]; disc_cols = 离散列下标集合;
     card[col] = 离散列基数 (缺省从数据取 max+1)。
     spn.posterior(feats, codes): feats (M, Vf) 连续观测, codes (K, C)

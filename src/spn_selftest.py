@@ -18,7 +18,7 @@ from spn_learner import SPNLearner
 
 
 class SelfTest:
-    """spn.py 自检 (python src/spn.py): 7 组。"""
+    """spn 自检 (python src/spn_selftest.py): 7 组。"""
 
     @staticmethod
     def run() -> None:
@@ -92,7 +92,7 @@ class SelfTest:
             os.unlink(tmp)
         print("  ok  序列化: save → load → eval 一致, extra 随存")
 
-        # 6) 在线参数等价: 同结构同数据, OnlineSPN 吸收 ≈ learn_spn MLE
+        # 6) 在线参数等价: 同结构同数据, OnlineSPN 吸收 ≈ SPNLearner 批量 MLE
         on = OnlineSPN(spn3.root, n_vars=2, code_cols=(1,), cards=(2,))
         x6 = mx.stack([f, lab], axis=1)
         on.absorb(x6, grow=False)
@@ -119,4 +119,4 @@ class SelfTest:
 
 if __name__ == "__main__":
     SelfTest.run()
-    print("spn.py: 7 组自检 ✓")
+    print("spn_selftest: 7 组自检 ✓")

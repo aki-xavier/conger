@@ -32,9 +32,9 @@ import mlx.core as mx
 
 from code_bayes import CodeBayes
 from codebook import Codebook
-from demo_config import DemoConfig
 from evaluator import Evaluator
 from feature_extractor import FeatureExtractor
+from inverse_config import InverseConfig
 from riesz import RieszWavelet
 from spn_learner import SPNLearner
 
@@ -48,8 +48,7 @@ class FullresExperiment:
 
     def __init__(self, k: int = 64):
         self.k = k
-        self.cfg = DemoConfig()  # 默认配置 (仅用其常量与管线件)
-        self.codebook = Codebook(self.cfg)
+        self.codebook = Codebook(InverseConfig())  # 默认配置 (仅用常量与管线)
         # 码族保留: 10% 码整族不训 (泛化探针)
         cb = Codebook
         perm = mx.random.permutation(

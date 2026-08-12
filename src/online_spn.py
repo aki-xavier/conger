@@ -25,15 +25,16 @@ class OnlineSPN:
     与批量的理论关系:
       * 参数层精确 —— 叶 (n,μ,M2 中心矩, Chan 合并) / 码联合计数 /
         Sum 计数全是可加充分统计量, 同结构同数据下在线 = 批量 MLE
-        (自检 6 验证);
+        (spn_selftest 自检 6 验证);
       * 软路由 —— 每行按叶后验 (路径先验 × 叶似然) 分配 responsibility,
         EM 语义: 分组/分裂错误被后续数据自校正, 无硬路由反馈环;
-      * 延迟生长 —— 码计数达 N_SPLIT 才分裂 (分组稳定性), 检查点按计数
-        翻倍 (VFDT grace period 对应物); 子叶继承父叶高斯参数作伪计数
-        先验, 抗早承诺过拟合。
+      * 延迟生长 —— 每批检查, 码计数达 N_SPLIT 才分裂; 码分裂语义上
+        无统计风险 (查询变量驱动: 不同码本来不同分量), 无需 VFDT 式
+        高阈值/翻倍节流 (套错对象会压死生长, 实测); 子叶继承父叶
+        高斯参数作伪计数先验 + 当批行按码分组播种, 抗早承诺过拟合。
     边界 (scope 一致性使在线不可局部执行, 留给周期全局修订):
       Product (变量独立) 分裂改 scope; 特征驱动 Sum 分裂需行级 k-means。
-    契约: 所有 CatLeaf 属于 code_cols (查询变量驱动设定, 见 demo_inverse)。
+    契约: 所有 CatLeaf 属于 code_cols (查询变量驱动设定, 见 inverse_app)。
     """
 
     N_SPLIT: ClassVar[float] = 1.0  # 码计数下限: 码分裂语义上无风险
@@ -120,7 +121,7 @@ class OnlineSPN:
 
     def absorb(self, X: mx.array, grow: bool = True) -> None:
         """吸收一批样本 (含码列的全列布局): 软分配 → 统计累加 → 参数刷新
-        → 显著性生长。X (B, V) 列布局与 learn_spn 输入一致。"""
+        → 显著性生长。X (B, V) 列布局与 SPNLearner.learn 输入一致。"""
         cidx = self.code_index(X)
         leaves = self.root.leaf_blocks()
         pis = self.path_logpi()
@@ -227,7 +228,7 @@ class OnlineSPN:
         cidx: mx.array,
         rmap: dict[tuple[int, ...], mx.array],
     ) -> None:
-        """显著性延迟生长: 计数翻倍检查点, 码支撑 ≥2 → 码空间加权分裂。
+        """显著性延迟生长: 每批检查 (计数有新质量才查), 码支撑 ≥2 → 分裂。
         子叶高斯用本批行按码分组当即播种 (伪先验 + 组内加权统计),
         避免分裂后子叶参数雷同、需再等一批才分化。"""
         for path in sorted(list(self.tables)):

@@ -10,7 +10,7 @@ import mlx.core as mx
 class FeatureMaps(NamedTuple):
     """RieszWavelet.features() 的输出: 跨尺度谱统计特征, 逐像素。
     11 张 (H,W) float32 特征图 + log_e (H,W,S)。不可变记录,
-    不预组特征矩阵 —— 选列组装是下游的事 (见 demo_inverse)。"""
+    不预组特征矩阵 —— 选列组装是下游的事 (见 feature_extractor)。"""
 
     log_mag: mx.array  # log Σe_s 减邻域均值 —— 局部对比度
     slope: mx.array  # log e_s 对 octave 的最小二乘斜率 —— 幂律衰减

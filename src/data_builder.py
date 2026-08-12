@@ -7,8 +7,8 @@ from pathlib import Path
 import mlx.core as mx
 
 from codebook import Codebook
-from demo_config import DemoConfig
 from feature_extractor import FeatureExtractor
+from inverse_config import InverseConfig
 from riesz import RieszWavelet
 
 
@@ -16,7 +16,7 @@ class DataBuilder:
     """数据构建 (含缓存) 与标准化。"""
 
     def __init__(
-        self, cfg: DemoConfig, codebook: Codebook, extractor: FeatureExtractor
+        self, cfg: InverseConfig, codebook: Codebook, extractor: FeatureExtractor
     ):
         self.cfg = cfg
         self.codebook = codebook

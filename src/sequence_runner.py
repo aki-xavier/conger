@@ -8,8 +8,8 @@ import mlx.core as mx
 
 from code_bayes import CodeBayes
 from codebook import Codebook
-from demo_config import DemoConfig
 from feature_extractor import FeatureExtractor
+from inverse_config import InverseConfig
 from riesz import RieszWavelet
 from spn import SPN
 
@@ -18,7 +18,7 @@ class SequenceRunner:
     """多帧运动先验 (prior.md 运动与时间先验): 贝叶斯前向滤波。"""
 
     def __init__(
-        self, cfg: DemoConfig, codebook: Codebook, extractor: FeatureExtractor
+        self, cfg: InverseConfig, codebook: Codebook, extractor: FeatureExtractor
     ):
         self.cfg = cfg
         self.codebook = codebook
@@ -115,4 +115,4 @@ class SequenceRunner:
             f"  码准确率: 单帧 {acc_single['code']/total:.3f} → "
             f"滤波 {acc_filter['code']/total:.3f}"
         )
-        print("demo_inverse: 序列自检 ✓")
+        print("inverse: 序列自检 ✓")
