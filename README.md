@@ -19,13 +19,14 @@ SPN (Sum-Product Network) 逆渲染研究: cga engine 渲染合成场景 → Rie
 ```bash
 cd src
 python code_bayes.py           # CodeBayes 自检
-python spn.py                  # SPN + OnlineSPN 自检
-python riesz.py                # Riesz 自检 + 自然图特征可视化
+python spn_selftest.py         # SPN + OnlineSPN 自检 (7 组)
+python riesz_selftest.py       # Riesz 自检 + 自然图特征可视化
 python demo_inverse.py --quick # 逆渲染小数据集自检 (默认 nb 模型)
 python demo_inverse.py         # 全量 nb (4000 样本, 码 0.965)
 python demo_inverse.py --model spn  # 池化 SPN 对照 (0.470)
 python experiment_incremental.py --rev-cap 2048 --rev-at 3  # 增量+修订 (×0.98)
 python experiment_fullres.py   # 全分辨率三臂 + 未见码泛化探针
+python experiment_joint.py     # 开放集门控双轨 + 提升
 ```
 
 demo 选项: `--feat l|lhs|hs|rgb` (特征通路)、`--equal-luma` (等亮度消融)、`--occlusion` (遮挡+序数先验)、`--sequence N` (运动先验)、`--multi-light`/`--test-light` (光照泛化)、`--prior edge,familiar` (码先验)、`--tree` (树语义可视化)。

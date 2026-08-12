@@ -31,14 +31,12 @@ from pathlib import Path
 import mlx.core as mx
 
 from code_bayes import CodeBayes
-from demo_inverse import (
-    Codebook,
-    DemoConfig,
-    Evaluator,
-    FeatureExtractor,
-)
+from codebook import Codebook
+from demo_config import DemoConfig
+from evaluator import Evaluator
+from feature_extractor import FeatureExtractor
 from riesz import RieszWavelet
-from spn import SPNLearner
+from spn_learner import SPNLearner
 
 
 class FullresExperiment:

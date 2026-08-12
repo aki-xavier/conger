@@ -1,12 +1,13 @@
 import math
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import ClassVar, NamedTuple
+from typing import ClassVar
 
 import matplotlib.pyplot as plt
 import mlx.core as mx
 
-from color import Color
+from feature_maps import FeatureMaps
+from riesz_scale import RieszScale
 from utils import Utils
 
 # ── Riesz (单演) 小波特征前端 ──────────────────────────────────────
@@ -39,55 +40,6 @@ from utils import Utils
 #        ▼
 #     FeatureMaps (11 张 (H,W) + log_e (H,W,S), 不可变)
 #        → demo_inverse.features_of_frame() 选通道块池化 (SPN 逆渲染)
-
-
-@dataclass(slots=True)
-class RieszScale:
-    """单尺度单演小波响应: ψ 是各向同性带通, R₁ψ/R₂ψ 是它的
-    Riesz 变换 (频域乘子 −j·ω/|ω|, 即 2D Hilbert 变换)。
-    b0 偶对称、b1/b2 分别沿 x/y 奇对称, 三者构成正交三元组。"""
-
-    b0: mx.array  # 带通响应 (偶)
-    b1: mx.array  # Riesz-x 响应 (沿 x 奇)
-    b2: mx.array  # Riesz-y 响应 (沿 y 奇)
-    amp: mx.array = field(init=False)  # A = sqrt(b0²+b1²+b2²): 局部幅值
-    phase: mx.array = field(init=False)  # φ = atan2(|R|, b0): 局部相位 ∈ [0, π]
-    ori: mx.array = field(init=False)  # atan2(b2, b1): 结构法向 ∈ (−π, π]
-    energy: mx.array = field(init=False)  # A²
-
-    def __post_init__(self):
-        """由 b0/b1/b2 派生 energy/amp/phase/ori。"""
-        r2 = self.b1**2 + self.b2**2
-        self.energy = self.b0**2 + r2
-        self.amp = mx.sqrt(self.energy)
-        self.phase = mx.arctan2(mx.sqrt(r2), self.b0)
-        self.ori = mx.arctan2(self.b2, self.b1)
-
-    def steer(self, theta: float) -> mx.array:
-        """沿 θ 方向的一阶 Riesz 转向: cosθ·b1 + sinθ·b2。
-        任意方向的奇对称滤波无需新卷积 —— 与 Gabor 多方向通道互为对偶:
-        Gabor 用 N 个方向核逼近角度, Riesz 用 2 个基精确合成任意角度。"""
-        return self.b1 * math.cos(theta) + self.b2 * math.sin(theta)
-
-
-class FeatureMaps(NamedTuple):
-    """RieszWavelet.features() 的输出: 跨尺度谱统计特征, 逐像素。
-    11 张 (H,W) float32 特征图 + log_e (H,W,S)。不可变记录,
-    不预组特征矩阵 —— 选列组装是下游的事 (见 demo_inverse)。"""
-
-    log_mag: mx.array  # log Σe_s 减邻域均值 —— 局部对比度
-    slope: mx.array  # log e_s 对 octave 的最小二乘斜率 —— 幂律衰减
-    residual: mx.array  # 拟合 RMS 残差 —— 偏离幂律 = 有峰
-    bump: mx.array  # argmax_s e_s, 归一化到 [0,1]
-    centroid: mx.array  # 能量分布 p_s 的一阶矩 (octave)
-    spread: mx.array  # 二阶矩 (标准差)
-    skew: mx.array  # 三阶矩
-    kurt: mx.array  # 四阶矩
-    ori_R: mx.array  # 跨尺度方向一致性 (2θ 圆均值 resultant)
-    mean_ori: mx.array  # 跨尺度平均法向 (−π/2, π/2]
-    phase_coh: mx.array  # 跨尺度相位一致性
-    log_e: mx.array  # log 逐尺度能量 (H,W,S)
-
 
 @dataclass(slots=True)
 class RieszWavelet:
@@ -413,84 +365,3 @@ class RieszWavelet:
         fig = Utils.visualize(plots)
         fig.savefig(out_path)
         plt.close(fig)
-
-
-if __name__ == "__main__":
-    from PIL import Image
-
-    # ── synthetic ground truth checks ────────────────────────────────
-    # grating: 单频平面波, 法向=angle, 匹配尺度上 phase 线性爬坡、
-    # amp 常数、ori 常数。
-    angle = math.radians(30.0)
-    grating = Utils.make_grating((256, 256), wavelength=16.0, angle_rad=angle)
-    rw = RieszWavelet(grating)
-    best = max(range(len(rw.scales)), key=lambda i: float(rw.scales[i].energy.mean()))
-    sc = rw.scales[best]
-    print(f"grating λ=16 @30°: 匹配尺度 s{best} (λ={rw.lams[best]:.1f})")
-    print(f"  amp mean/std = {float(sc.amp.mean()):.4f}/{float(sc.amp.std()):.4f}")
-    # 法向有 ±π 模糊 (Riesz 向量是带符号方向但 grating 无极性), 折到 mod π
-    ori_mean = math.atan2(
-        float(mx.mean(mx.sin(2 * sc.ori))),  # type: ignore
-        float(mx.mean(mx.cos(2 * sc.ori))),  # type: ignore
-    )
-    print(f"  ori 圆均值(2θ) = {math.degrees(ori_mean) / 2:.2f}° (期望 30°)")
-
-    # update(): 逐帧刷新应与全新初始化逐位一致
-    import time
-
-    step = Utils.make_step_edge((256, 256))
-    t0 = time.perf_counter()
-    rw.update(step)
-    mx.eval(rw.scales[-1].energy)
-    t1 = time.perf_counter()
-    diff = float(mx.max(mx.abs(rw.scales[0].amp - RieszWavelet(step).scales[0].amp)))
-    stale = float(mx.max(mx.abs(rw.img - step)))  # update 必须同步 self.img
-    print(
-        f"update(step): {1000 * (t1 - t0):.0f}ms, "
-        f"与全新初始化 max|Δamp|={diff:.2e}, img 同步残差={stale:.2e}"
-    )
-
-    # ── 跨尺度特征: 三种原型信号的谱形状应显著不同 ──────────────────
-    def show_feat(name: str, img: mx.array):
-        """打印一张图的谱特征图均值 (六指标)。"""
-        f = RieszWavelet(img).features()
-        print(
-            f"{name}: slope={float(f.slope.mean()):+.2f} "
-            f"resid={float(f.residual.mean()):.2f} "
-            f"bump={float(f.bump.mean()):.2f} "
-            f"spread={float(f.spread.mean()):.2f}oct "
-            f"ori_R={float(f.ori_R.mean()):.2f} "
-            f"phase_coh={float(f.phase_coh.mean()):.2f}"
-        )
-
-    print("── cross-scale features (图均值) ──")
-    show_feat("grating λ=16", grating)
-    show_feat("noise        ", Utils.synthesize_signal04(256))
-    show_feat("step edge    ", Utils.make_step_edge((256, 256)))
-
-    # mean_ori: grating 上应等于法向 30° (mod π)
-    f_g = RieszWavelet(grating).features()
-    mo = 0.5 * math.atan2(
-        float(mx.mean(mx.sin(2 * f_g.mean_ori))),  # type: ignore
-        float(mx.mean(mx.cos(2 * f_g.mean_ori))),  # type: ignore
-    )
-    print(f"mean_ori 圆均值(2θ) = {math.degrees(mo):.2f}° (期望 30°)")
-
-    # natural images
-    for img_name in [
-        "12.png",
-        "nat10.jpg",
-        "nat1015.jpg",
-        "nat1016.jpg",
-        "nat1018.jpg",
-        "nat1035.jpg",
-    ]:
-        img = Image.open(Utils.project_root() / f"images/{img_name}")
-        img = img.convert("L")
-        arr = Color.image_to_mlx(img)
-        rw3 = RieszWavelet(arr)
-        path = Utils.project_root() / f"artifacts/riesz_{img_name}"
-        print(path)
-        rw3.visualize(path)
-        fpath = Utils.project_root() / f"artifacts/rieszfeat_{img_name}"
-        rw3.visualize_features(rw3.features(), fpath)

@@ -33,13 +33,11 @@ from cga.engine import (
 )
 
 from code_bayes import CodeBayes
-from demo_inverse import (
-    Codebook,
-    DemoConfig,
-    FeatureExtractor,
-)
+from codebook import Codebook
+from demo_config import DemoConfig
+from feature_extractor import FeatureExtractor
 from riesz import RieszWavelet
-from spn import SPNLearner
+from spn_learner import SPNLearner
 
 
 class JointExperiment:

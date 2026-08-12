@@ -33,14 +33,13 @@ import time
 
 import mlx.core as mx
 
-from demo_inverse import (
-    Codebook,
-    DataBuilder,
-    DemoConfig,
-    Evaluator,
-    FeatureExtractor,
-)
-from spn import OnlineSPN, SPNLearner
+from codebook import Codebook
+from data_builder import DataBuilder
+from demo_config import DemoConfig
+from evaluator import Evaluator
+from feature_extractor import FeatureExtractor
+from online_spn import OnlineSPN
+from spn_learner import SPNLearner
 
 
 class IncrementalExperiment:
