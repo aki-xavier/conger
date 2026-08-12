@@ -1,59 +1,81 @@
 # conger 架构与流程图
 
 SPN 逆渲染研究: cga engine 渲染合成场景 → Riesz 全分辨率特征 → 连续反演
-3D 场景参数。本文档是全部流程的总图; 各模块 docstring 有机制细节。
+3D 场景参数。本文档是全部流程的总图 + 机制决策录; 各模块 docstring 有
+机制细节。
 
-## 0. 主线切换 (2026-08-12)
+## 0. 主线切换 (2026-08-12/13)
 
-离散场景码体系 (逐码贝叶斯 CodeBayes / 池化 SPN / 码网格 / 码先验 /
-在线 SPN) 已整体退役删除。理由: 位置/尺寸/深度是连续物理量, 离散码
-只是后验求积节点; 逐码机制的索引结构就是码本身, 连续任务下不适用。
-git 历史保留全部旧实现 (最后一次提交 decbb89..7ae963f 区间)。
+两次退役: ① 离散场景码体系 (逐码贝叶斯/池化 SPN/码网格, 最后提交
+7ae963f) —— 连续物理量的离散化只是后验求积; ② EM/质心压缩层
+(提交 523b97a 的 MixtureSPN 初版) —— 小数据 + 弯曲流形下质心把点
+平均到流形外, 实例级 (每样本一分量) 才是最小数据设计的正确形态。
+git 历史保留全部旧实现。
 
-现行唯一主线: 连续采样 + 全分辨率浅混合 SPN (MixtureSPN)。
+现行唯一主线: 全因子覆盖连续采样 + 全分辨率实例级浅混合 SPN。
 
 ## 1. 主链路 (inverse.py)
 
 ```mermaid
 flowchart LR
     subgraph DATA["数据 (DataBuilder)"]
-        SAMPLE["连续参数采样 (kind,u,v,s,z)<br/>训练范围内均匀; 外推探针范围外"]
+        SAMPLE["全因子组合采样:<br/>kind3×图元色6×光色3×光向3=162 组合<br/>全笛卡尔 × R 连续复制 (最小数据)"]
         --> SCENE["Codebook.to_scene<br/>cga Scene"]
         SCENE --> RENDER["Renderer 渲染<br/>144×144 帧"]
         RENDER --> FEAT["FeatureExtractor<br/>11 通道全分辨率 (V=228K):<br/>L×3 Riesz (gain control)<br/>色度×3 Riesz (无 gc, 保色相幅度)<br/>色度×2 原始 (带符号拮抗)"]
     end
-    FEAT --> W["PCA 白化 (Gram eigh, CPU)<br/>186K→D≤N−1 无损降维<br/>对角高斯≡原空间全协方差"]
-    W --> EM["逐 kind 分层联合 EM<br/>P(kind)·P(f,t|kind), 各 K/3 分量<br/>方差逆伽马收缩 (Ledoit-Wolf)"]
-    EM --> PRED["predict: 责任度 (特征证据)<br/>E[t|x]=r@t_mu, P(kind|x)=r@onehot"]
-    PRED --> EVAL["Evaluator: 物理单位 RMSE/R²<br/>(基线=训练均值) + kind 准确率<br/>插值 vs 外推分裂"]
+    FEAT --> W["PCA 白化 (Gram eigh, CPU)<br/>228K→D≤N−1 无损降维<br/>对角高斯≡原空间全协方差"]
+    W --> ASM["实例级组装 (无 EM):<br/>逐 kind 分层, 分量=全部样本,<br/>类内 tied 方差, 均匀权重"]
+    ASM --> PRED["predict: 责任度 (特征证据)<br/>E[t|x]=r@t_mu ≡ 分层核回归<br/>P(kind|x)=类条件似然比"]
+    PRED --> EVAL["Evaluator: 物理单位 RMSE/R²<br/>+ kind + 色相环形误差 (白光子集)<br/>插值 vs 外推分裂"]
     PRED --> RECON["重建: 预测参数 → to_scene 再渲染"]
 ```
 
-实测 (N=4000, K=64): 插值 kind 0.897 / u,v RMSE 6.6px (R²≈0.90) /
-z R² 0.44; s/z 弱是物理 (单目单帧仅乘积可观测 = 熟悉尺寸歧义,
-R²>0 部分来自边界线索)。外推报告制: 核回归边界饱和不完美
-(s/z R² 可为负) —— 核机器上限, 升级路径 mixture of linear experts。
+实测 (N=1296): 插值 u,v RMSE 5.4/5.2px (R²≈0.93) / 白光色相 bin 0.68
+(Δ28°) / kind 0.52 (形状线索密度封顶 —— 颜色解耦的有意代价) /
+s,z 报告制 (乘积歧义 ×2: 尺寸×深度 + 反照率×光色, 1-NN 同值 = 物理)。
+外推报告制: 核回归边界饱和上限 (升级路径 linear experts)。
 
-## 2. 关键机制决策 (全是实测驱动的判决)
+## 2. 机制决策录 (全部实测驱动, 按时间序)
+
+### 2.1 特征与分层 (2026-08-12)
 
 ```mermaid
 flowchart TD
-    Q1["kind 曾 0.47"] --> A1["病理 1: kind 与连续因子独立采样,<br/>无约束 EM 按位置聚类 → 分量结构性混色"]
-    A1 --> F1["修复 1: 逐 kind 分层拟合<br/>(生成结构 P(kind)·P(f,t|kind))"]
-    F1 --> A2["病理 2: 能量特征符号盲 + 对比度归一化<br/>→ 色相幅度比 (kind 主线索) 被前端抹掉"]
-    A2 --> F2["修复 2: 色度关 gain_control +<br/>2 个带符号原始色度通道"]
-    F2 --> A3["病理 3: 相邻像素强相关, 对角高斯<br/>把相关维当独立选票 → 色度被亮度淹没"]
-    A3 --> F3["修复 3: PCA 白化 (白化对角 ≡ 原始全协方差)"]
-    F3 --> A4["病理 4: 高维小样本, 分量方差在零空间<br/>维撞地板 → 责任度被零空间抖动主导"]
-    A4 --> F4["修复 4: 方差逆伽马收缩<br/>(等效 20 虚样本, nk≫20 纯数据)"]
+    A1["kind 0.47: 无约束 EM 按位置聚类<br/>(kind 与连续因子独立采样 → 结构性混色)"]
+    --> F1["逐 kind 分层拟合 P(kind)·P(f,t|kind)"]
+    F1 --> A2["仍 0.47: 对比度归一化 + 能量符号盲<br/>→ 色相幅度比 (kind 主线索) 被前端抹掉"]
+    A2 --> F2["色度关 gain_control + 2 个带符号原始拮抗通道"]
+    F2 --> A3["仍 0.47: 相邻像素强相关, 对角高斯<br/>把相关维当独立选票淹没色度 (1-NN 0.95)"]
+    A3 --> F3["PCA 白化 (白化对角 ≡ 原空间全协方差)"]
+    F3 --> A4["0.68: 分量方差在零空间维撞地板,<br/>责任度被零空间抖动主导"]
+    A4 --> F4["方差逆伽马收缩 (Ledoit-Wolf)"]
 ```
+
+### 2.2 EM 的四条退化通道 → 实例级 (2026-08-13, 全因子数据重设计时)
+
+图元色与 kind 解耦 + 光色/光向 nuisance 后, 逐版本实测定位:
+
+```mermaid
+flowchart TD
+    B0["目标: 组合覆盖 + 数据最小 + 速度快<br/>初版 162 组合 R=1: 全崩 (u R²≈0)"]
+    B0 --> B1["① 稀疏平铺? R→4 无效<br/>→ 判别实验: 自由 1-NN u R²0.94<br/>数据/度量无罪, 病在模型"]
+    B1 --> B2["② 质心压缩? K→216 无效<br/>③ 目标 razor 门控 E 步 (winner-take-all,<br/>死分量均值爆炸 90× 流形距) → 删目标项"]
+    B2 --> B3["④ 方差无上限 (大方差吃一切, 活 19/216)<br/>→ 上限=类全局 + 权重均匀化 → 仍无效"]
+    B3 --> B4["⑤ 真根: nk≈3 时每分量方差噪声,<br/>−½Σlog(var) 项 ±115 nats 淹没距离选择<br/>→ 类内 tied 方差: u R² 0.50"]
+    B4 --> B5["⑥ 终审: EM 40 轮逐位不变 = 质心表示力<br/>上限; 实例级 (K=N, 无 EM) → u R² 0.90"]
+```
+
+教训沉淀: EM/质心压缩是大数据优化; 小数据 + 弯曲流形时质心把点
+平均到流形外。数据均匀采样 ⟹ 均匀权重是正确先验 (学权重反而
+引入 log_w≈−20 死亡螺旋)。
 
 ## 3. 模块结构 (一文件一类)
 
 ```mermaid
 flowchart LR
     subgraph CORE["逆渲染族"]
-        CBK["codebook.py<br/>连续采样+投影"] --> FEX["feature_extractor.py<br/>11 通道"] --> DCFG["inverse_config.py"]
+        CBK["codebook.py<br/>组合采样+投影+调色板"] --> FEX["feature_extractor.py<br/>11 通道"] --> DCFG["inverse_config.py"]
         CBK & FEX & DCFG --> DB["data_builder.py"] & EV["evaluator.py"]
         DB & EV --> APP["inverse_app.py: InverseApp"]
         APP --> ENTRY["inverse.py 薄入口"]
@@ -62,7 +84,7 @@ flowchart LR
         RS["riesz_scale.py"] & FM["feature_maps.py"] --> RW["riesz.py: RieszWavelet"]
         RW --> FEX
     end
-    MSP["mixture_spn.py: MixtureSPN<br/>白化+分层 EM+条件期望+序列化<br/>内嵌 4 组黑盒自检"] --> APP
+    MSP["mixture_spn.py: MixtureSPN<br/>白化+实例级组装+条件期望+序列化<br/>内嵌 4 组黑盒自检"] --> APP
     RW --> ST["riesz_selftest.py"]
 ```
 
@@ -73,14 +95,25 @@ InverseConfig 防环。
 
 - 数据缓存: `artifacts/mix_*.safetensors` (配置指纹文件名, gitignore);
 - 模型: MixtureSPN.save/load —— 参数张量 (含白化基 basis (V,D),
-  全量模式约 3GB) + rel_floor 入 JSON 明文头; Utils.st_metadata 可查。
-- 注意: 旧 `inv_*`/`fullres_*`/`joint_*` 缓存属已删除的离散体系, 可清。
+  全量约 1.5GB) + rel_floor 入 JSON 明文头; Utils.st_metadata 可查。
 
-## 5. 待办 (研究升级路径, 均未做)
+## 5. 待办 (按价值排序; 已对照实例级架构审判, 过时项已删)
 
-- mixture of linear experts: 块内放开特征↔目标交叉协方差
-  (治外推边界饱和; 低秩 + SVI)
-- DP-SVI 自动定 K (分量数从超参变推断量, 接 structure learning 遗产)
-- online EM (数据量超内存时平移; 旧 OnlineSPN 已是其骨肉)
-- 训练数据全因子重设计 (光位/光色/图元色组合覆盖; 色恒常歧义对
-  拆条件监督 —— 讨论已定调, 未实现)
+1. **熟悉尺寸先验重接** (prior.md 遗产): s/z 乘积歧义的唯一合法
+   解法 —— 先验进实例模型只需 log_w += log p(s) 分量重加权,
+   最便宜的路径修最差的指标
+2. **局部线性核回归**: 治外推边界饱和 (责任度加权的局部线性拟合
+   在边界外沿线性外推; 原名 mixture of linear experts 是 EM 时代
+   载体, 已随 EM 退役)
+3. **逐 kind PPCA 似然比**: kind 形状线索的度量升级 (各类自己的
+   白化子空间 + log|det| 修正, 跨类密度可比化)
+4. **池外光照探针**: held-out 光向/光色, 验证"覆盖 → 不变性"
+   设计主张
+5. **参考物破解色恒常**: 遮挡黄柱是已知色参考物, 其渲染色直接
+   泄漏照明色 → 拆解 光色×反照率 歧义对
+6. **大数据逃生通道** (N~10⁴ 触发): PCA 基按内在维度截断 /
+   子样本估基全量套用 / ANN 索引加速推理 / 压缩蒸馏 —— EM 若
+   回归只能作实例模型的对照验证压缩件 (退化通道病历见 §2.2)
+
+已删过时项 (2026-08-13 审判): DP-SVI 自动定 K (实例模型 K=N, 无
+分量数可定) / online EM (无 EM 可 online, 需求并入逃生通道)。

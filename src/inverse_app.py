@@ -4,7 +4,6 @@
 from __future__ import annotations
 
 import argparse
-import dataclasses
 from pathlib import Path
 
 import matplotlib
@@ -32,32 +31,26 @@ class InverseApp:
 
     def run(self) -> None:
         cfg = self.cfg
-        n_tr, n_i, n_e = (800, 100, 100) if cfg.quick else (4000, 300, 300)
+        r_tr, r_i, r_e = (4, 1, 1) if cfg.quick else (8, 2, 2)
+        n_tr = 162 * r_tr
         print(
-            f"[1/4] 数据: train {n_tr} / 插值 {n_i} / 外推 {n_e} "
-            f"(cache={'on' if cfg.use_cache else 'off'}, K={cfg.k_components})"
+            f"[1/4] 数据: train {n_tr} / 插值 {162 * r_i} / 外推 {162 * r_e} "
+            f"(162 组合×R, cache={'on' if cfg.use_cache else 'off'})"
         )
         f_tr, p_tr, f_ti, p_ti, f_te, p_te = self.data.build(
-            n_tr, n_i, n_e, cfg.use_cache
+            r_tr, r_i, r_e, cfg.use_cache
         )
         assert mx.all(mx.isfinite(f_tr)), "特征含 NaN/inf"
-        t_tr = p_tr[:, 1:]
+        t_tr = DataBuilder.targets(p_tr)
         k_tr = p_tr[:, 0].astype(mx.int32)
 
         if cfg.model_path is not None and cfg.model_path.exists():
             print(f"[2/4] 加载模型 {cfg.model_path}")
             net = MixtureSPN.load(cfg.model_path)
         else:
-            print(
-                f"[2/4] MixtureSPN 联合 EM (K={cfg.k_components}, "
-                f"≤{cfg.em_iters} 轮, V={f_tr.shape[1]}) ..."
-            )
+            print(f"[2/4] MixtureSPN 实例级组装 (K=N={n_tr}, V={f_tr.shape[1]}) ...")
             net = MixtureSPN.fit(
-                f_tr, t_tr, k_tr,
-                k=cfg.k_components,
-                iters=cfg.em_iters,
-                rel_floor=cfg.sigma_rel_floor,
-                key=mx.random.key(0),
+                f_tr, t_tr, k_tr, rel_floor=cfg.sigma_rel_floor
             )
             if cfg.model_path is not None:
                 net.save(cfg.model_path)
@@ -69,20 +62,9 @@ class InverseApp:
         ki_pred = mx.argmax(ki_p, axis=1)
         ke_pred = mx.argmax(ke_p, axis=1)
 
-        print("[4/4] 评估 (物理单位; 基线 = 训练均值预测器)")
+        print("[4/4] 评估 (物理单位; 基线 = 训练均值预测器; 色相评白光子集)")
         mi = Evaluator.report("插值", p_ti, ti_pred, ki_pred, p_tr)
         me = Evaluator.report("外推", p_te, te_pred, ke_pred, p_tr)
-
-        if cfg.test_light:
-            print("  池外光照 (顶光) 重渲染评估:")
-            cfg2 = dataclasses.replace(cfg, test_light=True)
-            db = DataBuilder(cfg2, Codebook(cfg2), FeatureExtractor(cfg2))
-            # 同一组插值参数, 仅换光照重渲染 (cache tag 含 tl 指纹)
-            f_tl = db.feats_of(p_ti)
-            tt_pred, kt_p, _ = net.predict(f_tl)
-            Evaluator.report(
-                "池外光", p_ti, tt_pred, mx.argmax(kt_p, axis=1), p_tr
-            )
 
         artifacts = Path(__file__).resolve().parent.parent / "artifacts"
         artifacts.mkdir(exist_ok=True)
@@ -130,14 +112,26 @@ class InverseApp:
     def plot_recon(
         self, p_gt: mx.array, t_pred: mx.array, kind_pred: mx.array, out: Path
     ) -> None:
-        """3 个插值样本: GT 渲染 vs 预测参数重建渲染 (闭环 sanity)。"""
+        """3 个插值样本: GT 渲染 vs 预测参数重建渲染 (闭环 sanity)。
+        预测的 nuisance (光色/光向) 不可观测 → 重建用 GT 的 (场景参数
+        的角色是内容量, 见 docs/architecture.md)。"""
         renderer, cam = Codebook.make_renderer()
         n = p_gt.shape[0]
         picks = [0, n // 2, n - 1]
         fig, axes = plt.subplots(len(picks), 2, figsize=(5, 2.6 * len(picks)))
         for row, i in enumerate(picks):
             gt = p_gt[i].tolist()
-            pd = [float(kind_pred[i])] + t_pred[i].tolist()
+            # 预测: kind argmax + u,v,s,z + 色相 atan2 (nuisance 沿用 GT)
+            import math
+
+            hue_pred = (
+                math.atan2(float(t_pred[i, 5]), float(t_pred[i, 4]))
+                % (2 * math.pi)
+            ) / (2 * math.pi / Codebook.N_HUE)
+            pd = (
+                [float(kind_pred[i])] + t_pred[i, :4].tolist()
+                + [hue_pred] + gt[6:8]
+            )
             for col, prm in enumerate((gt, pd)):
                 img = renderer.render(self.codebook.to_scene(prm), cam)
                 axes[row, col].imshow(img[..., :3].astype(mx.int32))
@@ -156,31 +150,25 @@ class InverseApp:
 
     def self_check(self, mi: dict[str, float], me: dict[str, float]) -> None:
         cfg = self.cfg
+        # kind 颜色解耦后只剩形状线索 (色度泄漏捷径拆除, 这是任务升级
+        # 的有意代价)。实测 (实例级模型): quick 0.49 / 全量 0.52 /
+        # 等亮度 0.53 —— 密度封顶 (同密度 1-NN 同值)。阈值 0.45 只防
+        # 机制崩溃 (随机 0.33); 逐 kind 白化 (PPCA 似然比) 是升级候选
+        assert mi["kind"] > 0.45, f"kind 准确率过低 {mi['kind']:.3f}"
         if cfg.equal_luma:
-            # 等亮度: lum 通道变纯噪声, 白化把噪声维放大到单位方差 →
-            # 信号被稀释。实测 quick 上限: 原始色度 1-NN 0.91 / 白化全维
-            # 0.81 / 模型 0.73 (平铺稀疏再损)。阈值 0.65 只防机制崩溃
-            assert mi["kind"] > 0.65, f"等亮度 kind 过低 {mi['kind']:.3f}"
-            print("inverse: 等亮度消融自检 ✓ (kind 色度补位, 回归报告制)")
+            print("inverse: 等亮度消融自检 ✓ (shape-only kind, 回归报告制)")
             return
-        # 色度绑定 kind → 强线索 (白化 1-NN 上限 0.94); 混合平铺有容量
-        # 损失。阈值 0.75: 2026-08-12 实测 quick 0.87, 留余量;
-        # 低于此 = 机制破坏 (历史病理值 0.47, 见 mixture_spn 白化注释)
-        assert mi["kind"] > 0.75, f"kind 准确率过低 {mi['kind']:.3f}"
-        # 插值位置回归须优于旧离散网格的半档宽 9px (旧网格曾以高准确率
-        # 识别位置; 连续模型连量化误差都打不过则机制失效)。
-        # 实测: quick 8.0/6.7, 全量 6.5/6.3
+        # 插值位置回归: 实测 quick 6.5/7.0, 全量 5.4/5.2 (旧网格半档 9px
+        # 以下 = 连续模型优于量化误差的及格线)
         assert mi["u_rmse"] < 9.0, f"插值 u RMSE {mi['u_rmse']:.2f}px"
         assert mi["v_rmse"] < 9.0, f"插值 v RMSE {mi['v_rmse']:.2f}px"
-        # s/z: 单目单帧仅乘积可观测 (熟悉尺寸歧义), R²>0 的部分来自
-        # 边界线索 (大 s 压缩位置边距)。阈值只防机制崩溃:
-        # 实测 s R² quick 0.17/全量 0.19, z R² quick 0.29/全量 0.41
-        assert mi["s_r2"] > 0.1, f"插值 s R² {mi['s_r2']:.3f}"
-        assert mi["z_r2"] > 0.2, f"插值 z R² {mi['z_r2']:.3f}"
-        # 外推报告制: 核回归边界饱和不完美 (预测漂移, s/z R² 可为负,
-        # 2026-08-12 实测) —— 核机器边界行为的已知上限; 升级路径
-        # mixture of linear experts, 见架构文档
-        print("inverse: 自检 ✓ (外推为报告制, 见 self_check 注释)")
+        # 色相 (白光子集, 6 档随机 0.167): 实测 bin quick 0.63 / 全量 0.68,
+        # Δ quick 35.7° / 全量 28.4° (档位间距 60°, Δ<30° ≈ 命中档)
+        assert mi["hue_bin"] > 0.5, f"白光色相 bin 准确率 {mi['hue_bin']:.3f}"
+        # s/z 报告制: 乘积歧义 ×2 (尺寸×深度 + 反照率×光色), 实测 R²
+        # 为负且与 1-NN 同值 —— 物理上限, 非机制失效
+        # 外推报告制: 核回归边界饱和上限 (升级路径 linear experts)
+        print("inverse: 自检 ✓ (s/z/外推为报告制, 见 self_check 注释)")
 
     # ── CLI ─────────────────────────────────────────────────────────
 
@@ -196,10 +184,6 @@ class InverseApp:
             help="模型存取路径 (safetensors); 存在则加载跳过 EM, 否则训练后保存",
         )
         ap.add_argument(
-            "--components", type=int, default=64, help="混合分量数 K (默认 64)"
-        )
-        ap.add_argument("--em-iters", type=int, default=20, help="EM 最大轮数")
-        ap.add_argument(
             "--sigma-rel-floor",
             type=float,
             default=1e-2,
@@ -209,31 +193,17 @@ class InverseApp:
         ap.add_argument(
             "--equal-luma",
             action="store_true",
-            help="等亮度消融: 三色与背景同亮度且无明暗 → L 通路失效, 色度补位",
+            help="等亮度消融: 六色相同亮度且无明暗 → L 通路失效, 色度补位",
         )
         ap.add_argument(
             "--occlusion", action="store_true", help="遮挡场景: 固定黄色竖柱"
-        )
-        ap.add_argument(
-            "--multi-light",
-            action="store_true",
-            help="多光照训练: 5 方向池轮流渲染 (数据增广 → 光照不变)",
-        )
-        ap.add_argument(
-            "--test-light",
-            action="store_true",
-            help="追加池外顶光评估 (同一组插值参数换光照重渲染)",
         )
         a = ap.parse_args()
         return InverseConfig(
             quick=a.quick,
             use_cache=not a.no_cache,
             model_path=Path(a.model_path) if a.model_path else None,
-            k_components=a.components,
-            em_iters=a.em_iters,
             sigma_rel_floor=a.sigma_rel_floor,
             equal_luma=a.equal_luma,
             occlusion=a.occlusion,
-            multi_light=a.multi_light,
-            test_light=a.test_light,
         )

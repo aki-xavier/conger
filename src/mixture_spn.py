@@ -1,24 +1,24 @@
-"""MixtureSPN: 全分辨率浅混合 SPN (K 个对角高斯块的 Sum) + 联合 EM 学习。
+"""MixtureSPN: 全分辨率浅混合 SPN (实例级对角高斯块的 Sum)。
 
-结构: Sum(K) × Block; Block = Product(特征对角高斯 × V | 目标高斯 × T |
-kind 类目)。深度结构学习在 V=186K 列上是 O(V²) 列对检验, 不可行 ——
-浅混合是唯一可落地的全分辨率形态 (SPN 的退化深度形态, 推理仍精确)。
+结构: Sum(K) × Block; Block = Product(特征对角高斯 × D | 目标 × T |
+kind 类目), K = 训练样本数 (实例级, 每样本一个分量)。深度结构学习
+在 V=186K 列上是 O(V²) 列对检验, 不可行 —— 浅混合是可落地的全
+分辨率形态 (SPN 的退化深度形态, 推理仍精确)。
 
-学习: GMR (Gaussian Mixture Regression) 式联合 EM, 按生成结构分解
-P(f,t,kind) = P(kind)·P(f,t|kind) —— 逐 kind 分层拟合 K/3 个分量
-的联合 (特征,目标) 混合, 再按类频率合成全模型。为什么必须分层:
-kind 与连续因子独立采样, 连续流形上任何局部 patch 天然混合三种
-kind, 无约束 EM 按位置相似度聚类 → 分量结构性混色 (局部最优);
-分层后 kind 纯度由构造保证, P(kind|x) 成为三类条件混合的似然比。
-推理责任度只由特征给出, 再条件期望。
+学习 = 组装 (无 EM, 确定性): 逐 kind 分层, 分量 = 全部训练样本,
+类内 tied 对角方差 (全子集估计), 均匀权重。为什么不做 EM/质心
+压缩: 小数据 (本项目设计目标) + 弯曲流形时, K-means 质心把流形
+上的点平均到流形外, 实测 R² 0.50 vs 实例级 0.94; EM 的四条实测
+退化通道 (目标 razor 门控 winner-take-all / 死分量均值爆炸 /
+方差无上限大方差吃一切 / 每分量方差噪声淹没距离项) 随压缩层
+一起删除。EM 压缩是大数据优化, N≫K 且流形平直时再加 (ponytail:
+此刻 YAGNI)。
 
 推理: r = softmax(log_w + Σ_d logN(x_d; μ,σ)) → E[t|x] = r @ t_mu,
-P(kind|x) = r @ exp(k_logp)。数学上等价 Nadaraya-Watson 核回归:
-分量质心 = 核中心, σ = 带宽。sigma_rel_floor 即带宽下限, 是插值
-平滑度的原理旋钮 (非纯数值保护)。
+P(kind|x) = r @ exp(k_logp)。数学上等价逐 kind 分层的 Nadaraya-
+Watson 核回归: 样本 = 核中心, tied σ = 带宽。
 
-数组实现而非 Node 对象树: K 块 × 186K 叶的对象递归不可行, EM 直接
-操作 (K,V) 参数矩阵。
+数组实现而非 Node 对象树: K 块 × 186K 叶的对象递归不可行。
 
 度量基础: PCA 白化。原始特征相邻像素强相关 + 边缘像素双峰, 对角
 高斯把相关维当独立选票 —— 62K 亮度维的相关性夸大有效证据两个
@@ -27,10 +27,9 @@ P(kind|x) = r @ exp(k_logp)。数学上等价 Nadaraya-Watson 核回归:
 连根拔掉; 且 N 样本的秩 ≤ N−1, 白化同时是无损降维 (186K→N)。
 基/均值随模型序列化 (推理必须用同一变换)。
 
-数值纪律 (code_bayes 教训): 方差 M 步两遍法 (先 μ 后 Σr(x−μ)²) ——
-E[x²]−E[x]² 在 float32 下对近零方差维灾难性抵消; E 步同样用直接
-(x−μ)² 分块形式, 不用展开式 matmul (同因)。分块 + 逐块 mx.eval:
-惰性图全量累积会超 Metal 显存上限。
+数值纪律: E 步用直接 (x−μ)² 分块形式, 不用展开式 matmul
+(E[x²]−E[x]² 在 float32 下对近零方差维灾难性抵消, code_bayes
+教训); 分块 + 逐块 mx.eval: 惰性图全量累积会超 Metal 显存上限。
 """
 
 from __future__ import annotations
@@ -42,22 +41,22 @@ import mlx.core as mx
 
 from utils import Utils
 
-_NC = 64  # E/M 步样本块行数
-_KC = 8  # E/M 步分量块数: (64,8,186624) 中间量 ≈ 383MB, Metal 可承受
+_NC = 64  # E 步样本块行数
+_KC = 8  # E 步分量块数: (64,8,·) 中间量有界, Metal 可承受
 
 
 class MixtureSPN:
-    """浅混合 SPN: 对角高斯块混合 (白化空间) + 连续目标头 + kind 类目头。"""
+    """浅混合 SPN: 实例级对角高斯块混合 (白化空间) + 目标头 + kind 头。"""
 
     def __init__(
         self,
         log_w: mx.array,  # (K,)
-        f_mu: mx.array,  # (K, D) 白化空间特征均值
-        f_var: mx.array,  # (K, D) 白化空间特征方差 (对角)
-        t_mu: mx.array,  # (K, T) 连续目标均值
-        k_logp: mx.array,  # (K, 3) kind 类目 log 概率 (行归一)
+        f_mu: mx.array,  # (K, D) 白化空间特征均值 (实例级 = 样本)
+        f_var: mx.array,  # (K, D) 白化空间特征方差 (类内 tied)
+        t_mu: mx.array,  # (K, T) 连续目标 (= 样本目标)
+        k_logp: mx.array,  # (K, 3) kind 类目 log 概率 (行 one-hot)
         rel_floor: float,
-        f_mean: mx.array | None = None,  # (V,) 白化中心; None = EM 内部态
+        f_mean: mx.array | None = None,  # (V,) 白化中心
         basis: mx.array | None = None,  # (V, D) 白化基 (随模型序列化)
     ):
         self.log_w, self.f_mu, self.f_var = log_w, f_mu, f_var
@@ -72,11 +71,11 @@ class MixtureSPN:
     def _z(self, f: mx.array) -> mx.array:
         """原空间特征 (N,V) → 白化坐标 (N,D)。"""
         assert self.f_mean is not None and self.basis is not None, (
-            "EM 内部态无白化基, 不可 predict"
+            "模型缺白化基, 不可 predict"
         )
         return (f - self.f_mean[None, :]) @ self.basis
 
-    # ── E 步 ────────────────────────────────────────────────────────
+    # ── 特征侧似然 ──────────────────────────────────────────────────
 
     def _logq_feat(self, z: mx.array) -> mx.array:
         """白化空间特征侧未归一 log 联合 (N,K), 分块直接 (x−μ)² 形式。"""
@@ -94,21 +93,7 @@ class MixtureSPN:
             out.append(mx.concatenate(parts, axis=1))
         return mx.concatenate(out, axis=0)
 
-    def _logq_joint(
-        self, f: mx.array, t: mx.array, t_var: mx.array
-    ) -> mx.array:
-        """训练 E 步: 特征 + 目标联合 (N,K) (kind 已由分层处理)。"""
-        logq = self._logq_feat(f)
-        # 目标项: −½·Σ_t[(t−μ)²/var + log var + log2π] (T 很小, 不分块)
-        d = t[:, None, :] - self.t_mu[None, :, :]  # (N,K,T)
-        return logq - 0.5 * mx.sum(
-            d * d / t_var[None, :, :]
-            + mx.log(t_var)[None, :, :]
-            + math.log(2.0 * math.pi),
-            axis=2,
-        )
-
-    # ── 学习 ────────────────────────────────────────────────────────
+    # ── 组装 (学习) ─────────────────────────────────────────────────
 
     @classmethod
     def fit(
@@ -116,15 +101,10 @@ class MixtureSPN:
         f: mx.array,  # (N, V) 特征
         t: mx.array,  # (N, T) 连续目标
         kind: mx.array,  # (N,) int
-        k: int,
-        iters: int = 20,
         rel_floor: float = 1e-2,
-        key: mx.array | None = None,
     ) -> MixtureSPN:
-        """逐 kind 分层联合 EM (生成结构 P(kind)·P(f,t|kind)), 再合成。
-        k 为总分量预算, 逐 kind 各 k//3 个。"""
+        """逐 kind 分层实例级组装 (P(kind)·P(f,t|kind)), 确定性。"""
         f_mean, basis, z = cls._whiten(f)
-        ks = mx.random.split(key, 4) if key is not None else [None] * 4
         mus, vars_, tmus, ws, klp = [], [], [], [], []
         n = z.shape[0]
         for j in range(3):
@@ -132,15 +112,17 @@ class MixtureSPN:
             nj = sel.shape[0]
             if nj == 0:
                 continue  # 缺场 kind (合成测试/子集) 不建分量
-            sub = cls._fit_em(
-                z[sel], t[sel], max(1, k // 3), iters, rel_floor, ks[j]
+            zj, tj = z[sel], t[sel]
+            # 类内 tied 方差: 全子集对角方差 (核带宽), 地板防零
+            gvar = mx.maximum(
+                mx.var(zj, axis=0, keepdims=True),
+                (rel_floor * zj.std(axis=0, keepdims=True)) ** 2 + 1e-8,
             )
-            mus.append(sub.f_mu)
-            vars_.append(sub.f_var)
-            tmus.append(sub.t_mu)
-            # 合成权重: 类频率 × 类内权重
-            ws.append(sub.log_w + math.log(nj / n))
-            onehot = mx.zeros((sub.f_mu.shape[0], 3))
+            mus.append(zj)
+            vars_.append(mx.tile(gvar, (nj, 1)))
+            tmus.append(tj)
+            ws.append(mx.full((nj,), -math.log(n)))  # 均匀 (含类频率)
+            onehot = mx.zeros((nj, 3))
             klp.append(mx.log(onehot + (mx.arange(3) == j)[None, :]))
         m = cls(
             mx.concatenate(ws), mx.concatenate(mus), mx.concatenate(vars_),
@@ -165,81 +147,6 @@ class MixtureSPN:
         z = xc @ basis
         mx.eval(f_mean, basis, z)
         return f_mean, basis, z
-
-    @classmethod
-    def _fit_em(
-        cls, f, t, k, iters, rel_floor, key, var_prior=20.0
-    ) -> MixtureSPN:
-        """单 kind 子集的 (特征,目标) 联合 EM。init: 随机 K 样本为质心
-        + 全局方差 (流形平铺靠 EM 收敛)。
-
-        var_prior: 方差的逆伽马先验等效样本数 (Ledoit-Wolf 收缩) ——
-        高维小样本下分量内样本方差在零空间维上撞地板, 责任度会被
-        零空间抖动主导 (实测); 向类内全局方差收缩, nk≫var_prior 时
-        纯数据。先验强度是架构选择, 非调参。"""
-        n, v = f.shape
-        # 无放随机 K 样本 (argsort 洗牌, 比 permutation 的 key 支持稳)
-        perm = mx.argsort(mx.random.uniform(shape=(n,), key=key))[:k]
-        f_mu, t_mu = f[perm], t[perm]
-        f_var = mx.tile(mx.var(f, axis=0, keepdims=True), (k, 1))
-        t_var = mx.tile(mx.var(t, axis=0, keepdims=True), (k, 1))
-        k_logp = mx.zeros((k, 3))  # 占位 (分层拟合不用, 由 fit 合成时覆写)
-        log_w = mx.full((k,), -math.log(k))
-        # 带宽下限: 各维全局 std 的相对比例 (绝对地板防 std=0 维除零)
-        f_floor = mx.maximum((rel_floor * f.std(axis=0)) ** 2, 1e-8)
-        t_floor = mx.maximum((rel_floor * t.std(axis=0)) ** 2, 1e-8)
-        # 初始化即施地板: 首轮 E 步就用 var (零方差目标维 0/0 = NaN 实测)
-        f_var = mx.maximum(f_var, f_floor[None, :])
-        t_var = mx.maximum(t_var, t_floor[None, :])
-        # 收缩锚点: 类内 (本子集) 全局方差
-        f_gvar = mx.var(f, axis=0)
-        t_gvar = mx.var(t, axis=0)
-        mx.eval(f_mu, t_mu, f_var, t_var, k_logp)
-        it = -1
-        ll_new = float("nan")
-        ll = float("-inf")
-        for it in range(iters):
-            m = cls(log_w, f_mu, f_var, t_mu, k_logp, rel_floor)
-            logq = m._logq_joint(f, t, t_var)
-            ll_new = float(mx.mean(mx.logsumexp(logq, axis=1)))
-            r = mx.exp(logq - mx.logsumexp(logq, axis=1, keepdims=True))
-            mx.eval(r)
-            # M 步: nk 防零 (死分量保持原参数, 等下轮 E 步自然复活/淘汰)
-            nk = mx.sum(r, axis=0) + 1e-6
-            f_mu = (r.T @ f) / nk[:, None]
-            t_mu = (r.T @ t) / nk[:, None]
-            mx.eval(f_mu, t_mu)
-            # 两遍法方差 (先 μ 后 Σr(x−μ)²), 分块
-            parts = []
-            for j in range(0, k, _KC):
-                acc = mx.zeros_like(f_mu[j : j + _KC])
-                for i in range(0, n, _NC):
-                    d = f[i : i + _NC, None, :] - f_mu[None, j : j + _KC, :]
-                    c = mx.sum(r[i : i + _NC, j : j + _KC, None] * d * d, axis=0)
-                    mx.eval(c)
-                    acc = acc + c
-                parts.append(acc / nk[j : j + _KC, None])
-            f_var = mx.maximum(
-                (nk[:, None] * mx.concatenate(parts) + var_prior * f_gvar[None, :])
-                / (nk + var_prior)[:, None],
-                f_floor[None, :],
-            )
-            d = t[:, None, :] - t_mu[None, :, :]  # (N,K,T), T 小不分块
-            t_var = mx.maximum(
-                (
-                    nk[:, None] * (mx.sum(r[:, :, None] * d * d, axis=0) / nk[:, None])
-                    + var_prior * t_gvar[None, :]
-                )
-                / (nk + var_prior)[:, None],
-                t_floor[None, :],
-            )
-            log_w = mx.log(nk / mx.sum(nk))
-            mx.eval(f_var, t_var, log_w)
-            if it > 0 and abs(ll_new - ll) < 1e-4 * abs(ll):
-                break  # 对数似然相对收敛
-            ll = ll_new
-        print(f"      EM 收敛: {it + 1} 轮, 平均 log 联合 {ll_new:.1f}")
-        return cls(log_w, f_mu, f_var, t_mu, k_logp, rel_floor)
 
     # ── 推理 (特征证据 → 条件期望) ──────────────────────────────────
 
@@ -331,7 +238,7 @@ def _selftest() -> None:
     assert mx.allclose(tm1[0], t_mu[0]), f"单分量证据无关性: {tm1[0]}"
     print("组 1 ✓ 公理性质 (归一化/δ选择/类目聚合/单分量证据无关)")
 
-    # ── 组 2: EM 恢复 (可分离合成混合, 标签置换意义下) ────────────
+    # ── 组 2: 实例级回归精度 (可分离合成混合) ──────────────────────
     key = mx.random.key(0)
     keys = mx.random.split(key, 4)
     n_per, d_f, d_t = 200, 6, 2
@@ -349,24 +256,22 @@ def _selftest() -> None:
     f_all = mx.concatenate(fs)
     t_all = mx.concatenate(ts)
     k_all = mx.concatenate(ks)
-    fitted = MixtureSPN.fit(f_all, t_all, k_all, k=3, iters=30, key=keys[3])
-    # 分量匹配: 按 t_mu 最近邻 (EM 标签任意置换)
-    for c in range(3):
-        j = int(mx.argmin(mx.sum((fitted.t_mu - true_tmu[c]) ** 2, axis=1)))
-        # 恢复精度基准: 均值的标准误 ≈ σ/√n = 0.1/√200 ≈ 0.007 (目标维);
-        # 断 0.1 = 14σ 裕量
-        assert float(mx.max(mx.abs(fitted.t_mu[j] - true_tmu[c]))) < 0.1, (
-            f"分量 {c} 目标质心未恢复: {fitted.t_mu[j]} vs {true_tmu[c]}"
-        )
-    # 预测 RMSE 应远小于分量间距 (8.0): 断 0.5 = 间距的 1/16
+    fitted = MixtureSPN.fit(f_all, t_all, k_all)
+    # 实例级模型在可分数据上 ≈ 精确插值: 预测 RMSE 应远小于簇间距
+    # (8.0); 断 0.5 = 间距的 1/16, 目标噪声 σ=0.1 的 5 倍
     tm, kp, _ = fitted.predict(f_all)
     rmse = float(mx.sqrt(mx.mean((tm - t_all) ** 2)))
-    assert rmse < 0.5, f"EM 恢复后预测 RMSE {rmse}"
-    print(f"组 2 ✓ EM 恢复 (预测 RMSE {rmse:.3f}, 分量间距 8.0)")
+    assert rmse < 0.5, f"实例级回归 RMSE {rmse}"
+    # kind: 簇间可分 → kind 后验应近完美
+    acc2 = float(
+        mx.mean((mx.argmax(kp, axis=1) == k_all).astype(mx.float32))
+    )
+    assert acc2 > 0.99, f"可分混合 kind {acc2:.3f}"
+    print(f"组 2 ✓ 实例级回归 (RMSE {rmse:.3f}, kind {acc2:.3f}, 簇间距 8.0)")
 
     # ── 组 4: 相关性病理 (白化的存在理由) ─────────────────────────
-    # 两类样本沿对角线拉长 (强相关), 类分离方向 = 相关方向 —— 原空间
-    # 对角高斯的最坏情形 (逐维方差被拉长方向污染, 类间逐维重叠);
+    # 两类样本沿对角线拉长 (强相关), 类分离方向 = 正交低方差方向 ——
+    # 原空间对角高斯的最坏情形 (逐维方差被拉长方向污染, 类间逐维重叠);
     # 模型契约: 白化后应正确分离 (白化对角 ≡ 原空间全协方差)。
     n4 = 120
     k4a, k4b, k4c = mx.random.split(mx.random.key(5), 3)
@@ -381,12 +286,12 @@ def _selftest() -> None:
     f4 = lo * direction[None, :] + pe * perp[None, :] + off * perp[None, :]
     k4 = (mx.arange(n4) >= n4 // 2).astype(mx.int32)
     t4 = mx.zeros((n4, 1))  # 目标不参与本组断言
-    m4 = MixtureSPN.fit(f4, t4, k4, k=2, iters=20, key=k4c)
+    m4 = MixtureSPN.fit(f4, t4, k4)
     _, kp4, _ = m4.predict(f4)
     acc4 = float(
         mx.mean((mx.argmax(kp4, axis=1) == k4).astype(mx.float32))
     )
-    # 白化后两类在相关方向上距离 0.6/类内白化σ 应完全可分; 断 0.95
+    # 白化后两类在正交方向上 d'=6 应完全可分; 断 0.95
     assert acc4 > 0.95, f"相关特征类分离失败 {acc4:.3f}"
     print(f"组 4 ✓ 相关性病理 (白化后类准确率 {acc4:.3f})")
 

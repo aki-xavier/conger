@@ -1,13 +1,16 @@
 """Codebook: 连续场景参数 ⇄ cga Scene (三维建模) + 领域常量。
 
-场景: 暗背景 + 单个浅色图元 (sphere/cylinder/box), 像素位置 (u,v)、
-尺寸 s、深度 z 全连续 —— 训练范围均匀采样, 外推探针采样范围外区间
-(插值/外推分界即训练支撑集边界)。图元色绑定 kind (色度是 kind 的
-合法判别线索; 颜色与种类解耦留待训练数据重设计)。
+场景: 暗背景 + 单个图元 (sphere/cylinder/box), 位置 (u,v)、尺寸 s、
+深度 z 连续, 图元色 6 色相 (与 kind 解耦 —— kind 只剩形状线索,
+颜色泄漏捷径拆除), 光色 4 / 光向 5 为 nuisance。离散因子 (kind ×
+图元色 × 光色 × 光向 = 360) 全笛卡尔积覆盖采样 (每组合 ≥1 样本),
+连续因子每样本独立随机。色恒常歧义对: 图元色目标仅在白光样本
+监督 (彩光下 观测色=光色×反照率 乘积不可分)。
 """
 
 from __future__ import annotations
 
+import colorsys
 import math
 from typing import TYPE_CHECKING, ClassVar
 
@@ -46,16 +49,18 @@ class Codebook:
     S_EXTRA = ((0.25, 0.35), (0.6, 0.75))
     Z_EXTRA = ((2.0, 2.5), (4.0, 4.5))
     EXTENT = 1.8  # 图元最大世界半径系数: box 半对角 √3≈1.732, 取余量
-    # 光照: 默认右上光; 多光照训练用 5 方向池轮流渲染 → 光照不变;
-    # TEST_LIGHT_DIR 为池外顶光, 验证真泛化
+    # 离散因子水平 (全笛卡尔积 = 3×6×3×3 = 162 组合)。水平数取最小
+    # 可行集 (覆盖要求 = 组合存在即可), 省下的样本预算换连续复制数
+    # R —— 稀疏平铺实测: R=1 时每组合 1 样本, 最近分量必色差失配,
+    # 位置回归全崩 (R²≈0); 复制密度才是约束, 组合数不是
+    N_HUE = 6  # 图元色: 60° 等距色相环
+    LIGHT_COLORS: ClassVar[tuple] = (0xFFFFFF, 0xFF4040, 0x4040FF)
+    WHITE = 0  # LIGHT_COLORS 中白色下标 (色恒常监督锚点)
     LIGHT_DIRS: ClassVar[tuple] = (
         (0.3, -0.7, 0.4),
         (-0.6, -0.4, 0.7),
         (0.6, -0.4, 0.7),
-        (-0.3, 0.7, 0.4),
-        (0.0, 0.0, 1.0),
     )
-    TEST_LIGHT_DIR = (0.0, -1.0, 0.0)  # 池外: 正上方顶光
     # 遮挡: 固定黄色竖柱 (图中央偏右, 像素 81,84 @ z=3.5)
     OCC_BOX = (0.5, 1.4, 0.5)
     OCC_UV = (81.0, 84.0)
@@ -66,12 +71,34 @@ class Codebook:
         self.cfg = cfg
 
     @staticmethod
-    def sample(n: int, key: mx.array, extrap: bool = False) -> mx.array:
-        """→ (n,5) [kind,u,v,s,z]。位置边距按 s,z 逐样本计算,
-        保证图元完整在画面内 (最大延伸 EXTENT·s 世界单位)。"""
-        ks, kz, ku, kv, kk, ke = mx.random.split(key, 6)
-        kind = mx.random.randint(0, Codebook.N_KIND, shape=(n,), key=kk)
+    def obj_color(hue_idx: int, equal_luma: bool = False) -> int:
+        """色相下标 → RGB hex。普通: HSV(H, S=0.8, V=0.85); 等亮度:
+        按 Rec601 亮度反解 V (各色相亮度归一, L 通路失效由构造保证)。"""
+        h = hue_idx / Codebook.N_HUE
+        if equal_luma:
+            r, g, b = colorsys.hsv_to_rgb(h, 1.0, 1.0)
+            luma = 0.299 * r + 0.587 * g + 0.114 * b
+            v = 0.10 / luma  # 目标亮度 0.10 (六色相全可达)
+            r, g, b = colorsys.hsv_to_rgb(h, 1.0, v)
+        else:
+            r, g, b = colorsys.hsv_to_rgb(h, 0.8, 0.85)
+        return (int(r * 255) << 16) | (int(g * 255) << 8) | int(b * 255)
+
+    @staticmethod
+    def sample(replicates: int, key: mx.array, extrap: bool = False) -> mx.array:
+        """→ (162×R, 8) [kind,u,v,s,z,hue,lcol,ldir]。离散因子全笛卡尔
+        积 (组合覆盖保证), 连续因子每行独立随机; 位置边距按 s,z 逐样本
+        计算, 保证图元完整在画面内 (最大延伸 EXTENT·s 世界单位)。"""
         cb = Codebook
+        combos = [
+            (k, h, c, d)
+            for k in range(cb.N_KIND)
+            for h in range(cb.N_HUE)
+            for c in range(len(cb.LIGHT_COLORS))
+            for d in range(len(cb.LIGHT_DIRS))
+        ] * replicates
+        n = len(combos)  # 162 × R
+        ks, kz, ku, kv = mx.random.split(key, 4)
         if extrap:
             # 支撑集外两側区间等概率
             def uni_extra(rng, pair):
@@ -92,8 +119,11 @@ class Codebook:
         margin = cb.EXTENT * s * cb.FX / (cb.CAM_Z - z) + 2.0  # 像素边距
         u = margin + mx.random.uniform(shape=(n,), key=ku) * (cb.W - 2 * margin)
         v = margin + mx.random.uniform(shape=(n,), key=kv) * (cb.H - 2 * margin)
-        return mx.stack(
-            [kind.astype(mx.float32), u, v, s, z], axis=1
+        disc = mx.array(combos, dtype=mx.float32)  # (n,4) kind,hue,lcol,ldir
+        return mx.concatenate(
+            [disc[:, 0:1], u[:, None], v[:, None], s[:, None], z[:, None],
+             disc[:, 1:]],
+            axis=1,
         ).astype(mx.float32)
 
     @staticmethod
@@ -104,14 +134,13 @@ class Codebook:
         y = ((Codebook.H - 1) / 2.0 - v) * zc / Codebook.FY
         return x, y
 
-    def to_scene(
-        self, params: tuple[float, float, float, float, float], light=None
-    ) -> Scene:
-        """场景参数 (kind,u,v,s,z) → cga Scene。light: 覆盖光照方向
-        (多光照/池外测试用), None = 默认 (test_light 配置则池外顶光)。"""
+    def to_scene(self, params: tuple[float, ...]) -> Scene:
+        """场景参数 (kind,u,v,s,z,hue,lcol,ldir) → cga Scene。
+        等亮度: Basic 材质不接光照 → 光色/光向无效果 (仍采样覆盖)。"""
         cfg = self.cfg
         kind = int(params[0])
-        u, v, s, z = (float(p) for p in params[1:])
+        u, v, s, z = (float(p) for p in params[1:5])
+        hue, lcol, ldir = (int(p) for p in params[5:8])
         x, y = self.unproject(u, v, z)
         if kind == 0:
             geom = SphereGeometry(s)
@@ -121,17 +150,18 @@ class Codebook:
             geom = BoxGeometry(2 * s, 2 * s, 2 * s)
         scene = Scene(background=Color(cfg.bg_color))
         scene.add(AmbientLight(Color(0xFFFFFF), 0.5))
-        ld = light or (
-            self.TEST_LIGHT_DIR if cfg.test_light else self.LIGHT_DIRS[0]
+        scene.add(
+            DirectionalLight(
+                Color(self.LIGHT_COLORS[lcol]), 0.7,
+                direction=self.LIGHT_DIRS[ldir],
+            )
         )
-        scene.add(DirectionalLight(Color(0xFFFFFF), 0.7, direction=ld))
+        color = self.obj_color(hue, cfg.equal_luma)
         if cfg.equal_luma:
             # 等亮度: 无明暗 (Basic 材质不接光照) → L 图均匀, 轮廓仅存于色度
-            material = MeshBasicMaterial(Color(cfg.kind_colors[kind]))
+            material = MeshBasicMaterial(Color(color))
         else:
-            material = MeshStandardMaterial(
-                Color(cfg.kind_colors[kind]), roughness=0.55
-            )
+            material = MeshStandardMaterial(Color(color), roughness=0.55)
         scene.add(Mesh(geom, material, position=(x, y, z)))
         if cfg.occlusion:
             scene.add(self.occluder())
