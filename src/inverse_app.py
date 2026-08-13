@@ -32,26 +32,25 @@ class InverseApp:
 
     def run(self) -> None:
         cfg = self.cfg
-        r_tr, r_i, r_e = (4, 1, 1) if cfg.quick else (8, 2, 2)
-        n_tr = 162 * r_tr
+        artifacts = Path(__file__).resolve().parent.parent / "artifacts"
+        n_tr = 162 * cfg.replicates
         print(
-            f"[1/4] 数据: train {n_tr} / 插值 {162 * r_i} / 外推 {162 * r_e} "
-            f"(162 组合×R, cache={'on' if cfg.use_cache else 'off'})"
+            f"[1/4] 数据: train {n_tr} / 插值 324 / 外推 324 "
+            f"(162 组合×R={cfg.replicates}, 逐块缓存)"
         )
         f_tr, p_tr, f_ti, p_ti, f_te, p_te, s_tr, s_ti, s_te = (
-            self.data.build(r_tr, r_i, r_e, cfg.use_cache)
+            self.data.build(cfg.replicates)
         )
         assert mx.all(mx.isfinite(f_tr)), "特征含 NaN/inf"
-        if cfg.stereo:
-            # 视差管线独立评估 (几何 ẑ vs GT z; 外推同样几何有效)
-            for nm, st, pp in (("插值", s_ti, p_ti), ("外推", s_te, p_te)):
-                err = st[:, 0] - pp[:, 4]
-                print(
-                    f"  视差管线 {nm}: ẑ RMSE "
-                    f"{float(mx.sqrt(mx.mean(err**2))):.4f} "
-                    f"bias {float(mx.mean(err)):+.4f} "
-                    f"(d 中位 {float(mx.median(st[:, 1])):.2f}px)"
-                )
+        # 视差管线独立评估 (几何 ẑ vs GT z; 外推同样几何有效)
+        for nm, st, pp in (("插值", s_ti, p_ti), ("外推", s_te, p_te)):
+            err = st[:, 0] - pp[:, 4]
+            print(
+                f"  视差管线 {nm}: ẑ RMSE "
+                f"{float(mx.sqrt(mx.mean(err**2))):.4f} "
+                f"bias {float(mx.mean(err)):+.4f} "
+                f"(d 中位 {float(mx.median(st[:, 1])):.2f}px)"
+            )
         t_tr = DataBuilder.targets(p_tr)
         k_tr = p_tr[:, 0].astype(mx.int32)
 
@@ -61,55 +60,67 @@ class InverseApp:
                 Codebook.CAM_Z - stats[:, 0]
             ) / Codebook.FX
 
-        if cfg.stereo:
-            # 强几何观测 + 残差学习: ẑ/ŝ 直接拼特征会被白化稀释
-            # (1/647 维, 实测 z R² 0.02); 模型改为学 z−ẑ 与 s−ŝ 的
-            # 标定残差 (可见面≠中心偏差的形状相关部分), 推理后加回
-            t_tr = mx.concatenate(
-                [
-                    t_tr[:, :2],
-                    (t_tr[:, 2] - s_proxy(s_tr))[:, None],
-                    (t_tr[:, 3] - s_tr[:, 0])[:, None],
-                    t_tr[:, 4:],
-                ],
-                axis=1,
-            )
+        # 强几何观测 + 残差学习: ẑ/ŝ 直接拼特征会被白化稀释
+        # (1/647 维, 实测 z R² 0.02); 模型改为学 z−ẑ 与 s−ŝ 的
+        # 标定残差 (可见面≠中心偏差的形状相关部分), 推理后加回
+        t_tr = mx.concatenate(
+            [
+                t_tr[:, :2],
+                (t_tr[:, 2] - s_proxy(s_tr))[:, None],
+                (t_tr[:, 3] - s_tr[:, 0])[:, None],
+                t_tr[:, 4:],
+            ],
+            axis=1,
+        )
 
-        if cfg.model_path is not None and cfg.model_path.exists():
-            print(f"[2/4] 加载模型 {cfg.model_path}")
-            net = MixtureSPN.load(cfg.model_path)
+        # 模型默认持久化: 路径随数据指纹 (与块缓存同标签, 数据配置
+        # 变 → 旧模型自动失效)。加载后 K < 当前数据量 → 增量追加新块
+        # (白化基冻结, 见 MixtureSPN.add); K ≥ 数据量 → 直接用 (模型
+        # 训练集是当前请求的超集)
+        model_path = cfg.model_path or artifacts / (
+            f"spn_{self.data.cache_tag()}.safetensors"
+        )
+        if model_path.exists():
+            net = MixtureSPN.load(model_path)
+            k_have = net.f_mu.shape[0]
+            if k_have < n_tr:
+                print(f"[2/4] 增量训练: K {k_have} → {n_tr} (追加新块)")
+                net.add(
+                    f_tr[k_have:], t_tr[k_have:], k_tr[k_have:]
+                )
+                net.save(model_path)
+            else:
+                print(f"[2/4] 加载模型 {model_path.name} (K={k_have})")
         else:
             print(f"[2/4] MixtureSPN 实例级组装 (K=N={n_tr}, V={f_tr.shape[1]}) ...")
             net = MixtureSPN.fit(
                 f_tr, t_tr, k_tr, rel_floor=cfg.sigma_rel_floor
             )
-            if cfg.model_path is not None:
-                net.save(cfg.model_path)
-                print(f"      模型已保存 → {cfg.model_path}")
+            net.save(model_path)
+            print(f"      模型已保存 → {model_path.name}")
 
         print("[3/4] 推理: 条件期望 E[t|特征]")
         ti_pred, ki_p, _ = net.predict(f_ti)
         te_pred, ke_p, _ = net.predict(f_te)
-        if cfg.stereo:
-            # 残差加回代理 → 物理量 (s,z)
-            ti_pred = mx.concatenate(
-                [
-                    ti_pred[:, :2],
-                    (ti_pred[:, 2] + s_proxy(s_ti))[:, None],
-                    (ti_pred[:, 3] + s_ti[:, 0])[:, None],
-                    ti_pred[:, 4:],
-                ],
-                axis=1,
-            )
-            te_pred = mx.concatenate(
-                [
-                    te_pred[:, :2],
-                    (te_pred[:, 2] + s_proxy(s_te))[:, None],
-                    (te_pred[:, 3] + s_te[:, 0])[:, None],
-                    te_pred[:, 4:],
-                ],
-                axis=1,
-            )
+        # 残差加回代理 → 物理量 (s,z)
+        ti_pred = mx.concatenate(
+            [
+                ti_pred[:, :2],
+                (ti_pred[:, 2] + s_proxy(s_ti))[:, None],
+                (ti_pred[:, 3] + s_ti[:, 0])[:, None],
+                ti_pred[:, 4:],
+            ],
+            axis=1,
+        )
+        te_pred = mx.concatenate(
+            [
+                te_pred[:, :2],
+                (te_pred[:, 2] + s_proxy(s_te))[:, None],
+                (te_pred[:, 3] + s_te[:, 0])[:, None],
+                te_pred[:, 4:],
+            ],
+            axis=1,
+        )
         ki_pred = mx.argmax(ki_p, axis=1)
         ke_pred = mx.argmax(ke_p, axis=1)
 
@@ -117,7 +128,6 @@ class InverseApp:
         mi = Evaluator.report("插值", p_ti, ti_pred, ki_pred, p_tr)
         me = Evaluator.report("外推", p_te, te_pred, ke_pred, p_tr)
 
-        artifacts = Path(__file__).resolve().parent.parent / "artifacts"
         artifacts.mkdir(exist_ok=True)
         self.plot_scatter(p_tr, p_ti, ti_pred, p_te, te_pred,
                           artifacts / "inverse_scatter.png")
@@ -166,7 +176,7 @@ class InverseApp:
         """3 个插值样本: GT 渲染 vs 预测参数重建渲染 (闭环 sanity)。
         预测的 nuisance (光色/光向) 不可观测 → 重建用 GT 的 (场景参数
         的角色是内容量, 见 docs/architecture.md)。"""
-        renderer, cam = Codebook.make_renderer()
+        renderer, cam, _ = Codebook.make_renderer()  # 重建对比用左视图
         n = p_gt.shape[0]
         picks = [0, n // 2, n - 1]
         fig, axes = plt.subplots(len(picks), 2, figsize=(5, 2.6 * len(picks)))
@@ -200,34 +210,24 @@ class InverseApp:
     # ── 自检断言 (阈值依据见各注释; 2026-08-12 全量运行标定) ────────
 
     def self_check(self, mi: dict[str, float], me: dict[str, float]) -> None:
-        cfg = self.cfg
         # kind 颜色解耦后只剩形状线索 (色度泄漏捷径拆除, 这是任务升级
-        # 的有意代价)。实测 (实例级模型, rp2 线性光照管线): quick 0.46 /
-        # 全量 0.55 / 等亮度 0.54 —— 密度封顶 (同密度 1-NN 同值)。阈值 0.45
-        # 只防机制崩溃 (随机 0.33); 逐 kind 白化 (PPCA 似然比) 是升级候选
+        # 的有意代价)。实测 (实例级模型, rp2 线性光照管线): 全量 0.55
+        # —— 密度封顶 (同密度 1-NN 同值)。阈值 0.45 只防
+        # 机制崩溃 (随机 0.33); 逐 kind 白化 (PPCA 似然比) 是升级候选
         assert mi["kind"] > 0.45, f"kind 准确率过低 {mi['kind']:.3f}"
-        if cfg.equal_luma:
-            print("inverse: 等亮度消融自检 ✓ (shape-only kind, 回归报告制)")
-            return
-        # 插值位置回归: 实测 quick 6.0/5.3, 全量 5.9/5.1 (旧网格半档 9px
+        # 插值位置回归: 实测全量 5.9/5.1 (旧网格半档 9px
         # 以下 = 连续模型优于量化误差的及格线)
         assert mi["u_rmse"] < 9.0, f"插值 u RMSE {mi['u_rmse']:.2f}px"
         assert mi["v_rmse"] < 9.0, f"插值 v RMSE {mi['v_rmse']:.2f}px"
-        # 色相 (白光子集, 6 档随机 0.167): 实测 bin quick 0.63 / 全量 0.67,
-        # Δ quick 37.3° / 全量 33.2° (档位间距 60°, Δ<30° ≈ 命中档)
+        # 色相 (白光子集, 6 档随机 0.167): 实测 bin 全量 0.67,
+        # Δ 全量 33.2° (档位间距 60°, Δ<30° ≈ 命中档)
         assert mi["hue_bin"] > 0.5, f"白光色相 bin 准确率 {mi['hue_bin']:.3f}"
-        if cfg.stereo:
-            # 视差把 z 几何钉死 → s=表观×zc 随解 (乘积歧义破解)。
-            # 实测 (2026-08-13, rp2 管线): z R² quick 0.80/全量 0.85,
-            # s R² quick 0.25/全量 0.41; 外推 z R² 0.96 (几何不饱和)
-            assert mi["z_r2"] > 0.6, f"立体插值 z R² {mi['z_r2']:.3f}"
-            assert mi["s_r2"] > 0.2, f"立体插值 s R² {mi['s_r2']:.3f}"
-            print("inverse: 自检 ✓ (立体: z 几何钉死, s 随解)")
-            return
-        # s/z 报告制: 乘积歧义 ×2 (尺寸×深度 + 反照率×光色), 实测 R²
-        # 为负且与 1-NN 同值 —— 物理上限, 非机制失效
-        # 外推报告制: 核回归边界饱和上限 (升级路径 linear experts)
-        print("inverse: 自检 ✓ (s/z/外推为报告制, 见 self_check 注释)")
+        # 视差把 z 几何钉死 → s=表观×zc 随解 (乘积歧义破解)。
+        # 实测 (2026-08-13, rp2 管线): z R² 全量 0.85,
+        # s R² 全量 0.41; 外推 z R² 0.96 (几何不饱和)
+        assert mi["z_r2"] > 0.6, f"插值 z R² {mi['z_r2']:.3f}"
+        assert mi["s_r2"] > 0.2, f"插值 s R² {mi['s_r2']:.3f}"
+        print("inverse: 自检 ✓ (立体: z 几何钉死, s 随解)")
 
     # ── CLI ─────────────────────────────────────────────────────────
 
@@ -235,12 +235,12 @@ class InverseApp:
     def parse_args() -> InverseConfig:
         """CLI → InverseConfig (一切开关的唯一家)。"""
         ap = argparse.ArgumentParser()
-        ap.add_argument("--quick", action="store_true", help="小数据集自检模式")
         ap.add_argument("--no-cache", action="store_true", help="跳过数据缓存读写")
         ap.add_argument(
             "--model-path",
             default=None,
-            help="模型存取路径 (safetensors); 存在则加载跳过 EM, 否则训练后保存",
+            help="模型存取路径 (safetensors, 默认 artifacts/spn_<数据指纹>); "
+            "存在则加载跳过组装, 否则组装后保存",
         )
         ap.add_argument(
             "--sigma-rel-floor",
@@ -250,25 +250,15 @@ class InverseApp:
             "插值平滑度旋钮",
         )
         ap.add_argument(
-            "--equal-luma",
-            action="store_true",
-            help="等亮度消融: 六色相同亮度且无明暗 → L 通路失效, 色度补位",
-        )
-        ap.add_argument(
-            "--occlusion", action="store_true", help="遮挡场景: 固定黄色竖柱"
-        )
-        ap.add_argument(
-            "--stereo",
-            action="store_true",
-            help="双眼视差: 平行 rig 立体帧对, ẑ/掩码面积作观测通道",
+            "--replicates",
+            type=int,
+            default=8,
+            help="训练集复制数 R (162 组合×R 帧对): 逐块缓存, 调大触发增量训练",
         )
         a = ap.parse_args()
         return InverseConfig(
-            quick=a.quick,
             use_cache=not a.no_cache,
             model_path=Path(a.model_path) if a.model_path else None,
             sigma_rel_floor=a.sigma_rel_floor,
-            equal_luma=a.equal_luma,
-            occlusion=a.occlusion,
-            stereo=a.stereo,
+            replicates=a.replicates,
         )

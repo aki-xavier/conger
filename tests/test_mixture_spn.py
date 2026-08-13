@@ -73,8 +73,8 @@ def test_axioms() -> None:
 
 
 @pytest.fixture(scope="module")
-def fitted() -> tuple[MixtureSPN, mx.array, mx.array, mx.array]:
-    """可分离合成混合上组装的实例级模型 (3 簇 × 200 样本)。"""
+def separable() -> tuple[mx.array, mx.array, mx.array]:
+    """可分离合成混合 (3 簇 × 200 样本, 簇间距 8.0)。"""
     keys = mx.random.split(mx.random.key(0), 4)
     n_per, d_f, d_t = 200, 6, 2
     true_fmu = mx.random.normal(shape=(3, d_f), key=keys[0]) * 3.0  # 分量可分
@@ -88,9 +88,14 @@ def fitted() -> tuple[MixtureSPN, mx.array, mx.array, mx.array]:
             true_tmu[c] + 0.1 * mx.random.normal(shape=(n_per, d_t), key=keys[2])
         )
         ks.append(mx.full((n_per,), c % 3))
-    f_all = mx.concatenate(fs)
-    t_all = mx.concatenate(ts)
-    k_all = mx.concatenate(ks)
+    return mx.concatenate(fs), mx.concatenate(ts), mx.concatenate(ks)
+
+
+@pytest.fixture(scope="module")
+def fitted(
+    separable: tuple[mx.array, mx.array, mx.array],
+) -> tuple[MixtureSPN, mx.array, mx.array, mx.array]:
+    f_all, t_all, k_all = separable
     return MixtureSPN.fit(f_all, t_all, k_all), f_all, t_all, k_all
 
 
@@ -106,6 +111,25 @@ def test_instance_regression(
     # kind: 簇间可分 → kind 后验应近完美
     acc = float(mx.mean((mx.argmax(kp, axis=1) == k_all).astype(mx.float32)))
     assert acc > 0.99, f"可分混合 kind {acc:.3f}"
+
+
+def test_incremental_add(
+    separable: tuple[mx.array, mx.array, mx.array],
+) -> None:
+    """增量训练: fit 半量 + add 半量 → 与全量 fit 同契约。
+
+    交错对半分 (两半均含全部 kind); 白化基冻结是唯一与全量 fit 的
+    差异 (注释见 MixtureSPN.add), 可分数据上应达到同一标准。"""
+    f_all, t_all, k_all = separable
+    even, odd = mx.arange(0, 600, 2), mx.arange(1, 600, 2)
+    m = MixtureSPN.fit(f_all[even], t_all[even], k_all[even])
+    m.add(f_all[odd], t_all[odd], k_all[odd])
+    assert m.f_mu.shape[0] == 600, "增量后 K 应翻倍"
+    tm, kp, _ = m.predict(f_all)
+    rmse = float(mx.sqrt(mx.mean((tm - t_all) ** 2)))
+    assert rmse < 0.5, f"增量回归 RMSE {rmse}"
+    acc = float(mx.mean((mx.argmax(kp, axis=1) == k_all).astype(mx.float32)))
+    assert acc > 0.99, f"增量 kind {acc:.3f}"
 
 
 def test_correlation_pathology() -> None:

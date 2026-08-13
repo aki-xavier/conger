@@ -16,15 +16,14 @@ SPN 逆渲染研究: cga engine 渲染合成场景 → Riesz 全分辨率特征 
 
 ```bash
 pytest                       # 单元黑盒测试 (mixture_spn/color/stereo)
-pytest -m slow               # 集成自检 (渲染管线 quick 全流程, 缓存热时秒级)
+pytest -m slow               # 集成自检 (渲染管线全流程, 缓存热时秒级)
 cd src
 python riesz_selftest.py     # Riesz 自检 + 自然图特征可视化
-python inverse.py --quick    # 小数据集自检 (648 样本)
-python inverse.py            # 全量 (1296 样本): 插值 u/v R² 0.93, 白光色相 bin 0.68
+python inverse.py            # 全量立体 (1296 帧对): z R² 0.85, 外推 z R² 0.96
 ```
 
-选项: `--sigma-rel-floor` (核带宽下限)、`--stereo` (双眼视差: 平行 rig 立体帧对 + 视差深度通道)、`--equal-luma` (等亮度消融)、`--occlusion` (遮挡场景)、`--model-path` (safetensors 存取; 全量白化基约 1.5GB)。
+选项: `--sigma-rel-floor` (核带宽下限)、`--replicates R` (训练集复制数, 调大触发增量训练)、`--no-cache` (跳过数据缓存)、`--model-path` (模型 safetensors 存取, 默认 `artifacts/spn_<数据指纹>`; 存在即加载, K 不足则增量追加)。
 
-实测 (全量): 单目 插值 u,v R²≈0.93 / 白光色相 bin 0.68 / s,z 报告制 (乘积歧义); **立体 (`--stereo`)** 插值 u,v R²≈0.92 / s R² 0.38 / z R² 0.85 / 外推 z R² 0.96 (视差深度几何钉死, 乘积歧义破解, 外推不饱和)。
+实测 (全量立体): 插值 u,v R²≈0.95 / s R² 0.41 / z R² 0.85 / 外推 z R² 0.96 / 白光色相 bin 0.67 / kind 0.55 (视差深度几何钉死, 乘积歧义破解, 外推不饱和)。
 
 依赖: mlx / matplotlib / numpy / pillow + 本地 path 依赖 [cga](../cga) (渲染引擎)。

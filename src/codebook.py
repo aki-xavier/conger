@@ -22,7 +22,6 @@ from cga.engine import (
     CylinderGeometry,
     DirectionalLight,
     Mesh,
-    MeshBasicMaterial,
     MeshStandardMaterial,
     PerspectiveCamera,
     Renderer,
@@ -50,7 +49,8 @@ class Codebook:
     Z_EXTRA = ((2.0, 2.5), (4.0, 4.5))
     EXTENT = 1.8  # 图元最大世界半径系数: box 半对角 √3≈1.732, 取余量
     STEREO_BASE = 0.2  # 双眼基线 (世界单位): 训练深度范围 d∈[6,12]px
-    SAMPLE_V = 2  # 采样器版本 (2=取景约束拒绝采样; 入缓存指纹)
+    # 采样器版本 (入缓存指纹): 3 = 逐复制块独立种子 (增量追加友好)
+    SAMPLE_V = 3
     # 渲染管线版本 (入缓存指纹): 2 = cga 引擎线性空间光照 + 输出端
     # sRGB 编码 (cga d71e0e4 重构, 着色数值变化, 几何不变)
     RENDER_V = 2
@@ -66,39 +66,33 @@ class Codebook:
         (-0.6, -0.4, 0.7),
         (0.6, -0.4, 0.7),
     )
-    # 遮挡: 固定黄色竖柱 (图中央偏右, 像素 81,84 @ z=3.5)
-    OCC_BOX = (0.5, 1.4, 0.5)
-    OCC_UV = (81.0, 84.0)
-    OCC_Z = 3.5
-    OCC_COLOR = 0xF1C40F
 
     def __init__(self, cfg: InverseConfig):
         self.cfg = cfg
 
     @staticmethod
-    def obj_color(hue_idx: int, equal_luma: bool = False) -> int:
-        """色相下标 → RGB hex。普通: HSV(H, S=0.8, V=0.85); 等亮度:
-        按 Rec601 亮度反解 V (各色相亮度归一, L 通路失效由构造保证)。"""
+    def obj_color(hue_idx: int) -> int:
+        """色相下标 → RGB hex: HSV(H, S=0.8, V=0.85)。"""
         h = hue_idx / Codebook.N_HUE
-        if equal_luma:
-            r, g, b = colorsys.hsv_to_rgb(h, 1.0, 1.0)
-            luma = 0.299 * r + 0.587 * g + 0.114 * b
-            v = 0.10 / luma  # 目标亮度 0.10 (六色相全可达)
-            r, g, b = colorsys.hsv_to_rgb(h, 1.0, v)
-        else:
-            r, g, b = colorsys.hsv_to_rgb(h, 0.8, 0.85)
+        r, g, b = colorsys.hsv_to_rgb(h, 0.8, 0.85)
         return (int(r * 255) << 16) | (int(g * 255) << 8) | int(b * 255)
 
     @staticmethod
-    def sample(
-        replicates: int,
-        key: mx.array,
-        extrap: bool = False,
-        stereo_base: float = 0.0,
-    ) -> mx.array:
-        """→ (162×R, 8) [kind,u,v,s,z,hue,lcol,ldir]。离散因子全笛卡尔
-        积 (组合覆盖保证), 连续因子每行独立随机; 位置边距按 s,z 逐样本
-        计算 (含立体偏移 FX·B/2z), 保证图元在两视图都完整在画面内。"""
+    def sample(replicates: int, seed: int, extrap: bool = False) -> mx.array:
+        """→ (162×R, 8)。逐复制块独立种子 (seed·1000+r): R 增长纯追加,
+        已有块不重采 —— 增量训练的数据侧前提。"""
+        return mx.concatenate(
+            [
+                Codebook._block(mx.random.key(seed * 1000 + r), extrap)
+                for r in range(replicates)
+            ]
+        )
+
+    @staticmethod
+    def _block(key: mx.array, extrap: bool = False) -> mx.array:
+        """单复制块 → (162, 8) [kind,u,v,s,z,hue,lcol,ldir]。离散因子全
+        笛卡尔积 (组合覆盖保证), 连续因子每行独立随机; 位置边距按 s,z
+        逐样本计算 (含立体偏移 FX·B/2z), 保证图元在两视图都完整在画面内。"""
         cb = Codebook
         combos = [
             (k, h, c, d)
@@ -106,8 +100,8 @@ class Codebook:
             for h in range(cb.N_HUE)
             for c in range(len(cb.LIGHT_COLORS))
             for d in range(len(cb.LIGHT_DIRS))
-        ] * replicates
-        n = len(combos)  # 162 × R
+        ]
+        n = len(combos)  # 162
 
         def uni_extra(rng, pair):
             """支撑集外两側区间等概率采样 (n,) (外推探针用)。"""
@@ -128,8 +122,7 @@ class Codebook:
                 cb.Z_RANGE[1] - cb.Z_RANGE[0]
             )
         margin = cb.EXTENT * s * cb.FX / (cb.CAM_Z - z) + 2.0  # 像素边距
-        if stereo_base > 0:
-            margin = margin + stereo_base / 2 * cb.FX / (cb.CAM_Z - z)
+        margin = margin + cb.STEREO_BASE / 2 * cb.FX / (cb.CAM_Z - z)
         # 取景约束: margin ≤ W/2−2, 否则图元出画。角部组合 (大 s × 近 z)
         # 物理上放不下 → 拒绝重采 (相机取景的诚实约束, 非分布偏差)。
         # 实测: 不拒绝时角部样本出画 → 掩码为空 → 视差质心 1/d 爆炸
@@ -152,8 +145,7 @@ class Codebook:
             s = mx.where(badm, s_new, s)
             z = mx.where(badm, z_new, z)
             margin = cb.EXTENT * s * cb.FX / (cb.CAM_Z - z) + 2.0
-            if stereo_base > 0:
-                margin = margin + stereo_base / 2 * cb.FX / (cb.CAM_Z - z)
+            margin = margin + cb.STEREO_BASE / 2 * cb.FX / (cb.CAM_Z - z)
         u = margin + mx.random.uniform(shape=(n,), key=ku) * (cb.W - 2 * margin)
         v = margin + mx.random.uniform(shape=(n,), key=kv) * (cb.H - 2 * margin)
         disc = mx.array(combos, dtype=mx.float32)  # (n,4) kind,hue,lcol,ldir
@@ -172,8 +164,7 @@ class Codebook:
         return x, y
 
     def to_scene(self, params: tuple[float, ...]) -> Scene:
-        """场景参数 (kind,u,v,s,z,hue,lcol,ldir) → cga Scene。
-        等亮度: Basic 材质不接光照 → 光色/光向无效果 (仍采样覆盖)。"""
+        """场景参数 (kind,u,v,s,z,hue,lcol,ldir) → cga Scene。"""
         cfg = self.cfg
         kind = int(params[0])
         u, v, s, z = (float(p) for p in params[1:5])
@@ -193,43 +184,14 @@ class Codebook:
                 direction=self.LIGHT_DIRS[ldir],
             )
         )
-        color = self.obj_color(hue, cfg.equal_luma)
-        if cfg.equal_luma:
-            # 等亮度: 无明暗 (Basic 材质不接光照) → L 图均匀, 轮廓仅存于色度
-            material = MeshBasicMaterial(Color(color))
-        else:
-            material = MeshStandardMaterial(Color(color), roughness=0.55)
+        material = MeshStandardMaterial(
+            Color(self.obj_color(hue)), roughness=0.55
+        )
         scene.add(Mesh(geom, material, position=(x, y, z)))
-        if cfg.occlusion:
-            scene.add(self.occluder())
         return scene
 
-    def occluder(self) -> Mesh:
-        """固定黄色竖柱遮挡物 (后添加 → 同深度时 z-buffer 赢)。"""
-        xo, yo = self.unproject(*self.OCC_UV, self.OCC_Z)
-        mat = (
-            MeshBasicMaterial(Color(self.OCC_COLOR))
-            if self.cfg.equal_luma
-            else MeshStandardMaterial(Color(self.OCC_COLOR), roughness=0.55)
-        )
-        return Mesh(BoxGeometry(*self.OCC_BOX), mat, position=(xo, yo, self.OCC_Z))
-
     @staticmethod
-    def make_renderer() -> tuple[Renderer, PerspectiveCamera]:
-        renderer = Renderer(Codebook.H, Codebook.W, aa=1)
-        cam = PerspectiveCamera(
-            fov=Codebook.FOV,
-            aspect=1.0,
-            near=0.1,
-            far=50.0,
-            position=(0.0, 0.0, Codebook.CAM_Z),
-            target=(0.0, 0.0, 0.0),
-        )
-        cam.look_at((0.0, 0.0, 0.0))
-        return renderer, cam
-
-    @staticmethod
-    def make_stereo_renderer(
+    def make_renderer(
         baseline: float = STEREO_BASE,
     ) -> tuple[Renderer, PerspectiveCamera, PerspectiveCamera]:
         """平行 rig: 左右相机 x 偏移 ±B/2, 光轴平行 (−z)。视差

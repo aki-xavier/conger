@@ -85,19 +85,13 @@ class FeatureExtractor:
     ) -> tuple[mx.array, RieszWavelet | None]:
         """渲染帧 → 全分辨率特征向量 (n_feat,)。单 RieszWavelet 实例
         顺序 update (核只建一次)。"""
-        cfg = self.cfg
         lum = self.frame_lum(frame)
         chr_re, chr_im = self.frame_chroma(frame)
-        if cfg.equal_luma:
-            # 传感器噪声底: 等亮度残差对比 (~0.6 灰度级) 在真实相机被
-            # 噪声淹没 → L 通路失效; 色度轮廓不受影响 → 色度补位
-            # (无 key = 全局 RNG, 每帧新噪声; 复现性由数据缓存保证)
-            lum = lum + mx.random.normal(shape=lum.shape, scale=0.02)
         imgs = {"lum": lum, "chr_re": chr_re, "chr_im": chr_im}
         if rw is None:
             rw = RieszWavelet(lum)
         parts = []
-        for src, ch in cfg.feat_spec:
+        for src, ch in self.cfg.feat_spec:
             if ch == "raw":  # 原始源图 (带符号色度, 不过 Riesz)
                 parts.append(imgs[src].reshape(-1))
                 continue

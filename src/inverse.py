@@ -10,12 +10,13 @@
 nuisance。离散因子全笛卡尔积覆盖 (3×6×3×3 = 162 组合 × R 复制),
 数据量最小化设计 (全量 1296 帧 vs 旧 4600)。
 
-数据: 参数采样 → cga 渲染 144×144 → Riesz 特征 (L + 复数色相 + 带
-符号拮抗, 11 通道全分辨率) → 实例级组装。
-推理: 责任度 (特征证据) → E[t|特征] + P(kind|特征)。
+数据: 参数采样 → cga 渲染 144×144 立体帧对 (平行 rig, B=0.2) →
+左帧 Riesz 特征 (L + 复数色相 + 带符号拮抗, 11 通道全分辨率) +
+视差几何观测 (ẑ, 掩码面积) → 实例级组装。
+推理: 责任度 (特征证据) → E[t|特征] + P(kind|特征); s,z 走残差
+参数化 (模型学 z−ẑ / s−ŝ, 推理加回 —— 几何钉死不饱和)。
 评估: 物理单位 RMSE/R² (基线 = 训练均值), 色相环形误差 (白光子集),
-插值 vs 外推分裂。kind 形状线索密度封顶 ≈0.52; s/z 乘积歧义 ×2
-(尺寸×深度 + 反照率×光色) 报告制。
+插值 vs 外推分裂。kind 形状线索密度封顶 ≈0.55。
 
 结构 (无游离状态: 配置集中 InverseConfig, 机制分属各类):
   Codebook          连续场景参数 ⇄ cga 场景 (领域常量 + 组合采样)
@@ -26,9 +27,9 @@ nuisance。离散因子全笛卡尔积覆盖 (3×6×3×3 = 162 组合 × R 复�
   Evaluator         回归/分类/色相指标
   InverseApp        主流程 (训练/推理/评估/可视化/自检)
 
-运行: cd src && python inverse.py [--quick] [--equal-luma] [--occlusion]
+运行: cd src && python inverse.py [--replicates R] [--no-cache] [...]
 自检: pytest tests/ (mixture_spn 公理/回归/白化病理/序列化 + color +
-      stereo); 集成自检 pytest -m slow ≡ inverse.py --quick 内置断言
+      stereo); 集成自检 pytest -m slow ≡ inverse.py 内置断言
       (阈值依据见 inverse_app.self_check)。
 """
 

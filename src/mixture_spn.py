@@ -95,6 +95,25 @@ class MixtureSPN:
 
     # ── 组装 (学习) ─────────────────────────────────────────────────
 
+    @staticmethod
+    def _tied_vars(z: mx.array, kind: mx.array, rel_floor: float) -> mx.array:
+        """逐 kind tied 对角方差 → (3, D) (类内全子集估计 = 核带宽,
+        地板防零; 缺场 kind 行无引用, 填 1 占位)。"""
+        out = []
+        for j in range(3):
+            sel = Utils.nonzero(kind == j)
+            if sel.shape[0] == 0:
+                out.append(mx.ones((1, z.shape[1])))
+                continue
+            zj = z[sel]
+            out.append(
+                mx.maximum(
+                    mx.var(zj, axis=0, keepdims=True),
+                    (rel_floor * zj.std(axis=0, keepdims=True)) ** 2 + 1e-8,
+                )
+            )
+        return mx.concatenate(out)
+
     @classmethod
     def fit(
         cls,
@@ -107,19 +126,15 @@ class MixtureSPN:
         f_mean, basis, z = cls._whiten(f)
         mus, vars_, tmus, ws, klp = [], [], [], [], []
         n = z.shape[0]
+        gvar = cls._tied_vars(z, kind, rel_floor)
         for j in range(3):
             sel = Utils.nonzero(kind == j)
             nj = sel.shape[0]
             if nj == 0:
                 continue  # 缺场 kind (合成测试/子集) 不建分量
             zj, tj = z[sel], t[sel]
-            # 类内 tied 方差: 全子集对角方差 (核带宽), 地板防零
-            gvar = mx.maximum(
-                mx.var(zj, axis=0, keepdims=True),
-                (rel_floor * zj.std(axis=0, keepdims=True)) ** 2 + 1e-8,
-            )
             mus.append(zj)
-            vars_.append(mx.tile(gvar, (nj, 1)))
+            vars_.append(mx.tile(gvar[j : j + 1], (nj, 1)))
             tmus.append(tj)
             ws.append(mx.full((nj,), -math.log(n)))  # 均匀 (含类频率)
             onehot = mx.zeros((nj, 3))
@@ -130,6 +145,31 @@ class MixtureSPN:
         )
         mx.eval(m.log_w, m.f_mu, m.f_var, m.t_mu, m.k_logp)
         return m
+
+    def add(self, f: mx.array, t: mx.array, kind: mx.array) -> None:
+        """增量训练: 追加新样本分量 + tied 方差/均匀权重全量重估。
+
+        精确性: 实例级模型的 f_mu 即全部训练样本, 重估与"全量 fit 的
+        方差步"是同估计量 —— 唯一冻结的是白化基 (度量): 新样本跑出
+        旧主子空间的方向不可表示 (ponytail: 分布漂移大时重新 fit,
+        基扩展要做正交化+坐标迁移, YAGNI 直到漂移实测发生)。"""
+        assert self.f_mean is not None and self.basis is not None
+        z_new = self._z(f)  # 冻结基白化
+        self.f_mu = mx.concatenate([self.f_mu, z_new])
+        self.t_mu = mx.concatenate([self.t_mu, t])
+        onehot = mx.zeros((kind.shape[0], 3))
+        self.k_logp = mx.concatenate(
+            [self.k_logp, mx.log(onehot + (mx.arange(3) == kind[:, None]))]
+        )
+        n = self.f_mu.shape[0]
+        k_all = mx.argmax(self.k_logp, axis=1)
+        gvar = self._tied_vars(self.f_mu, k_all, self.rel_floor)
+        self.f_var = gvar[k_all]
+        self.log_w = mx.full((n,), -math.log(n))
+        self._norm = self.log_w - 0.5 * mx.sum(
+            mx.log(self.f_var) + math.log(2.0 * math.pi), axis=1
+        )
+        mx.eval(self.log_w, self.f_mu, self.f_var, self.t_mu, self.k_logp)
 
     @staticmethod
     def _whiten(f: mx.array) -> tuple[mx.array, mx.array, mx.array]:
