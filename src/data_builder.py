@@ -32,7 +32,7 @@ class DataBuilder:
         feat_tag = "".join(f"{s[:2]}{c[:2]}" for s, c in cfg.feat_spec)
         lvl_tag = (
             f"k{cb.N_KIND}h{cb.N_HUE}c{len(cb.LIGHT_COLORS)}d{len(cb.LIGHT_DIRS)}"
-            f"sv{cb.SAMPLE_V}"
+            f"sv{cb.SAMPLE_V}rp{cb.RENDER_V}"
         )
         eq_tag = "eqn" if cfg.equal_luma else "std"
         occ_tag = "occ" if cfg.occlusion else "noc"

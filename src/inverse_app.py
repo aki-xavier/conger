@@ -202,24 +202,24 @@ class InverseApp:
     def self_check(self, mi: dict[str, float], me: dict[str, float]) -> None:
         cfg = self.cfg
         # kind 颜色解耦后只剩形状线索 (色度泄漏捷径拆除, 这是任务升级
-        # 的有意代价)。实测 (实例级模型): quick 0.49 / 全量 0.52 /
-        # 等亮度 0.53 —— 密度封顶 (同密度 1-NN 同值)。阈值 0.45 只防
-        # 机制崩溃 (随机 0.33); 逐 kind 白化 (PPCA 似然比) 是升级候选
+        # 的有意代价)。实测 (实例级模型, rp2 线性光照管线): quick 0.46 /
+        # 全量 0.55 / 等亮度 0.54 —— 密度封顶 (同密度 1-NN 同值)。阈值 0.45
+        # 只防机制崩溃 (随机 0.33); 逐 kind 白化 (PPCA 似然比) 是升级候选
         assert mi["kind"] > 0.45, f"kind 准确率过低 {mi['kind']:.3f}"
         if cfg.equal_luma:
             print("inverse: 等亮度消融自检 ✓ (shape-only kind, 回归报告制)")
             return
-        # 插值位置回归: 实测 quick 6.5/7.0, 全量 5.4/5.2 (旧网格半档 9px
+        # 插值位置回归: 实测 quick 6.0/5.3, 全量 5.9/5.1 (旧网格半档 9px
         # 以下 = 连续模型优于量化误差的及格线)
         assert mi["u_rmse"] < 9.0, f"插值 u RMSE {mi['u_rmse']:.2f}px"
         assert mi["v_rmse"] < 9.0, f"插值 v RMSE {mi['v_rmse']:.2f}px"
-        # 色相 (白光子集, 6 档随机 0.167): 实测 bin quick 0.63 / 全量 0.68,
-        # Δ quick 35.7° / 全量 28.4° (档位间距 60°, Δ<30° ≈ 命中档)
+        # 色相 (白光子集, 6 档随机 0.167): 实测 bin quick 0.63 / 全量 0.67,
+        # Δ quick 37.3° / 全量 33.2° (档位间距 60°, Δ<30° ≈ 命中档)
         assert mi["hue_bin"] > 0.5, f"白光色相 bin 准确率 {mi['hue_bin']:.3f}"
         if cfg.stereo:
             # 视差把 z 几何钉死 → s=表观×zc 随解 (乘积歧义破解)。
-            # 实测 (2026-08-13): z R² quick 0.79/全量 0.85,
-            # s R² quick 0.25/全量 0.38; 外推 z R² 0.96 (几何不饱和)
+            # 实测 (2026-08-13, rp2 管线): z R² quick 0.80/全量 0.85,
+            # s R² quick 0.25/全量 0.41; 外推 z R² 0.96 (几何不饱和)
             assert mi["z_r2"] > 0.6, f"立体插值 z R² {mi['z_r2']:.3f}"
             assert mi["s_r2"] > 0.2, f"立体插值 s R² {mi['s_r2']:.3f}"
             print("inverse: 自检 ✓ (立体: z 几何钉死, s 随解)")
