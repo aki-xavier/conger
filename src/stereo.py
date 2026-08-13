@@ -63,30 +63,3 @@ class StereoDepth:
         return z, d, area
 
 
-def _selftest() -> None:
-    """黑盒自检: 合成位移帧对, 契约全部来自几何第一性原理。"""
-    h = w = 144
-    # 左帧: 红色方块 (H,W,4) uint8; 右帧 = 左移 k px (d = k)
-    k = 8
-    fl = mx.zeros((h, w, 4), dtype=mx.uint8)
-    fl[50:90, 60:100, 0] = 200  # R
-    fl[50:90, 60:100, 3] = 255
-    fr = mx.zeros((h, w, 4), dtype=mx.uint8)
-    fr[50:90, 60 - k : 100 - k, 0] = 200
-    fr[50:90, 60 - k : 100 - k, 3] = 255
-    z, d, area = StereoDepth(baseline=0.2).estimate(fl, fr)
-    # 位移不变性: 视差必须等于位移 (亚像素容差 0.1px, 质心是精确量)
-    assert abs(d - k) < 0.1, f"视差 {d} ≠ 位移 {k}"
-    # 深度公式: ẑ = CAM_Z − FX·B/d = 5.5 − 90·0.2/8 = 3.25
-    assert abs(z - 3.25) < 0.05, f"深度 {z}"
-    # 面积: 40×40 = 1600 (软权重 S²=1 每像素)
-    assert abs(area - 1600) < 1.0, f"面积 {area}"
-    # 背景鲁棒: 纯灰背景帧的质心权重应全在物体上 —— 本构造已隐含
-    # (背景 S=0); 交换左右帧 → 视差变号 (对称性)
-    z2, d2, _ = StereoDepth(baseline=0.2).estimate(fr, fl)
-    assert abs(d2 + k) < 0.1, f"交换视差 {d2}"
-    print(f"stereo 自检 ✓ (d={d:.2f}px, ẑ={z:.3f}, area={area:.0f})")
-
-
-if __name__ == "__main__":
-    _selftest()

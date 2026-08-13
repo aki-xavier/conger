@@ -84,7 +84,7 @@ flowchart LR
         RS["riesz_scale.py"] & FM["feature_maps.py"] --> RW["riesz.py: RieszWavelet"]
         RW --> FEX
     end
-    MSP["mixture_spn.py: MixtureSPN<br/>白化+实例级组装+条件期望+序列化<br/>内嵌 4 组黑盒自检"] --> APP
+    MSP["mixture_spn.py: MixtureSPN<br/>白化+实例级组装+条件期望+序列化"] --> APP
     RW --> ST["riesz_selftest.py"]
 ```
 

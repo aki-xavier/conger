@@ -27,8 +27,9 @@ nuisance。离散因子全笛卡尔积覆盖 (3×6×3×3 = 162 组合 × R 复�
   InverseApp        主流程 (训练/推理/评估/可视化/自检)
 
 运行: cd src && python inverse.py [--quick] [--equal-luma] [--occlusion]
-自检: mixture_spn.py 内嵌 (公理性质/实例回归/白化相关病理/序列化);
-      inverse.py --quick 内置断言 (阈值依据见 inverse_app.self_check)。
+自检: pytest tests/ (mixture_spn 公理/回归/白化病理/序列化 + color +
+      stereo); 集成自检 pytest -m slow ≡ inverse.py --quick 内置断言
+      (阈值依据见 inverse_app.self_check)。
 """
 
 from inverse_app import InverseApp
