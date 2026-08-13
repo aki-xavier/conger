@@ -23,6 +23,7 @@ class InverseConfig:
     sigma_rel_floor: float = 1e-2
     equal_luma: bool = False  # 等亮度消融: L 失效 / 色度补位
     occlusion: bool = False  # 遮挡场景: 固定黄柱
+    stereo: bool = False  # 双眼视差: 平行 rig 立体帧对 + 视差深度通道
 
     @property
     def feat_spec(self) -> tuple[tuple[str, str], ...]:
@@ -31,7 +32,8 @@ class InverseConfig:
 
     @property
     def n_feat(self) -> int:
-        return len(self.feat_spec) * Codebook.H * Codebook.W
+        n = len(self.feat_spec) * Codebook.H * Codebook.W
+        return n + 2 if self.stereo else n  # +[ẑ, 掩码面积]
 
     @property
     def bg_color(self) -> int:

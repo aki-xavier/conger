@@ -49,6 +49,8 @@ class Codebook:
     S_EXTRA = ((0.25, 0.35), (0.6, 0.75))
     Z_EXTRA = ((2.0, 2.5), (4.0, 4.5))
     EXTENT = 1.8  # 图元最大世界半径系数: box 半对角 √3≈1.732, 取余量
+    STEREO_BASE = 0.2  # 双眼基线 (世界单位): 训练深度范围 d∈[6,12]px
+    SAMPLE_V = 2  # 采样器版本 (2=取景约束拒绝采样; 入缓存指纹)
     # 离散因子水平 (全笛卡尔积 = 3×6×3×3 = 162 组合)。水平数取最小
     # 可行集 (覆盖要求 = 组合存在即可), 省下的样本预算换连续复制数
     # R —— 稀疏平铺实测: R=1 时每组合 1 样本, 最近分量必色差失配,
@@ -85,10 +87,15 @@ class Codebook:
         return (int(r * 255) << 16) | (int(g * 255) << 8) | int(b * 255)
 
     @staticmethod
-    def sample(replicates: int, key: mx.array, extrap: bool = False) -> mx.array:
+    def sample(
+        replicates: int,
+        key: mx.array,
+        extrap: bool = False,
+        stereo_base: float = 0.0,
+    ) -> mx.array:
         """→ (162×R, 8) [kind,u,v,s,z,hue,lcol,ldir]。离散因子全笛卡尔
         积 (组合覆盖保证), 连续因子每行独立随机; 位置边距按 s,z 逐样本
-        计算, 保证图元完整在画面内 (最大延伸 EXTENT·s 世界单位)。"""
+        计算 (含立体偏移 FX·B/2z), 保证图元在两视图都完整在画面内。"""
         cb = Codebook
         combos = [
             (k, h, c, d)
@@ -98,15 +105,16 @@ class Codebook:
             for d in range(len(cb.LIGHT_DIRS))
         ] * replicates
         n = len(combos)  # 162 × R
+
+        def uni_extra(rng, pair):
+            """支撑集外两側区间等概率采样 (n,) (外推探针用)。"""
+            side = mx.random.randint(0, 2, shape=(n,), key=rng)
+            lo = mx.where(side == 0, pair[0][0], pair[1][0])
+            hi = mx.where(side == 0, pair[0][1], pair[1][1])
+            return lo + mx.random.uniform(shape=(n,), key=rng) * (hi - lo)
+
         ks, kz, ku, kv = mx.random.split(key, 4)
         if extrap:
-            # 支撑集外两側区间等概率
-            def uni_extra(rng, pair):
-                side = mx.random.randint(0, 2, shape=(n,), key=rng)
-                lo = mx.where(side == 0, pair[0][0], pair[1][0])
-                hi = mx.where(side == 0, pair[0][1], pair[1][1])
-                return lo + mx.random.uniform(shape=(n,), key=rng) * (hi - lo)
-
             s = uni_extra(ks, cb.S_EXTRA)
             z = uni_extra(kz, cb.Z_EXTRA)
         else:
@@ -117,6 +125,32 @@ class Codebook:
                 cb.Z_RANGE[1] - cb.Z_RANGE[0]
             )
         margin = cb.EXTENT * s * cb.FX / (cb.CAM_Z - z) + 2.0  # 像素边距
+        if stereo_base > 0:
+            margin = margin + stereo_base / 2 * cb.FX / (cb.CAM_Z - z)
+        # 取景约束: margin ≤ W/2−2, 否则图元出画。角部组合 (大 s × 近 z)
+        # 物理上放不下 → 拒绝重采 (相机取景的诚实约束, 非分布偏差)。
+        # 实测: 不拒绝时角部样本出画 → 掩码为空 → 视差质心 1/d 爆炸
+        for attempt in range(8):
+            badm = 2 * margin > cb.W - 4.0
+            nbad = int(mx.sum(badm.astype(mx.int32)))
+            if nbad == 0:
+                break
+            ka, kb = mx.random.split(mx.random.key(1000 + attempt), 2)
+            if extrap:
+                s_new = uni_extra(ka, cb.S_EXTRA)
+                z_new = uni_extra(kb, cb.Z_EXTRA)
+            else:
+                s_new = cb.S_RANGE[0] + mx.random.uniform(shape=(n,), key=ka) * (
+                    cb.S_RANGE[1] - cb.S_RANGE[0]
+                )
+                z_new = cb.Z_RANGE[0] + mx.random.uniform(shape=(n,), key=kb) * (
+                    cb.Z_RANGE[1] - cb.Z_RANGE[0]
+                )
+            s = mx.where(badm, s_new, s)
+            z = mx.where(badm, z_new, z)
+            margin = cb.EXTENT * s * cb.FX / (cb.CAM_Z - z) + 2.0
+            if stereo_base > 0:
+                margin = margin + stereo_base / 2 * cb.FX / (cb.CAM_Z - z)
         u = margin + mx.random.uniform(shape=(n,), key=ku) * (cb.W - 2 * margin)
         v = margin + mx.random.uniform(shape=(n,), key=kv) * (cb.H - 2 * margin)
         disc = mx.array(combos, dtype=mx.float32)  # (n,4) kind,hue,lcol,ldir
@@ -190,3 +224,25 @@ class Codebook:
         )
         cam.look_at((0.0, 0.0, 0.0))
         return renderer, cam
+
+    @staticmethod
+    def make_stereo_renderer(
+        baseline: float = STEREO_BASE,
+    ) -> tuple[Renderer, PerspectiveCamera, PerspectiveCamera]:
+        """平行 rig: 左右相机 x 偏移 ±B/2, 光轴平行 (−z)。视差
+        d = FX·B/zc 纯水平、与位置无关 (汇聚式有梯形畸变, 不用)。"""
+        renderer = Renderer(Codebook.H, Codebook.W, aa=1)
+        cams = []
+        for sign in (-1.0, 1.0):
+            px = sign * baseline / 2
+            cam = PerspectiveCamera(
+                fov=Codebook.FOV,
+                aspect=1.0,
+                near=0.1,
+                far=50.0,
+                position=(px, 0.0, Codebook.CAM_Z),
+                target=(px, 0.0, 0.0),
+            )
+            cam.look_at((px, 0.0, 0.0))
+            cams.append(cam)
+        return renderer, cams[0], cams[1]

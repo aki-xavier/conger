@@ -22,8 +22,8 @@ python inverse.py --quick    # 小数据集自检 (648 样本)
 python inverse.py            # 全量 (1296 样本): 插值 u/v R² 0.93, 白光色相 bin 0.68
 ```
 
-选项: `--sigma-rel-floor` (核带宽下限)、`--equal-luma` (等亮度消融)、`--occlusion` (遮挡场景)、`--model-path` (safetensors 存取; 全量白化基约 1.5GB)。
+选项: `--sigma-rel-floor` (核带宽下限)、`--stereo` (双眼视差: 平行 rig 立体帧对 + 视差深度通道)、`--equal-luma` (等亮度消融)、`--occlusion` (遮挡场景)、`--model-path` (safetensors 存取; 全量白化基约 1.5GB)。
 
-实测 (全量): 插值 u,v RMSE 5.4/5.2px (R²≈0.93) / 白光色相 bin 0.68 (Δ28°) / kind 0.52 (形状线索密度封顶, 颜色解耦的有意代价) / s,z 报告制 (乘积歧义 ×2 的物理上限)。
+实测 (全量): 单目 插值 u,v R²≈0.93 / 白光色相 bin 0.68 / s,z 报告制 (乘积歧义); **立体 (`--stereo`)** 插值 u,v R²≈0.92 / s R² 0.38 / z R² 0.85 / 外推 z R² 0.96 (视差深度几何钉死, 乘积歧义破解, 外推不饱和)。
 
 依赖: mlx / matplotlib / numpy / pillow + 本地 path 依赖 [cga](../cga) (渲染引擎)。

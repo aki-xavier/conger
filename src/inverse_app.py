@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import argparse
+import math
 from pathlib import Path
 
 import matplotlib
@@ -37,12 +38,42 @@ class InverseApp:
             f"[1/4] 数据: train {n_tr} / 插值 {162 * r_i} / 外推 {162 * r_e} "
             f"(162 组合×R, cache={'on' if cfg.use_cache else 'off'})"
         )
-        f_tr, p_tr, f_ti, p_ti, f_te, p_te = self.data.build(
-            r_tr, r_i, r_e, cfg.use_cache
+        f_tr, p_tr, f_ti, p_ti, f_te, p_te, s_tr, s_ti, s_te = (
+            self.data.build(r_tr, r_i, r_e, cfg.use_cache)
         )
         assert mx.all(mx.isfinite(f_tr)), "特征含 NaN/inf"
+        if cfg.stereo:
+            # 视差管线独立评估 (几何 ẑ vs GT z; 外推同样几何有效)
+            for nm, st, pp in (("插值", s_ti, p_ti), ("外推", s_te, p_te)):
+                err = st[:, 0] - pp[:, 4]
+                print(
+                    f"  视差管线 {nm}: ẑ RMSE "
+                    f"{float(mx.sqrt(mx.mean(err**2))):.4f} "
+                    f"bias {float(mx.mean(err)):+.4f} "
+                    f"(d 中位 {float(mx.median(st[:, 1])):.2f}px)"
+                )
         t_tr = DataBuilder.targets(p_tr)
         k_tr = p_tr[:, 0].astype(mx.int32)
+
+        def s_proxy(stats: mx.array) -> mx.array:
+            """表观尺寸代理: √(area/π)·zc/FX (形状系数留给模型残差学)。"""
+            return mx.sqrt(stats[:, 2] / math.pi) * (
+                Codebook.CAM_Z - stats[:, 0]
+            ) / Codebook.FX
+
+        if cfg.stereo:
+            # 强几何观测 + 残差学习: ẑ/ŝ 直接拼特征会被白化稀释
+            # (1/647 维, 实测 z R² 0.02); 模型改为学 z−ẑ 与 s−ŝ 的
+            # 标定残差 (可见面≠中心偏差的形状相关部分), 推理后加回
+            t_tr = mx.concatenate(
+                [
+                    t_tr[:, :2],
+                    (t_tr[:, 2] - s_proxy(s_tr))[:, None],
+                    (t_tr[:, 3] - s_tr[:, 0])[:, None],
+                    t_tr[:, 4:],
+                ],
+                axis=1,
+            )
 
         if cfg.model_path is not None and cfg.model_path.exists():
             print(f"[2/4] 加载模型 {cfg.model_path}")
@@ -59,6 +90,26 @@ class InverseApp:
         print("[3/4] 推理: 条件期望 E[t|特征]")
         ti_pred, ki_p, _ = net.predict(f_ti)
         te_pred, ke_p, _ = net.predict(f_te)
+        if cfg.stereo:
+            # 残差加回代理 → 物理量 (s,z)
+            ti_pred = mx.concatenate(
+                [
+                    ti_pred[:, :2],
+                    (ti_pred[:, 2] + s_proxy(s_ti))[:, None],
+                    (ti_pred[:, 3] + s_ti[:, 0])[:, None],
+                    ti_pred[:, 4:],
+                ],
+                axis=1,
+            )
+            te_pred = mx.concatenate(
+                [
+                    te_pred[:, :2],
+                    (te_pred[:, 2] + s_proxy(s_te))[:, None],
+                    (te_pred[:, 3] + s_te[:, 0])[:, None],
+                    te_pred[:, 4:],
+                ],
+                axis=1,
+            )
         ki_pred = mx.argmax(ki_p, axis=1)
         ke_pred = mx.argmax(ke_p, axis=1)
 
@@ -165,6 +216,14 @@ class InverseApp:
         # 色相 (白光子集, 6 档随机 0.167): 实测 bin quick 0.63 / 全量 0.68,
         # Δ quick 35.7° / 全量 28.4° (档位间距 60°, Δ<30° ≈ 命中档)
         assert mi["hue_bin"] > 0.5, f"白光色相 bin 准确率 {mi['hue_bin']:.3f}"
+        if cfg.stereo:
+            # 视差把 z 几何钉死 → s=表观×zc 随解 (乘积歧义破解)。
+            # 实测 (2026-08-13): z R² quick 0.79/全量 0.85,
+            # s R² quick 0.25/全量 0.38; 外推 z R² 0.96 (几何不饱和)
+            assert mi["z_r2"] > 0.6, f"立体插值 z R² {mi['z_r2']:.3f}"
+            assert mi["s_r2"] > 0.2, f"立体插值 s R² {mi['s_r2']:.3f}"
+            print("inverse: 自检 ✓ (立体: z 几何钉死, s 随解)")
+            return
         # s/z 报告制: 乘积歧义 ×2 (尺寸×深度 + 反照率×光色), 实测 R²
         # 为负且与 1-NN 同值 —— 物理上限, 非机制失效
         # 外推报告制: 核回归边界饱和上限 (升级路径 linear experts)
@@ -198,6 +257,11 @@ class InverseApp:
         ap.add_argument(
             "--occlusion", action="store_true", help="遮挡场景: 固定黄色竖柱"
         )
+        ap.add_argument(
+            "--stereo",
+            action="store_true",
+            help="双眼视差: 平行 rig 立体帧对, ẑ/掩码面积作观测通道",
+        )
         a = ap.parse_args()
         return InverseConfig(
             quick=a.quick,
@@ -206,4 +270,5 @@ class InverseApp:
             sigma_rel_floor=a.sigma_rel_floor,
             equal_luma=a.equal_luma,
             occlusion=a.occlusion,
+            stereo=a.stereo,
         )

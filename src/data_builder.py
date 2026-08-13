@@ -12,6 +12,7 @@ from codebook import Codebook
 from feature_extractor import FeatureExtractor
 from inverse_config import InverseConfig
 from riesz import RieszWavelet
+from stereo import StereoDepth
 
 
 class DataBuilder:
@@ -31,32 +32,60 @@ class DataBuilder:
         feat_tag = "".join(f"{s[:2]}{c[:2]}" for s, c in cfg.feat_spec)
         lvl_tag = (
             f"k{cb.N_KIND}h{cb.N_HUE}c{len(cb.LIGHT_COLORS)}d{len(cb.LIGHT_DIRS)}"
+            f"sv{cb.SAMPLE_V}"
         )
         eq_tag = "eqn" if cfg.equal_luma else "std"
         occ_tag = "occ" if cfg.occlusion else "noc"
+        st_tag = "st4" if cfg.stereo else "mono"  # 4 = 拼接维缩放版
         return (
             f"mix_{cb.H}x{cb.W}_{feat_tag}_{lvl_tag}_{eq_tag}_{occ_tag}_"
-            f"{r_tr}_{r_i}_{r_e}.safetensors"
+            f"{st_tag}_{r_tr}_{r_i}_{r_e}.safetensors"
         )
 
-    def feats_of(self, params: mx.array) -> mx.array:
-        """参数行 (n,8) → 渲染 → 特征 (n, n_feat)。"""
-        renderer, cam = Codebook.make_renderer()
-        rw: RieszWavelet | None = None
-        out = []
+    def feats_of(self, params: mx.array) -> tuple[mx.array, mx.array | None]:
+        """参数行 (n,8) → 渲染 → (特征 (n, n_feat), 立体统计 (n,3)|None)。
+        立体模式: 平行 rig 双渲染, 左帧走 11 通道特征, 视差深度 ẑ 与
+        掩码面积拼接为 2 个观测通道 (z 被几何钉死 → s=表观×zc 随解)。"""
+        cb = self.codebook
+        if not self.cfg.stereo:
+            renderer, cam = Codebook.make_renderer()
+            rw: RieszWavelet | None = None
+            out = []
+            for p in params.tolist():
+                scene = cb.to_scene(p)
+                vec, rw = self.extractor.of_frame(renderer.render(scene, cam), rw)
+                # 逐帧立即求值: MLX 惰性求值会把数千帧的计算图累积到
+                # 一次性 eval, 超 Metal 显存上限
+                mx.eval(vec)
+                out.append(vec)
+            return mx.stack(out), None
+        if self.cfg.occlusion:
+            raise ValueError("stereo+occlusion: 遮挡物是第二个物体, "
+                             "质心视差语义破坏, 组合不支持")
+        renderer, cam_l, cam_r = Codebook.make_stereo_renderer()
+        sd = StereoDepth()
+        rw = None
+        out, stats = [], []
         for p in params.tolist():
-            scene = self.codebook.to_scene(p)
-            vec, rw = self.extractor.of_frame(renderer.render(scene, cam), rw)
-            # 逐帧立即求值: MLX 惰性求值会把数千帧的计算图累积到
-            # 一次性 eval, 超 Metal 显存上限
+            scene = cb.to_scene(p)
+            fl = renderer.render(scene, cam_l)
+            fr = renderer.render(scene, cam_r)
+            vec, rw = self.extractor.of_frame(fl, rw)
+            z_hat, d, area = sd.estimate(fl, fr)
+            # 拼接维须缩放到特征方差量级: 裸 area (σ≈600) 会主导 λ 谱,
+            # 白化截断阈值 λmax·1e-6 随之抬到 0.36 → 大部分特征方向
+            # 被误截 (实测 u R² 0.90→0.73, kind 同步掉)
+            vec = mx.concatenate([vec, mx.array([z_hat, area / 1000.0])])
             mx.eval(vec)
             out.append(vec)
-        return mx.stack(out)
+            stats.append([z_hat, d, area])
+        return mx.stack(out), mx.array(stats, dtype=mx.float32)
 
     def build(
         self, r_train: int, r_interp: int, r_extrap: int, use_cache: bool
     ) -> tuple[mx.array, ...]:
-        """→ (Ftr, Ptr, Fi, Pi, Fe, Pe): 特征 (360R, V) + 参数 (360R, 8)。
+        """→ (Ftr, Ptr, Fi, Pi, Fe, Pe, Str, Si, Se): 特征 (162R, V) +
+        参数 (162R, 8) + 立体统计 (162R, 3) (非 stereo 模式为 None)。
         三分裂: 训练 (范围内) / 插值测试 (范围内, 独立种子) / 外推测试
         (s,z 支撑集外)。R = 每离散组合的连续复制数。"""
         cache = Path(__file__).resolve().parent.parent / "artifacts"
@@ -64,22 +93,27 @@ class DataBuilder:
         path = cache / self.cache_tag(r_train, r_interp, r_extrap)
         if use_cache and path.exists():
             d = mx.load(str(path))
-            return d["Ftr"], d["Ptr"], d["Fi"], d["Pi"], d["Fe"], d["Pe"]
+            st = (d.get("Str"), d.get("Si"), d.get("Se"))
+            return d["Ftr"], d["Ptr"], d["Fi"], d["Pi"], d["Fe"], d["Pe"], *st
+
+        base = Codebook.STEREO_BASE if self.cfg.stereo else 0.0
 
         cb = self.codebook
-        p_tr = cb.sample(r_train, mx.random.key(42))
-        p_ti = cb.sample(r_interp, mx.random.key(99))
-        p_te = cb.sample(r_extrap, mx.random.key(7), extrap=True)
-        f_tr = self.feats_of(p_tr)
-        f_ti = self.feats_of(p_ti)
-        f_te = self.feats_of(p_te)
-        mx.save_safetensors(
-            str(path),
-            {"Ftr": f_tr, "Ptr": p_tr, "Fi": f_ti, "Pi": p_ti,
-             "Fe": f_te, "Pe": p_te},
+        p_tr = cb.sample(r_train, mx.random.key(42), stereo_base=base)
+        p_ti = cb.sample(r_interp, mx.random.key(99), stereo_base=base)
+        p_te = cb.sample(
+            r_extrap, mx.random.key(7), extrap=True, stereo_base=base
         )
+        f_tr, s_tr = self.feats_of(p_tr)
+        f_ti, s_ti = self.feats_of(p_ti)
+        f_te, s_te = self.feats_of(p_te)
+        arrs = {"Ftr": f_tr, "Ptr": p_tr, "Fi": f_ti, "Pi": p_ti,
+                "Fe": f_te, "Pe": p_te}
+        if s_tr is not None:
+            arrs |= {"Str": s_tr, "Si": s_ti, "Se": s_te}
+        mx.save_safetensors(str(path), arrs)
         print(f"数据缓存 → {path.name}")
-        return f_tr, p_tr, f_ti, p_ti, f_te, p_te
+        return f_tr, p_tr, f_ti, p_ti, f_te, p_te, s_tr, s_ti, s_te
 
     @staticmethod
     def targets(p: mx.array) -> mx.array:
