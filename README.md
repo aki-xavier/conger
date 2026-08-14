@@ -8,7 +8,7 @@ SPN 逆渲染研究: 左右两张二维立体图像 → Riesz 全分辨率特征
 
 - 模型: `src/mixture_spn.py` (MixtureSPN)
 - demo 族: `src/inverse_config.py` (配置唯一家) / `codebook.py` (单物体组合采样+投影) / `layered_codebook.py` (双物体遮挡/前后层) / `feature_extractor.py` (11 通道) / `data_builder.py` / `scene_reconstructor.py` (帧对/参数 → 完整 Scene) / `layered_reconstructor.py` (双层 SPN 解码) / `scene_estimate.py` (Scene 后验返回对象) / `evaluator.py` / `inverse_app.py`, `src/inverse.py` 为薄 CLI 入口
-- 前端: `src/riesz.py` + `riesz_scale.py` + `feature_maps.py` (Riesz 小波), `src/color.py`, `src/utils.py`
+- 前端: `src/riesz.py` + `riesz_scale.py` + `feature_maps.py` (Riesz 小波), `src/color.py`, `src/utils.py`, `src/stereo.py` (单物体视差), `src/stereo_layers.py` (遮挡逐层视差)
 - 测试: `tests/` (pytest; 单元黑盒 + slow 集成自检) / `src/riesz_selftest.py` (可视化脚本)
 - `docs/architecture.md` — 架构与机制决策录
 
@@ -53,6 +53,6 @@ SPN 初估的 4 因子后验; `candidate_posterior` 是渲染残差联合后验,
 
 消融: 旧固定几何 top-3 为 kind 0.753 / s R² 0.332; 纯解析逐 kind 几何会使插值 s R² 降至 0.160 (掩码观测偏差不可忽略); 共享评分 + kind 后校准得到上述最优平衡。
 
-双层遮挡实验族 (`--n-objects 2 --replicates 1`, N=2916): 管线可完整训练并输出双物体 Scene; 报告模式实测插值 kind0/kind1 0.325/0.359、hue0/hue1 0.207/0.287、lcol/ldir 0.353/0.338, 连续几何 R² 多数为负。该路径验证了遮挡支持集和数据/模型契约, 但全局质心没有逐层几何含义, 渲染残差也未启用; 下一步是遮挡感知逐层视差与结构似然。
+双层遮挡实验族 (`--n-objects 2 --replicates 1`, N=2916): StereoLayers 逐层视差后, 插值 kind0/kind1 0.400/0.359、hue0/hue1 0.419/0.170、lcol/ldir 0.386/0.372; 位置 v0/u1/v1 R² 0.725/0.388/0.360, 前层 z0 R² 0.202。后层 s/z 仍为负 R²: 遮挡使后层面积/中心只来自可见区域, R=1 下 SPN 残差不足。当前管线采用前层全残差、后层 s/z 锚点直读; 下一步需逐层轮廓补全或更高复制密度。
 
 依赖: mlx / matplotlib / numpy / pillow + 本地 path 依赖 [cga](../cga) (渲染引擎)。

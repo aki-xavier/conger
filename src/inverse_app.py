@@ -87,12 +87,15 @@ class InverseApp:
                 axis=1,
             )
 
+        else:
+            t_tr = LayeredReconstructor.residual_targets(t_tr, c_tr, s_tr)
+
         # 模型默认持久化: 路径随数据指纹 + 输出/几何残差契约 (旧
         # spn_full_ 模型的 s 残差仍基于统一球代理, 不复用)。加载后
         # K < 当前数据量 → 增量追加新块
         # (白化基冻结, 见 MixtureSPN.add); K ≥ 数据量 → 直接用 (模型
         # 训练集是当前请求的超集)
-        prefix = "spn_kindgeo" if cfg.n_objects == 1 else "spn_layered"
+        prefix = "spn_kindgeo" if cfg.n_objects == 1 else "spn_layered_anchor"
         model_path = cfg.model_path or artifacts / (
             f"{prefix}_{self.data.cache_tag()}.safetensors"
         )
@@ -148,10 +151,10 @@ class InverseApp:
                 ti_pred = SceneReconstructor.targets_from_params(ci_pred)
                 te_pred = SceneReconstructor.targets_from_params(ce_pred)
         else:
-            ti_pred = ti_raw
-            te_pred = te_raw
-            ci_pred = LayeredReconstructor.params(ti_raw, ci_p)
-            ce_pred = LayeredReconstructor.params(te_raw, ce_p)
+            ci_pred = LayeredReconstructor.params(ti_raw, ci_p, s_ti)
+            ce_pred = LayeredReconstructor.params(te_raw, ce_p, s_te)
+            ti_pred = LayeredReconstructor.targets_from_params(ci_pred)
+            te_pred = LayeredReconstructor.targets_from_params(ce_pred)
             print("  双层遮挡: SPN 后验报告模式 (渲染残差精炼待分层几何)")
 
         print("[4/4] 评估 (物理单位 + 完整场景离散因子; 基线 = 训练均值)")

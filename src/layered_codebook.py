@@ -1,7 +1,7 @@
 """LayeredCodebook: 双图元遮挡/前后层场景参数 ⇄ cga Scene。
 
 参数序: [k0,u0,v0,s0,z0,h0, k1,u1,v1,s1,z1,h1, lcol,ldir]。
-按深度规范排序 (z0 < z1, 0 是前层), 消除两物体标签置换对称;
+按深度规范排序 (z0 > z1, 0 是前层/更靠近相机), 消除两物体标签置换对称;
 约 70% 样本强制投影重叠, 让遮挡成为数据分布的一等结构。
 """
 
@@ -40,7 +40,7 @@ class LayeredCodebook:
     N_COMBO = (
         N_KIND * N_KIND * N_HUE * N_HUE * N_LIGHT_COLORS * N_LIGHT_DIRS
     )  # 2916
-    SAMPLE_V = 1  # 双层采样器版本 (入缓存指纹)
+    SAMPLE_V = 3  # 3 = 修正前层 z 方向 (z0>z1) + 可分辨层间距
     RENDER_V = Codebook.RENDER_V
     TARGET_IDX = (1, 2, 3, 4, 7, 8, 9, 10)
     CLASS_IDX = (0, 6, 5, 11, 12, 13)  # k0,k1,h0,h1,lcol,ldir
@@ -56,7 +56,12 @@ class LayeredCodebook:
         return m + Codebook.STEREO_BASE / 2 * Codebook.FX / zc
 
     @classmethod
-    def _sample_free(cls, rng: random.Random, extrap: bool) -> tuple[float, ...]:
+    def _sample_free(
+        cls,
+        rng: random.Random,
+        extrap: bool,
+        z_range: tuple[float, float] = (2.4, 3.4),
+    ) -> tuple[float, ...]:
         """独立物体 → (u,v,s,z), 取景约束拒绝重采。"""
         for _ in range(8):
             if extrap:
@@ -68,7 +73,7 @@ class LayeredCodebook:
                 )
             else:
                 s = rng.uniform(*Codebook.S_RANGE)
-            z = rng.uniform(2.4, 3.4)
+            z = rng.uniform(*z_range)
             m = cls._margin(s, z)
             if 2 * m <= Codebook.W - 4:
                 break
@@ -79,10 +84,10 @@ class LayeredCodebook:
     @classmethod
     def _sample_pair(cls, rng: random.Random, extrap: bool) -> tuple[float, ...]:
         """前/后层连续参数; 70% 强制投影重叠 (遮挡训练支撑)。"""
-        u0, v0, s0, z0 = cls._sample_free(rng, extrap)
-        z1 = min(z0 + rng.uniform(0.25, 1.0), 4.3)
-        u1, v1, s1, _ = cls._sample_free(rng, extrap)
-        z1 = max(z1, z0 + 0.05)
+        u0, v0, s0, z0 = cls._sample_free(rng, extrap, (3.1, 4.2))
+        z1 = max(z0 - rng.uniform(0.7, 1.4), 2.3)
+        u1, v1, s1, _ = cls._sample_free(rng, extrap, (2.3, 3.5))
+        z1 = min(z1, z0 - 0.05)
         if rng.random() < 0.7:
             a0 = Codebook.EXTENT * s0 * Codebook.FX / (Codebook.CAM_Z - z0)
             a1 = Codebook.EXTENT * s1 * Codebook.FX / (Codebook.CAM_Z - z1)
@@ -92,7 +97,7 @@ class LayeredCodebook:
             m1 = cls._margin(s1, z1)
             if not (m1 <= u1 <= Codebook.W - m1 and m1 <= v1 <= Codebook.H - m1):
                 u1, v1, s1, _ = cls._sample_free(rng, extrap)
-                z1 = min(z0 + rng.uniform(0.25, 1.0), 4.3)
+                z1 = max(z0 - rng.uniform(0.7, 1.4), 2.3)
         return u0, v0, s0, z0, u1, v1, s1, z1
 
     @classmethod

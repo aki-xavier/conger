@@ -17,6 +17,7 @@ from cga.engine import PerspectiveCamera, Renderer, Scene
 from codebook import Codebook
 from scene_estimate import SceneEstimate, SceneHypothesis
 from stereo import StereoDepth
+from stereo_layers import StereoLayers
 
 if TYPE_CHECKING:
     from inverse_app import InverseApp
@@ -235,6 +236,12 @@ class SceneReconstructor:
     ) -> tuple[mx.array, mx.array, RieszWavelet | None]:
         """左/右帧 → (模型特征 (1,V), 立体统计 (1,3), Riesz 工作区)。"""
         vec, rw = app.extractor.of_frame(fl, rw)
+        if app.cfg.n_objects == 2:
+            stat = StereoLayers().estimate(fl, fr)
+            vec = mx.concatenate(
+                [vec, StereoLayers.scaled(mx.array([stat]))[0]]
+            )
+            return vec[None, :], mx.array([stat], dtype=mx.float32), rw
         z_hat, d, area = StereoDepth().estimate(fl, fr)
         vec = mx.concatenate([vec, mx.array([z_hat, area / 1000.0])])
         return vec[None, :], mx.array([[z_hat, d, area]], dtype=mx.float32), rw

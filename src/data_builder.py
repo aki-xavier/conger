@@ -11,6 +11,7 @@ from codebook import Codebook
 from feature_extractor import FeatureExtractor
 from inverse_config import InverseConfig
 from stereo import StereoDepth
+from stereo_layers import StereoLayers
 
 
 class DataBuilder:
@@ -32,8 +33,9 @@ class DataBuilder:
             f"k{cb.N_KIND}h{cb.N_HUE}c{len(cb.LIGHT_COLORS)}d{len(cb.LIGHT_DIRS)}"
             f"o{cb.N_OBJECTS}sv{cb.SAMPLE_V}rp{cb.RENDER_V}"
         )
-        # st4 = 立体管线版本号 (4 = 拼接维缩放版), 非模式开关
-        return f"mix_{cb.H}x{cb.W}_{feat_tag}_{lvl_tag}_st4"
+        # st4 = 单物体拼接维缩放; sl1 = 逐层双目几何统计
+        stereo_tag = "sl1" if cb.N_OBJECTS == 2 else "st4"
+        return f"mix_{cb.H}x{cb.W}_{feat_tag}_{lvl_tag}_{stereo_tag}"
 
     def _block_feats(self, split: str, r: int) -> tuple[mx.array, ...]:
         """一个复制块的 (参数, 特征, 统计), 逐块缓存: 缺哪块渲哪块
@@ -68,12 +70,12 @@ class DataBuilder:
         )
 
     def feats_of(self, params: mx.array) -> tuple[mx.array, mx.array]:
-        """参数行 (n,8) → 渲染 → (特征 (n, n_feat), 立体统计 (n,3)).
-        平行 rig 双渲染, 左帧走 11 通道特征, 视差深度 ẑ 与
-        掩码面积拼接为 2 个观测通道 (z 被几何钉死 → s=表观×zc 随解)。"""
+        """参数行 → 渲染 → (特征 (n,n_feat), 立体统计)。
+        单物体拼接 [ẑ,area]; 双层拼接逐层 [u,v,z,area]×2。"""
         cb = self.codebook
         renderer, cam_l, cam_r = Codebook.make_renderer()
         sd = StereoDepth()
+        sl = StereoLayers()
         rw = None
         out, stats = [], []
         for p in params.tolist():
@@ -81,14 +83,21 @@ class DataBuilder:
             fl = renderer.render(scene, cam_l)
             fr = renderer.render(scene, cam_r)
             vec, rw = self.extractor.of_frame(fl, rw)
-            z_hat, d, area = sd.estimate(fl, fr)
-            # 拼接维须缩放到特征方差量级: 裸 area (σ≈600) 会主导 λ 谱,
-            # 白化截断阈值 λmax·1e-6 随之抬到 0.36 → 大部分特征方向
-            # 被误截 (实测 u R² 0.90→0.73, kind 同步掉)
-            vec = mx.concatenate([vec, mx.array([z_hat, area / 1000.0])])
+            if cb.N_OBJECTS == 2:
+                stat = sl.estimate(fl, fr)
+                vec = mx.concatenate(
+                    [vec, StereoLayers.scaled(mx.array([stat]))[0]]
+                )
+                stats.append(stat)
+            else:
+                z_hat, d, area = sd.estimate(fl, fr)
+                # 拼接维须缩放到特征方差量级: 裸 area (σ≈600) 会主导 λ 谱,
+                # 白化截断阈值 λmax·1e-6 随之抬到 0.36 → 大部分特征方向
+                # 被误截 (实测 u R² 0.90→0.73, kind 同步掉)
+                vec = mx.concatenate([vec, mx.array([z_hat, area / 1000.0])])
+                stats.append([z_hat, d, area])
             mx.eval(vec)
             out.append(vec)
-            stats.append([z_hat, d, area])
         return mx.stack(out), mx.array(stats, dtype=mx.float32)
 
 

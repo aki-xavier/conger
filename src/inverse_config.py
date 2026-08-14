@@ -40,7 +40,8 @@ class InverseConfig:
     @property
     def n_feat(self) -> int:
         n = len(self.feat_spec) * Codebook.H * Codebook.W
-        return n + 2  # +[ẑ, 掩码面积] (立体观测通道)
+        # +单物体 [ẑ,area] 或双层 [u,v,z,area]×2
+        return n + (8 if self.n_objects == 2 else 2)
 
     @property
     def bg_color(self) -> int:

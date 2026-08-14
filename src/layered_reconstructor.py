@@ -24,6 +24,9 @@ class LayeredReconstructor:
     返回 SceneEstimate 保留 SPN 联合后验, 避免过早 argmax。"""
 
     CAT_SIZES = LayeredCodebook.CAT_SIZES
+    # 前层通常完整可见, 允许全部残差; 后层被遮挡, 低密度 SPN 的
+    # s/z 残差会放大可见面积歧义, 先采用双目锚点 (实测优于校准)
+    RESIDUAL_SCALE = (1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 0.0, 0.0)
 
     @classmethod
     def split_cat(cls, cat_p: mx.array) -> tuple[mx.array, ...]:
@@ -34,20 +37,86 @@ class LayeredReconstructor:
             lo += nc
         return tuple(out)
 
+    @staticmethod
+    def _proxy(kind: int, stats: mx.array, off: int) -> float:
+        """一层 [u,v,z,area] 统计 → kind-conditioned 几何尺寸代理。"""
+        st = mx.array(
+            [[stats[off + 2], 0.0, stats[off + 3]]], dtype=mx.float32
+        )
+        return float(SceneReconstructor.s_proxy(kind, st)[0])
+
+    @classmethod
+    def residual_targets(
+        cls, t: mx.array, classes: mx.array, stats: mx.array
+    ) -> mx.array:
+        """物理连续目标 − 逐层双目观测锚点 (训练用)。"""
+        out = []
+        for i in range(t.shape[0]):
+            st = stats[i]
+            p0 = cls._proxy(int(classes[i, 0]), st, 0)
+            p1 = cls._proxy(int(classes[i, 1]), st, 4)
+            vals = [
+                t[i, 0] - st[0],
+                t[i, 1] - st[1],
+                t[i, 2] - p0,
+                t[i, 3] - st[2],
+                t[i, 4] - st[4],
+                t[i, 5] - st[5],
+                t[i, 6] - p1,
+                t[i, 7] - st[6],
+            ]
+            out.append(
+                [v * s for v, s in zip(vals, cls.RESIDUAL_SCALE, strict=True)]
+            )
+        return mx.array(out, dtype=mx.float32)
+
     @classmethod
     def params(
-        cls, t_pred: mx.array, cat_p: mx.array
+        cls,
+        t_pred: mx.array,
+        cat_p: mx.array,
+        stats: mx.array | None = None,
     ) -> tuple[tuple[float, ...], ...]:
-        """连续目标 + 离散头 MAP → 14 维双层场景参数。"""
+        """连续残差/直读目标 + 离散头 MAP → 14 维双层场景参数。"""
         probs = [mx.argmax(p, axis=1).astype(mx.int32) for p in cls.split_cat(cat_p)]
         rows = []
         for i in range(t_pred.shape[0]):
             t = t_pred[i].tolist()
+            if stats is None:
+                geom = t
+            else:
+                st = stats[i]
+                # 遮挡锚点校正有界: 低密度 SPN 的野性残差不应覆盖
+                # 逐层视差提供的物理量 (阈值比训练分布边距宽一档)
+                r = [
+                    min(max(t[0], -25.0), 25.0),
+                    min(max(t[1], -25.0), 25.0),
+                    min(max(t[2], -0.25), 0.25),
+                    min(max(t[3], -0.5), 0.5),
+                    min(max(t[4], -25.0), 25.0),
+                    min(max(t[5], -25.0), 25.0),
+                    min(max(t[6], -0.25), 0.25),
+                    min(max(t[7], -0.5), 0.5),
+                ]
+                r = [
+                    v * s
+                    for v, s in zip(r, cls.RESIDUAL_SCALE, strict=True)
+                ]
+                geom = [
+                    r[0] + float(st[0]),
+                    r[1] + float(st[1]),
+                    r[2] + cls._proxy(int(probs[0][i]), st, 0),
+                    r[3] + float(st[2]),
+                    r[4] + float(st[4]),
+                    r[5] + float(st[5]),
+                    r[6] + cls._proxy(int(probs[1][i]), st, 4),
+                    r[7] + float(st[6]),
+                ]
             rows.append(
                 (
-                    float(probs[0][i]), t[0], t[1], t[2], t[3],
+                    float(probs[0][i]), geom[0], geom[1], geom[2], geom[3],
                     float(probs[2][i]),
-                    float(probs[1][i]), t[4], t[5], t[6], t[7],
+                    float(probs[1][i]), geom[4], geom[5], geom[6], geom[7],
                     float(probs[3][i]),
                     float(probs[4][i]), float(probs[5][i]),
                 )
@@ -64,9 +133,9 @@ class LayeredReconstructor:
         rw: RieszWavelet | None = None,
     ) -> SceneEstimate:
         """左/右二维图像 → 双层 SceneEstimate (SPN 后验, 无渲染精炼)。"""
-        f, _, _ = SceneReconstructor.frame_features(app, fl, fr, rw)
+        f, stats, _ = SceneReconstructor.frame_features(app, fl, fr, rw)
         t, cat_p, _ = net.predict(f)
-        prm = cls.params(t, cat_p)[0]
+        prm = cls.params(t, cat_p, stats)[0]
         return SceneEstimate(
             scene=app.codebook.to_scene(prm),
             params=prm,
