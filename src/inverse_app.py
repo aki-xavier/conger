@@ -7,6 +7,7 @@
 from __future__ import annotations
 
 import argparse
+import math
 from pathlib import Path
 
 import matplotlib
@@ -17,9 +18,11 @@ import mlx.core as mx
 
 from codebook import Codebook
 from data_builder import DataBuilder
-from evaluator import TARGETS, Evaluator
+from evaluator import LAYERED_TARGET_COLS, Evaluator
 from feature_extractor import FeatureExtractor
 from inverse_config import InverseConfig
+from layered_codebook import LayeredCodebook
+from layered_reconstructor import LayeredReconstructor
 from mixture_spn import MixtureSPN
 from scene_reconstructor import SceneReconstructor
 
@@ -29,53 +32,69 @@ class InverseApp:
 
     def __init__(self, cfg: InverseConfig):
         self.cfg = cfg
-        self.codebook = Codebook(cfg)
+        if cfg.n_objects == 1:
+            self.codebook = Codebook(cfg)
+        elif cfg.n_objects == 2:
+            self.codebook = LayeredCodebook(cfg)
+        else:
+            raise ValueError(f"n_objects 只支持 1/2, 得到 {cfg.n_objects}")
         self.extractor = FeatureExtractor(cfg)
         self.data = DataBuilder(cfg, self.codebook, self.extractor)
 
     def run(self) -> None:
         cfg = self.cfg
         artifacts = Path(__file__).resolve().parent.parent / "artifacts"
-        n_tr = 162 * cfg.replicates
+        n_tr = self.codebook.N_COMBO * cfg.replicates
+        n_test = self.codebook.N_COMBO * (1 if cfg.n_objects > 1 else 2)
         print(
-            f"[1/4] 数据: train {n_tr} / 插值 324 / 外推 324 "
-            f"(162 组合×R={cfg.replicates}, 逐块缓存)"
+            f"[1/4] 数据: train {n_tr} / 插值 {n_test} / 外推 {n_test} "
+            f"({self.codebook.N_COMBO} 组合×R={cfg.replicates}, "
+            f"n_objects={cfg.n_objects}, 逐块缓存)"
         )
         f_tr, p_tr, f_ti, p_ti, f_te, p_te, s_tr, s_ti, s_te = self.data.build(
             cfg.replicates
         )
         assert mx.all(mx.isfinite(f_tr)), "特征含 NaN/inf"
-        # 视差管线独立评估 (几何 ẑ vs GT z; 外推同样几何有效)
-        for nm, st, pp in (("插值", s_ti, p_ti), ("外推", s_te, p_te)):
-            err = st[:, 0] - pp[:, 4]
-            print(
-                f"  视差管线 {nm}: ẑ RMSE "
-                f"{float(mx.sqrt(mx.mean(err**2))):.4f} "
-                f"bias {float(mx.mean(err)):+.4f} "
-                f"(d 中位 {float(mx.median(st[:, 1])):.2f}px)"
-            )
+        # 视差管线独立评估 (单物体几何 ẑ vs GT z; 双层为全局质心诊断)
+        if cfg.n_objects == 1:
+            pairs = (("插值", s_ti, p_ti), ("外推", s_te, p_te))
+            for nm, st, pp in pairs:
+                err = st[:, 0] - pp[:, 4]
+                print(
+                    f"  视差管线 {nm}: ẑ RMSE "
+                    f"{float(mx.sqrt(mx.mean(err**2))):.4f} "
+                    f"bias {float(mx.mean(err)):+.4f} "
+                    f"(d 中位 {float(mx.median(st[:, 1])):.2f}px)"
+                )
+        else:
+            print("  视差管线: 双层遮挡下全局质心仅作特征诊断, 不作 GT 对照")
         t_tr = DataBuilder.targets(p_tr)
         c_tr = DataBuilder.scene_classes(p_tr)
 
-        # 强几何观测 + 残差学习: ẑ/ŝ 直接拼特征会被白化稀释
-        # (1/647 维, 实测 z R² 0.02); 模型改为学 z−ẑ 与 s−ŝ 的
-        # 标定残差 (可见面≠中心偏差的形状相关部分), 推理后加回
-        t_tr = mx.concatenate(
-            [
-                t_tr[:, :2],
-                (t_tr[:, 2] - SceneReconstructor.s_proxy(c_tr[:, 0], s_tr))[:, None],
-                (t_tr[:, 3] - s_tr[:, 0])[:, None],
-            ],
-            axis=1,
-        )
+        if cfg.n_objects == 1:
+            # 强几何观测 + 残差学习: ẑ/ŝ 直接拼特征会被白化稀释
+            # (1/647 维, 实测 z R² 0.02); 模型改为学 z−ẑ 与 s−ŝ 的
+            # 标定残差 (可见面≠中心偏差的形状相关部分), 推理后加回
+            t_tr = mx.concatenate(
+                [
+                    t_tr[:, :2],
+                    (
+                        t_tr[:, 2]
+                        - SceneReconstructor.s_proxy(c_tr[:, 0], s_tr)
+                    )[:, None],
+                    (t_tr[:, 3] - s_tr[:, 0])[:, None],
+                ],
+                axis=1,
+            )
 
         # 模型默认持久化: 路径随数据指纹 + 输出/几何残差契约 (旧
         # spn_full_ 模型的 s 残差仍基于统一球代理, 不复用)。加载后
         # K < 当前数据量 → 增量追加新块
         # (白化基冻结, 见 MixtureSPN.add); K ≥ 数据量 → 直接用 (模型
         # 训练集是当前请求的超集)
+        prefix = "spn_kindgeo" if cfg.n_objects == 1 else "spn_layered"
         model_path = cfg.model_path or artifacts / (
-            f"spn_kindgeo_{self.data.cache_tag()}.safetensors"
+            f"{prefix}_{self.data.cache_tag()}.safetensors"
         )
         if model_path.exists():
             net = MixtureSPN.load(model_path)
@@ -99,7 +118,11 @@ class InverseApp:
                 c_tr[:, 0],
                 rel_floor=cfg.sigma_rel_floor,
                 scene_classes=c_tr,
-                cat_sizes=SceneReconstructor.CAT_SIZES,
+                cat_sizes=(
+                    SceneReconstructor.CAT_SIZES
+                    if cfg.n_objects == 1
+                    else LayeredReconstructor.CAT_SIZES
+                ),
             )
             net.save(model_path)
             print(f"      模型已保存 → {model_path.name}")
@@ -107,22 +130,29 @@ class InverseApp:
         print("[3/4] 推理: 连续目标条件期望 + 场景因子条件后验")
         ti_raw, ci_p, _ = net.predict(f_ti)
         te_raw, ce_p, _ = net.predict(f_te)
-        # 残差加回 kind-conditioned 代理 → 物理量 (s,z)
-        ki0 = mx.argmax(ci_p[:, : Codebook.N_KIND], axis=1)
-        ke0 = mx.argmax(ce_p[:, : Codebook.N_KIND], axis=1)
-        ti_pred = SceneReconstructor.physical_targets(ti_raw, s_ti, ki0)
-        te_pred = SceneReconstructor.physical_targets(te_raw, s_te, ke0)
-        ci_pred = SceneReconstructor.params(ti_raw, ci_p, s_ti)
-        ce_pred = SceneReconstructor.params(te_raw, ce_p, s_te)
-        if cfg.refine_appearance:
-            print(
-                f"  渲染残差精炼: top{cfg.kind_topk} kind × "
-                "hue×lcol×ldir 候选 × 左右视图"
-            )
-            ci_pred = self.refine_scenes(ci_pred, ci_p, s_ti, p_ti, "插值")
-            ce_pred = self.refine_scenes(ce_pred, ce_p, s_te, p_te, "外推")
-            ti_pred = SceneReconstructor.targets_from_params(ci_pred)
-            te_pred = SceneReconstructor.targets_from_params(ce_pred)
+        if cfg.n_objects == 1:
+            # 残差加回 kind-conditioned 代理 → 物理量 (s,z)
+            ki0 = mx.argmax(ci_p[:, : Codebook.N_KIND], axis=1)
+            ke0 = mx.argmax(ce_p[:, : Codebook.N_KIND], axis=1)
+            ti_pred = SceneReconstructor.physical_targets(ti_raw, s_ti, ki0)
+            te_pred = SceneReconstructor.physical_targets(te_raw, s_te, ke0)
+            ci_pred = SceneReconstructor.params(ti_raw, ci_p, s_ti)
+            ce_pred = SceneReconstructor.params(te_raw, ce_p, s_te)
+            if cfg.refine_appearance:
+                print(
+                    f"  渲染残差精炼: top{cfg.kind_topk} kind × "
+                    "hue×lcol×ldir 候选 × 左右视图"
+                )
+                ci_pred = self.refine_scenes(ci_pred, ci_p, s_ti, p_ti, "插值")
+                ce_pred = self.refine_scenes(ce_pred, ce_p, s_te, p_te, "外推")
+                ti_pred = SceneReconstructor.targets_from_params(ci_pred)
+                te_pred = SceneReconstructor.targets_from_params(ce_pred)
+        else:
+            ti_pred = ti_raw
+            te_pred = te_raw
+            ci_pred = LayeredReconstructor.params(ti_raw, ci_p)
+            ce_pred = LayeredReconstructor.params(te_raw, ce_p)
+            print("  双层遮挡: SPN 后验报告模式 (渲染残差精炼待分层几何)")
 
         print("[4/4] 评估 (物理单位 + 完整场景离散因子; 基线 = 训练均值)")
         mi = Evaluator.report("插值", p_ti, ti_pred, ci_pred, p_tr)
@@ -146,6 +176,8 @@ class InverseApp:
 
         公开推理接口: 帧必须是 Codebook.make_renderer 训练 rig 的渲染
         输出; 返回值包含 SPN 后验、渲染候选后验和 top 场景假设。"""
+        if self.cfg.n_objects == 2:
+            return LayeredReconstructor.from_frames(self, net, fl, fr)
         return SceneReconstructor.from_frames(
             self,
             net,
@@ -204,14 +236,20 @@ class InverseApp:
         te_pred: mx.array,
         out: Path,
     ) -> None:
-        """4 目标 GT vs Pred 散点 (插值蓝/外推红) + 训练支撑集边界。"""
+        """连续目标 GT vs Pred 散点 (插值蓝/外推红)。"""
         cb = Codebook
-        fig, axes = plt.subplots(2, 2, figsize=(9, 8))
+        names = Evaluator.target_names(p_ti)
+        cols = LAYERED_TARGET_COLS if p_ti.shape[1] == 14 else (1, 2, 3, 4)
+        n = len(names)
+        fig, axes = plt.subplots(2, (n + 1) // 2, figsize=(4.5 * ((n + 1) // 2), 8))
         rng = {"s": cb.S_RANGE + cb.S_EXTRA, "z": cb.Z_RANGE + cb.Z_EXTRA}
         for j, ax in enumerate(axes.flat):
-            nm = TARGETS[j]
-            gi, pi = p_ti[:, j + 1], ti_pred[:, j]
-            ge, pe = p_te[:, j + 1], te_pred[:, j]
+            if j >= n:
+                ax.axis("off")
+                continue
+            nm = names[j]
+            gi, pi = p_ti[:, cols[j]], ti_pred[:, j]
+            ge, pe = p_te[:, cols[j]], te_pred[:, j]
             ax.scatter(gi, pi, s=8, alpha=0.6, label="interp")
             ax.scatter(ge, pe, s=8, alpha=0.6, c="r", label="extrap")
             lo = float(mx.min(mx.concatenate([gi, ge])))
@@ -246,9 +284,14 @@ class InverseApp:
                 axes[row, col].imshow(img[..., :3].astype(mx.int32))
                 axes[row, col].set_xticks([])
                 axes[row, col].set_yticks([])
-            axes[row, 0].set_ylabel(
-                f"k{gt[0]:.0f} h{gt[5]:.0f} l{gt[6]:.0f}/{gt[7]:.0f}", fontsize=8
-            )
+            if len(gt) == 14:
+                label = (
+                    f"k{gt[0]:.0f}/{gt[6]:.0f} h{gt[5]:.0f}/{gt[11]:.0f} "
+                    f"l{gt[12]:.0f}/{gt[13]:.0f}"
+                )
+            else:
+                label = f"k{gt[0]:.0f} h{gt[5]:.0f} l{gt[6]:.0f}/{gt[7]:.0f}"
+            axes[row, 0].set_ylabel(label, fontsize=8)
         axes[0, 0].set_title("GT render")
         axes[0, 1].set_title("Pred full scene")
         fig.tight_layout()
@@ -258,6 +301,11 @@ class InverseApp:
     # ── 自检断言 (阈值依据见各注释; 2026-08-12 全量运行标定) ────────
 
     def self_check(self, mi: dict[str, float], me: dict[str, float]) -> None:
+        if self.cfg.n_objects == 2:
+            vals = list(mi.values()) + list(me.values())
+            assert all(math.isfinite(v) for v in vals), "双层指标含 NaN/inf"
+            print("layered: 报告模式 ✓ (遮挡/双层支持集; 阈值待几何标定)")
+            return
         # 全 kind 结构精炼实测 (kindgeo 契约, 2026-08-13): 插值 0.753;
         # 阈值防结构候选机制崩溃 (随机 0.33), 不把当前上限硬编码过紧
         kind_floor = 0.65 if self.cfg.refine_appearance else 0.45
@@ -328,6 +376,13 @@ class InverseApp:
             choices=(1, 2, 3),
             help="结构候选数: top-k kind 进入渲染残差联合后验 (默认全覆盖 3)",
         )
+        ap.add_argument(
+            "--n-objects",
+            type=int,
+            default=1,
+            choices=(1, 2),
+            help="场景支持集: 1 单图元 / 2 双图元遮挡前后层 (实验)",
+        )
         a = ap.parse_args()
         return InverseConfig(
             use_cache=not a.no_cache,
@@ -336,4 +391,5 @@ class InverseApp:
             replicates=a.replicates,
             refine_appearance=not a.no_refine_appearance,
             kind_topk=a.kind_topk,
+            n_objects=a.n_objects,
         )

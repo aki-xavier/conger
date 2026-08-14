@@ -1,8 +1,8 @@
 # conger 架构与流程图
 
 SPN 逆渲染研究: 左右两张二维立体图像 → Riesz 全分辨率特征 → 完整
-`cga.Scene` 重建 (含光照)。本文档是全部流程的总图 + 机制决策录; 各模块
-docstring 有机制细节。
+`cga.Scene` 重建 (含光照; `--n-objects 2` 启用双图元遮挡/前后层实验族)。
+本文档是全部流程的总图 + 机制决策录; 各模块 docstring 有机制细节。
 
 ## 0. 主线切换 (2026-08-12/13)
 
@@ -108,7 +108,26 @@ p_{\mathrm{SPN}}(k\mid I)\exp(-\ell(k,h,c,d)/T),
 结构先验共同裁决。公开接口返回 `SceneEstimate`: MAP Scene、SPN 原始
 后验、候选残差/联合后验和 top 完整场景假设, 不再把歧义硬压成单点。
 
-## 4. 模块结构 (一文件一类)
+## 4. 遮挡/前后层实验族 (LayeredCodebook)
+
+`--n-objects 2` 启用最小多层支持集: 两个不透明图元, 参数按深度规范
+排序 (z0<z1, 0=前层), 共享光色/光向; 离散因子为
+kind0×kind1×hue0×hue1×lcol×ldir=2916 组合全笛卡尔积, 连续位置/尺寸/
+深度逐样本随机, 约 70% 样本强制投影重叠。renderer 的最近命中自然产生
+遮挡, 无需单独标签 —— 层序就是 z 序。
+
+第一版双层管线是有意的报告模式: 左帧全分辨率特征 + 全局立体统计进
+实例级 SPN, 输出 8 个连续目标 (两层各 u,v,s,z) 和 6 个离散因子后验;
+不做渲染残差精炼。原因是遮挡下全局质心不再对应唯一物体, 2916 个
+结构×外观候选也缺少分层几何校验。先把数据/模型/SceneEstimate 契约
+打通, 再升级逐层视差和遮挡感知似然。
+
+首版实测 (R=1, N=2916): 插值 kind0/kind1 0.325/0.359, hue0/hue1
+0.207/0.287, lcol/ldir 0.353/0.338, 连续几何 R² 多数为负。这不是
+回归目标 —— 它证明遮挡场景族和双层输出契约已可运行, 同时明确显示
+全局质心+共享 SPN 度量不足以逆解两层。
+
+## 5. 模块结构 (一文件一类)
 
 ```mermaid
 flowchart LR
@@ -131,18 +150,18 @@ flowchart LR
 依赖方向单向; codebook/feature_extractor 仅 TYPE_CHECKING 引
 InverseConfig 防环。
 
-## 5. 持久化 (safetensors)
+## 6. 持久化 (safetensors)
 
 - 数据缓存: `artifacts/mix_*.safetensors` (配置指纹文件名, gitignore);
 - 模型: MixtureSPN.save/load —— 参数张量 (含白化基 basis (V,D),
   全量约 1.5GB) + rel_floor 入 JSON 明文头; Utils.st_metadata 可查;
-  默认路径 `spn_kindgeo_<数据指纹>` (`kindgeo` 标记 kind-conditioned
-  s 残差输出契约)。
+  默认路径 `spn_kindgeo_<数据指纹>` 或 `spn_layered_<数据指纹>`
+  (`kindgeo` 标记 kind-conditioned s 残差, `layered` 标记双层契约)。
 
-## 6. 待办 (按价值排序; 已对照实例级架构审判, 过时项已删)
+## 7. 待办 (按价值排序; 已对照实例级架构审判, 过时项已删)
 
-1. **遮挡/层场景族**: 当前 Scene 后验已结构化, 下一步把单图元
-   支持集扩展为多物体/前后层, 让遮挡这一硬物理先验进入生成模型
+1. **遮挡感知逐层几何**: 当前双层族已入支持集, 下一步把全局质心
+   升级为逐层视差/掩码, 并给 2916 结构×外观候选加分层校验
 2. **池外光照探针**: held-out 光向/光色, 验证完整 Scene 输出的光照
    泛化与反照率×光照联合可识别性
 3. **逐 kind PPCA 似然比**: kind 形状线索的度量升级 (各类自己的
@@ -157,7 +176,7 @@ InverseConfig 防环。
 模式已删, 立体下 s/z 由几何解决) / 参考物破解色恒常 (随遮挡
 模式一起删)。
 
-## 7. 双眼视差 (stereo.py, 2026-08-13)
+## 8. 双眼视差 (stereo.py, 2026-08-13)
 
 ```mermaid
 flowchart LR

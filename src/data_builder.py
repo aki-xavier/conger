@@ -30,7 +30,7 @@ class DataBuilder:
         feat_tag = "".join(f"{s[:2]}{c[:2]}" for s, c in cfg.feat_spec)
         lvl_tag = (
             f"k{cb.N_KIND}h{cb.N_HUE}c{len(cb.LIGHT_COLORS)}d{len(cb.LIGHT_DIRS)}"
-            f"sv{cb.SAMPLE_V}rp{cb.RENDER_V}"
+            f"o{cb.N_OBJECTS}sv{cb.SAMPLE_V}rp{cb.RENDER_V}"
         )
         # st4 = 立体管线版本号 (4 = 拼接维缩放版), 非模式开关
         return f"mix_{cb.H}x{cb.W}_{feat_tag}_{lvl_tag}_st4"
@@ -55,8 +55,9 @@ class DataBuilder:
         """→ (Ftr, Ptr, Fi, Pi, Fe, Pe, Str, Si, Se)。训练集 = n_rep 个
         复制块拼接 (逐块缓存, R 增长纯追加); 插值/外推测试集固定 2 块。"""
         tr = [self._block_feats("tr", r) for r in range(n_rep)]
-        ti = [self._block_feats("ti", r) for r in range(2)]
-        te = [self._block_feats("te", r) for r in range(2)]
+        n_test = 1 if self.codebook.N_OBJECTS > 1 else 2
+        ti = [self._block_feats("ti", r) for r in range(n_test)]
+        te = [self._block_feats("te", r) for r in range(n_test)]
 
         def cat(blocks: list, i: int) -> mx.array:
             return mx.concatenate([b[i] for b in blocks])
@@ -93,12 +94,14 @@ class DataBuilder:
 
     @staticmethod
     def targets(p: mx.array) -> mx.array:
-        """参数 (n,8) → 连续目标 (n,4) [u,v,s,z]。
-        离散场景因子 (kind/hue/lcol/ldir) 走条件后验分类头, 不进连续
-        回归空间 (避免把无序类目错误当作有距离关系的实数)。"""
+        """参数 → 连续目标 (单物体 4 维 / 双层 8 维)。"""
+        if p.shape[1] == 14:
+            return p[:, [1, 2, 3, 4, 7, 8, 9, 10]]
         return p[:, 1:5]
 
     @staticmethod
     def scene_classes(p: mx.array) -> mx.array:
-        """参数 (n,8) → 离散场景因子 (n,4) [kind,hue,lcol,ldir]。"""
+        """参数 → 离散场景因子 (单物体 4 维 / 双层 6 维)。"""
+        if p.shape[1] == 14:
+            return p[:, [0, 6, 5, 11, 12, 13]].astype(mx.int32)
         return p[:, [0, 5, 6, 7]].astype(mx.int32)

@@ -133,11 +133,11 @@ class MixtureSPN:
     @staticmethod
     def cat_sizes(cat_logp: mx.array) -> tuple[int, ...]:
         """拼接类目头的宽度 → 各场景因子类目数。"""
-        return (
-            (MixtureSPN.N_STRATUM,)
-            if cat_logp.shape[1] == MixtureSPN.N_STRATUM
-            else (3, 6, 3, 3)
-        )
+        if cat_logp.shape[1] == MixtureSPN.N_STRATUM:
+            return (MixtureSPN.N_STRATUM,)
+        if cat_logp.shape[1] == 24:
+            return (3, 3, 6, 6, 3, 3)  # 双层 k0,k1,h0,h1,lcol,ldir
+        return (3, 6, 3, 3)
 
     @classmethod
     def fit(

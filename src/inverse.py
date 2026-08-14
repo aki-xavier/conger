@@ -9,10 +9,10 @@
 精炼: 覆盖全部 kind, 逐 kind 尺寸代理 × hue×光色×光向候选, 用左右图
 渲染残差做联合裁决。
 
-场景: 暗背景 + 单图元 (sphere/cylinder/box), 位置/尺寸/深度连续,
+场景: 默认暗背景 + 单图元 (sphere/cylinder/box), 位置/尺寸/深度连续,
 图元色 6 色相 (与 kind 解耦 —— kind 只剩形状线索), 光色 3 / 光向 3
-均为监督目标。离散因子全笛卡尔积覆盖 (3×6×3×3 = 162 组合 × R 复制),
-数据量最小化设计 (全量 1296 帧对 vs 旧 4600)。
+均为监督目标; `--n-objects 2` 启用双图元遮挡/前后层实验族 (2916 组合)。
+离散因子全笛卡尔积覆盖 × R 复制。
 
 数据: 参数采样 → cga 渲染 144×144 立体帧对 (平行 rig, B=0.2) →
 左帧 Riesz 特征 (L + 复数色相 + 带符号拮抗, 11 通道全分辨率) +
@@ -25,7 +25,9 @@ s 重校准) × 外观候选渲染残差后验 → SceneEstimate (MAP cga.Scene 
 插值 vs 外推分裂。
 
 结构 (无游离状态: 配置集中 InverseConfig, 机制分属各类):
-  Codebook          连续场景参数 ⇄ cga 场景 (领域常量 + 组合采样)
+  Codebook          单物体场景参数 ⇄ cga 场景 (领域常量 + 组合采样)
+  LayeredCodebook   双物体遮挡/前后层采样与 cga 场景
+  LayeredReconstructor 双层 SPN 输出 → SceneEstimate
   InverseConfig     运行配置 (开关唯一家, 派生量全 property)
   FeatureExtractor  帧 → 全分辨率特征向量
   DataBuilder       数据构建 (缓存) + 目标组装

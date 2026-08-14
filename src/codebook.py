@@ -42,6 +42,8 @@ class Codebook:
     CAM_Z = 5.5  # 相机位置 z (世界), 看向原点
     KINDS = ("sphere", "cylinder", "box")
     N_KIND = 3
+    N_OBJECTS = 1
+    N_COMBO = 162
     S_RANGE = (0.35, 0.6)  # 半径/半边长, 训练范围
     Z_RANGE = (2.5, 4.0)  # 图元中心世界 z, 训练范围
     # 外推探针区间 (训练支撑集之外; 位置不外推 —— 受图像边界物理限制)
@@ -163,6 +165,15 @@ class Codebook:
         y = ((Codebook.H - 1) / 2.0 - v) * zc / Codebook.FY
         return x, y
 
+    @staticmethod
+    def geometry(kind: int, s: float):
+        """kind × 尺度 → 图元几何 (单/多物体场景族共享)。"""
+        if kind == 0:
+            return SphereGeometry(s)
+        if kind == 1:
+            return CylinderGeometry(s, length=2.2 * s)  # 有限柱: 轴向可观测
+        return BoxGeometry(2 * s, 2 * s, 2 * s)
+
     def to_scene(self, params: tuple[float, ...]) -> Scene:
         """场景参数 (kind,u,v,s,z,hue,lcol,ldir) → cga Scene。"""
         cfg = self.cfg
@@ -170,12 +181,7 @@ class Codebook:
         u, v, s, z = (float(p) for p in params[1:5])
         hue, lcol, ldir = (int(p) for p in params[5:8])
         x, y = self.unproject(u, v, z)
-        if kind == 0:
-            geom = SphereGeometry(s)
-        elif kind == 1:
-            geom = CylinderGeometry(s, length=2.2 * s)  # 有限柱: 竖向可观测
-        else:
-            geom = BoxGeometry(2 * s, 2 * s, 2 * s)
+        geom = self.geometry(kind, s)
         scene = Scene(background=Color(cfg.bg_color))
         scene.add(AmbientLight(Color(0xFFFFFF), 0.5))
         scene.add(

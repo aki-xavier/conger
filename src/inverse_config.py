@@ -27,9 +27,10 @@ class InverseConfig:
     # 渲染残差精炼: 结构候选使用逐 kind 尺寸代理, 外观枚举
     # hue×lcol×ldir, 并用左右图残差联合裁决 (完整 Scene 输出级)
     refine_appearance: bool = True
-    # 结构候选数: 3 = 覆盖全部 kind 支持集; 1/2 是低成本截断调试。
-    # 每个 kind 使用自己的 s 几何代理后, 结构残差不再共享球尺寸偏差
+    # 结构候选数: 3 = 覆盖全部 kind 支持集; 1/2 是低成本截断调试
     kind_topk: int = 3
+    # 场景结构支持集: 1 = 单图元; 2 = 双图元遮挡/前后层 (实验路径)
+    n_objects: int = 1
 
     @property
     def feat_spec(self) -> tuple[tuple[str, str], ...]:

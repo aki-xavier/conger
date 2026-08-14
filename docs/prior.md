@@ -65,8 +65,9 @@ $$\hat{S} = argmax_S P(S|I) = argmax_S P(I|S) \cdot P(S)$$
 
 本项目把先验分四层落地，而不是集中为一个 `Prior` 对象：
 
-1. **场景族硬先验**：`Codebook` / `cga.Scene` / renderer 固定单图元、
-   材质、相机 rig、光照模型和离散因子支持集；
+1. **场景族硬先验**：`Codebook` / `LayeredCodebook` / `cga.Scene` /
+   renderer 固定材质、相机 rig、光照模型和离散因子支持集; `n_objects=2`
+   时支持双图元遮挡/前后层；
 2. **经验统计先验**：162 组合全因子 × R 连续复制，MixtureSPN 的实例
    记忆、均匀权重和逐 kind tied variance；
 3. **算法结构先验**：Riesz 多尺度、带符号色度、前景权重、双目视差

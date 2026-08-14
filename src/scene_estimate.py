@@ -7,8 +7,6 @@ from dataclasses import dataclass, field
 import mlx.core as mx
 from cga.engine import Scene
 
-from codebook import Codebook
-
 
 @dataclass(frozen=True)
 class SceneHypothesis:
@@ -35,30 +33,21 @@ class SceneEstimate:
     candidate_posterior: mx.array | None = None
     candidate_temperature: float | None = None
     hypotheses: tuple[SceneHypothesis, ...] = field(default_factory=tuple)
+    factor_sizes: tuple[int, ...] = (3, 6, 3, 3)
+    factor_indices: tuple[int, ...] = (0, 5, 6, 7)
 
-    def factor_marginals(self) -> tuple[mx.array, mx.array, mx.array, mx.array]:
-        """候选后验 → kind/hue/lcol/ldir 边缘后验。"""
-        sizes = (
-            Codebook.N_KIND,
-            Codebook.N_HUE,
-            len(Codebook.LIGHT_COLORS),
-            len(Codebook.LIGHT_DIRS),
-        )
-        vals = [[0.0] * n for n in sizes]
+    def factor_marginals(self) -> tuple[mx.array, ...]:
+        """候选后验 → 场景离散因子边缘后验 (单/双层通用)。"""
+        vals = [[0.0] * n for n in self.factor_sizes]
         if self.candidate_posterior is None or not self.candidate_params:
-            cols = (
-                int(self.params[0]),
-                int(self.params[5]),
-                int(self.params[6]),
-                int(self.params[7]),
-            )
+            cols = tuple(int(self.params[j]) for j in self.factor_indices)
             for p, j in zip(vals, cols, strict=True):
                 p[j] = 1.0
             return tuple(mx.array(p) for p in vals)
         for prm, prob in zip(
             self.candidate_params, self.candidate_posterior.tolist(), strict=True
         ):
-            cols = (int(prm[0]), int(prm[5]), int(prm[6]), int(prm[7]))
+            cols = tuple(int(prm[j]) for j in self.factor_indices)
             for p, j in zip(vals, cols, strict=True):
                 p[j] += float(prob)
         return tuple(mx.array(p) for p in vals)
