@@ -26,11 +26,12 @@ class StereoDepth:
         self.b = baseline
 
     @staticmethod
-    def _centroid(frame: mx.array) -> tuple[float, float]:
-        """(H,W,4) → (加权 x 质心, 掩码像素数)。权重 m = S² + (lum−bg)²:
+    def foreground_weights(frame: mx.array) -> mx.array:
+        """(H,W,4) → 前景权重 m = S² + (lum−bg)²。
+
         色度能量 (背景灰 S=0) + 亮度对比 (交叉光色下图元近黑 → 色度
-        失效时亮度对比兜底, 实测外推爆炸源); 背景亮度取帧四角中位
-        (角点保证是背景)。掩码版本 st2 (统计入缓存, 改掩码须 bump)。"""
+        失效时亮度对比兜底); 背景亮度取帧四角中位 (角点保证是背景)。
+        渲染残差精炼复用同一前景定义。"""
         re, im = FeatureExtractor.frame_chroma(frame)
         lum = FeatureExtractor.frame_lum(frame)
         corners = mx.concatenate(
@@ -39,7 +40,13 @@ class StereoDepth:
         )
         bg = mx.median(corners)
         dl = lum - bg
-        m = re * re + im * im + dl * dl
+        return re * re + im * im + dl * dl
+
+    @staticmethod
+    def _centroid(frame: mx.array) -> tuple[float, float]:
+        """(H,W,4) → (加权 x 质心, 掩码像素数)。掩码版本 st2
+        (统计入缓存, 改掩码须 bump)。"""
+        m = StereoDepth.foreground_weights(frame)
         xs = mx.arange(m.shape[1], dtype=mx.float32)[None, :]
         tot = float(mx.sum(m))
         cx = float(mx.sum(m * xs)) / max(tot, 1e-8)

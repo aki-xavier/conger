@@ -3,7 +3,6 @@
 
 from __future__ import annotations
 
-import math
 from pathlib import Path
 
 import mlx.core as mx
@@ -94,13 +93,12 @@ class DataBuilder:
 
     @staticmethod
     def targets(p: mx.array) -> mx.array:
-        """参数 (n,8) → 目标 (n,6) [u,v,s,z,cosH,sinH]。
-        色相环形量走 (cos,sin) 两维 (与复数色度特征同构)。
-        色恒常: 彩光下色相不可观测是推理侧的事 (预测自然退回
-        白光关联先验); 标签本身是真实反照率色相, 且与光色独立
-        采样, 簇内均值不受彩光样本污染 —— 无需掩码 (实测: 目标
-        不进 E 步后, 掩码在数学上无谓)。"""
-        h = p[:, 5] * (2.0 * math.pi / Codebook.N_HUE)
-        return mx.concatenate(
-            [p[:, 1:5], mx.cos(h)[:, None], mx.sin(h)[:, None]], axis=1
-        )
+        """参数 (n,8) → 连续目标 (n,4) [u,v,s,z]。
+        离散场景因子 (kind/hue/lcol/ldir) 走条件后验分类头, 不进连续
+        回归空间 (避免把无序类目错误当作有距离关系的实数)。"""
+        return p[:, 1:5]
+
+    @staticmethod
+    def scene_classes(p: mx.array) -> mx.array:
+        """参数 (n,8) → 离散场景因子 (n,4) [kind,hue,lcol,ldir]。"""
+        return p[:, [0, 5, 6, 7]].astype(mx.int32)

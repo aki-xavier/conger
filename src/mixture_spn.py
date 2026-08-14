@@ -1,22 +1,23 @@
 """MixtureSPN: 全分辨率浅混合 SPN (实例级对角高斯块的 Sum)。
 
-结构: Sum(K) × Block; Block = Product(特征对角高斯 × D | 目标 × T |
-kind 类目), K = 训练样本数 (实例级, 每样本一个分量)。深度结构学习
+结构: Sum(K) × Block; Block = Product(特征对角高斯 × D | 连续目标 × T |
+场景类目 × C), K = 训练样本数 (实例级, 每样本一个分量)。深度结构学习
 在 V=186K 列上是 O(V²) 列对检验, 不可行 —— 浅混合是可落地的全
 分辨率形态 (SPN 的退化深度形态, 推理仍精确)。
 
-学习 = 组装 (无 EM, 确定性): 逐 kind 分层, 分量 = 全部训练样本,
-类内 tied 对角方差 (全子集估计), 均匀权重。为什么不做 EM/质心
-压缩: 小数据 (本项目设计目标) + 弯曲流形时, K-means 质心把流形
-上的点平均到流形外, 实测 R² 0.50 vs 实例级 0.94; EM 的四条实测
-退化通道 (目标 razor 门控 winner-take-all / 死分量均值爆炸 /
-方差无上限大方差吃一切 / 每分量方差噪声淹没距离项) 随压缩层
-一起删除。EM 压缩是大数据优化, N≫K 且流形平直时再加 (ponytail:
-此刻 YAGNI)。
+学习 = 组装 (无 EM, 确定性): 逐 kind 分层 (kind 是形状因子, 决定方差
+度量), 分量 = 全部训练样本, 类内 tied 对角方差 (全子集估计), 均匀权重。
+kind / 图元色相 / 光色 / 光向作为离散场景因子共享同一责任度。为什么
+不做 EM/质心压缩: 小数据 (本项目设计目标) + 弯曲流形时, K-means 质心
+把流形上的点平均到流形外, 实测 R² 0.50 vs 实例级 0.94; EM 的四条
+实测退化通道 (目标 razor 门控 winner-take-all / 死分量均值爆炸 /
+方差无上限大方差吃一切 / 每分量方差噪声淹没距离项) 随压缩层一起
+删除。EM 压缩是大数据优化, N≫K 且流形平直时再加 (ponytail: 此刻
+YAGNI)。
 
 推理: r = softmax(log_w + Σ_d logN(x_d; μ,σ)) → E[t|x] = r @ t_mu,
-P(kind|x) = r @ exp(k_logp)。数学上等价逐 kind 分层的 Nadaraya-
-Watson 核回归: 样本 = 核中心, tied σ = 带宽。
+P(场景因子|x) = r @ exp(cat_logp)。数学上等价逐 kind 分层的
+Nadaraya-Watson 核回归/核分类: 样本 = 核中心, tied σ = 带宽。
 
 数组实现而非 Node 对象树: K 块 × 186K 叶的对象递归不可行。
 
@@ -46,7 +47,13 @@ _KC = 8  # E 步分量块数: (64,8,·) 中间量有界, Metal 可承受
 
 
 class MixtureSPN:
-    """浅混合 SPN: 实例级对角高斯块混合 (白化空间) + 目标头 + kind 头。"""
+    """浅混合 SPN: 实例级对角高斯块混合 (白化空间) + 连续头 + 多分类头。
+
+    场景因子分层: kind / 图元色相 / 光色 / 光向各是一个类目头。分层决定
+    特征方差度量的仍用 kind (形状因子); 其余离散因子沿维度复用同一
+    责任度, 得到完整场景参数的条件后验。"""
+
+    N_STRATUM = 3
 
     def __init__(
         self,
@@ -54,13 +61,13 @@ class MixtureSPN:
         f_mu: mx.array,  # (K, D) 白化空间特征均值 (实例级 = 样本)
         f_var: mx.array,  # (K, D) 白化空间特征方差 (类内 tied)
         t_mu: mx.array,  # (K, T) 连续目标 (= 样本目标)
-        k_logp: mx.array,  # (K, 3) kind 类目 log 概率 (行 one-hot)
+        cat_logp: mx.array,  # (K, 21) 场景因子类目 log 概率 (行 one-hot)
         rel_floor: float,
         f_mean: mx.array | None = None,  # (V,) 白化中心
         basis: mx.array | None = None,  # (V, D) 白化基 (随模型序列化)
     ):
         self.log_w, self.f_mu, self.f_var = log_w, f_mu, f_var
-        self.t_mu, self.k_logp = t_mu, k_logp
+        self.t_mu, self.cat_logp = t_mu, cat_logp
         self.f_mean, self.basis = f_mean, basis
         self.rel_floor = rel_floor
         # 预计算特征侧归一常数 (K,): log_w − ½·Σ_d(log var + log2π)
@@ -96,12 +103,12 @@ class MixtureSPN:
     # ── 组装 (学习) ─────────────────────────────────────────────────
 
     @staticmethod
-    def _tied_vars(z: mx.array, kind: mx.array, rel_floor: float) -> mx.array:
-        """逐 kind tied 对角方差 → (3, D) (类内全子集估计 = 核带宽,
-        地板防零; 缺场 kind 行无引用, 填 1 占位)。"""
+    def _tied_vars(z: mx.array, stratum: mx.array, rel_floor: float) -> mx.array:
+        """逐分层 tied 对角方差 → (N_STRATUM, D) (类内全子集估计 = 核带宽,
+        地板防零; 缺场分层行无引用, 填 1 占位)。"""
         out = []
-        for j in range(3):
-            sel = Utils.nonzero(kind == j)
+        for j in range(MixtureSPN.N_STRATUM):
+            sel = Utils.nonzero(stratum == j)
             if sel.shape[0] == 0:
                 out.append(mx.ones((1, z.shape[1])))
                 continue
@@ -114,39 +121,71 @@ class MixtureSPN:
             )
         return mx.concatenate(out)
 
+    @staticmethod
+    def _cat_logp(classes: mx.array, sizes: tuple[int, ...]) -> mx.array:
+        """场景离散因子 (N,len(sizes)) → 拼接 one-hot log 概率 (N,Σsizes)。"""
+        cols = []
+        for j, nc in enumerate(sizes):
+            eye = mx.arange(nc)[None, :] == classes[:, j, None]
+            cols.append(mx.log(mx.zeros(classes.shape[:1] + (nc,)) + eye))
+        return mx.concatenate(cols, axis=1)
+
+    @staticmethod
+    def cat_sizes(cat_logp: mx.array) -> tuple[int, ...]:
+        """拼接类目头的宽度 → 各场景因子类目数。"""
+        return (
+            (MixtureSPN.N_STRATUM,)
+            if cat_logp.shape[1] == MixtureSPN.N_STRATUM
+            else (3, 6, 3, 3)
+        )
+
     @classmethod
     def fit(
         cls,
         f: mx.array,  # (N, V) 特征
         t: mx.array,  # (N, T) 连续目标
-        kind: mx.array,  # (N,) int
+        stratum: mx.array,  # (N,) 分层因子 int (kind)
         rel_floor: float = 1e-2,
+        scene_classes: mx.array | None = None,  # (N,4) kind,hue,lcol,ldir
+        cat_sizes: tuple[int, ...] | None = None,
     ) -> MixtureSPN:
-        """逐 kind 分层实例级组装 (P(kind)·P(f,t|kind)), 确定性。"""
+        """逐分层实例级组装 (P(stratum)·P(f,t,场景因子|stratum)), 确定性。"""
         f_mean, basis, z = cls._whiten(f)
-        mus, vars_, tmus, ws, klp = [], [], [], [], []
+        mus, vars_, tmus, ws = [], [], [], []
         n = z.shape[0]
-        gvar = cls._tied_vars(z, kind, rel_floor)
-        for j in range(3):
-            sel = Utils.nonzero(kind == j)
+        gvar = cls._tied_vars(z, stratum, rel_floor)
+        clps = []
+        if scene_classes is None:
+            scene_classes = stratum[:, None].astype(mx.int32)
+            cat_sizes = (cls.N_STRATUM,)
+        assert cat_sizes is not None
+        assert scene_classes.shape[1] == len(cat_sizes)
+        for j in range(cls.N_STRATUM):
+            sel = Utils.nonzero(stratum == j)
             nj = sel.shape[0]
             if nj == 0:
-                continue  # 缺场 kind (合成测试/子集) 不建分量
+                continue  # 缺场分层 (合成测试/子集) 不建分量
             zj, tj = z[sel], t[sel]
             mus.append(zj)
             vars_.append(mx.tile(gvar[j : j + 1], (nj, 1)))
             tmus.append(tj)
             ws.append(mx.full((nj,), -math.log(n)))  # 均匀 (含类频率)
-            onehot = mx.zeros((nj, 3))
-            klp.append(mx.log(onehot + (mx.arange(3) == j)[None, :]))
+            clps.append(cls._cat_logp(scene_classes[sel], cat_sizes))
         m = cls(
             mx.concatenate(ws), mx.concatenate(mus), mx.concatenate(vars_),
-            mx.concatenate(tmus), mx.concatenate(klp), rel_floor, f_mean, basis,
+            mx.concatenate(tmus), mx.concatenate(clps), rel_floor, f_mean,
+            basis,
         )
-        mx.eval(m.log_w, m.f_mu, m.f_var, m.t_mu, m.k_logp)
+        mx.eval(m.log_w, m.f_mu, m.f_var, m.t_mu, m.cat_logp)
         return m
 
-    def add(self, f: mx.array, t: mx.array, kind: mx.array) -> None:
+    def add(
+        self,
+        f: mx.array,
+        t: mx.array,
+        stratum: mx.array,
+        scene_classes: mx.array,
+    ) -> None:
         """增量训练: 追加新样本分量 + tied 方差/均匀权重全量重估。
 
         精确性: 实例级模型的 f_mu 即全部训练样本, 重估与"全量 fit 的
@@ -157,19 +196,28 @@ class MixtureSPN:
         z_new = self._z(f)  # 冻结基白化
         self.f_mu = mx.concatenate([self.f_mu, z_new])
         self.t_mu = mx.concatenate([self.t_mu, t])
-        onehot = mx.zeros((kind.shape[0], 3))
-        self.k_logp = mx.concatenate(
-            [self.k_logp, mx.log(onehot + (mx.arange(3) == kind[:, None]))]
+        cat_sizes = self.cat_sizes(self.cat_logp)
+        assert scene_classes.shape[1] == len(cat_sizes)
+        self.cat_logp = mx.concatenate(
+            [self.cat_logp, self._cat_logp(scene_classes, cat_sizes)]
         )
         n = self.f_mu.shape[0]
-        k_all = mx.argmax(self.k_logp, axis=1)
-        gvar = self._tied_vars(self.f_mu, k_all, self.rel_floor)
-        self.f_var = gvar[k_all]
+        n_new = scene_classes.shape[0]
+        s_all = mx.concatenate(
+            [
+                mx.argmax(
+                    self.cat_logp[:-n_new, : self.N_STRATUM], axis=1
+                ),
+                stratum.astype(mx.int32),
+            ]
+        )
+        gvar = self._tied_vars(self.f_mu, s_all, self.rel_floor)
+        self.f_var = gvar[s_all]
         self.log_w = mx.full((n,), -math.log(n))
         self._norm = self.log_w - 0.5 * mx.sum(
             mx.log(self.f_var) + math.log(2.0 * math.pi), axis=1
         )
-        mx.eval(self.log_w, self.f_mu, self.f_var, self.t_mu, self.k_logp)
+        mx.eval(self.log_w, self.f_mu, self.f_var, self.t_mu, self.cat_logp)
 
     @staticmethod
     def _whiten(f: mx.array) -> tuple[mx.array, mx.array, mx.array]:
@@ -188,19 +236,19 @@ class MixtureSPN:
         mx.eval(f_mean, basis, z)
         return f_mean, basis, z
 
-    # ── 推理 (特征证据 → 条件期望) ──────────────────────────────────
+    # ── 推理 (特征证据 → 条件期望/条件后验) ─────────────────────────
 
     def predict(
         self, f: mx.array
     ) -> tuple[mx.array, mx.array, mx.array]:
-        """特征 (N,V) → (E[t|x] (N,T), P(kind|x) (N,3), 责任度 (N,K))。"""
+        """特征 (N,V) → (E[t|x] (N,T), P(场景因子|x) (N,C), 责任度 (N,K))。"""
         logq = self._logq_feat(self._z(f))
         r = mx.exp(logq - mx.logsumexp(logq, axis=1, keepdims=True))
         mx.eval(r)
         t_mean = r @ self.t_mu
-        kind_p = r @ mx.exp(self.k_logp)
-        mx.eval(t_mean, kind_p)
-        return t_mean, kind_p, r
+        cat_p = r @ mx.exp(self.cat_logp)
+        mx.eval(t_mean, cat_p)
+        return t_mean, cat_p, r
 
     # ── 序列化 (safetensors, 标量入 JSON 头) ─────────────────────────
 
@@ -214,7 +262,7 @@ class MixtureSPN:
                 "f_mu": self.f_mu,
                 "f_var": self.f_var,
                 "t_mu": self.t_mu,
-                "k_logp": self.k_logp,
+                "cat_logp": self.cat_logp,
                 "f_mean": self.f_mean,
                 "basis": self.basis,
             },
@@ -228,7 +276,7 @@ class MixtureSPN:
         d = mx.load(str(path))
         hd = Utils.st_metadata(path).get("__metadata__", {})
         return MixtureSPN(
-            d["log_w"], d["f_mu"], d["f_var"], d["t_mu"], d["k_logp"],
+            d["log_w"], d["f_mu"], d["f_var"], d["t_mu"], d["cat_logp"],
             float(json.loads(hd["rel_floor"])), d["f_mean"], d["basis"],
         )
 

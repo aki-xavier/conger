@@ -21,7 +21,7 @@ def _manual_model() -> tuple[MixtureSPN, mx.array]:
     )
     f_var = mx.full((3, 4), 0.01)  # σ=0.1, 分量间距 10 → 近似可分
     t_mu = mx.array([[1.0, 2.0], [3.0, 4.0], [5.0, 6.0]])
-    k_logp = mx.log(
+    cat_logp = mx.log(
         mx.array([[1.0, 0.0, 0.0], [1.0, 0.0, 0.0], [0.0, 1.0, 0.0]])
     )
     m = MixtureSPN(
@@ -29,7 +29,7 @@ def _manual_model() -> tuple[MixtureSPN, mx.array]:
         f_mu,
         f_var,
         t_mu,
-        k_logp,
+        cat_logp,
         0.1,
         mx.zeros(4),
         mx.eye(4),
@@ -40,7 +40,7 @@ def _manual_model() -> tuple[MixtureSPN, mx.array]:
 def test_axioms() -> None:
     """公理性质: 归一化 / δ选择 / 类目聚合 / 单分量证据无关。"""
     m, t_mu = _manual_model()
-    k_logp = m.k_logp
+    cat_logp = m.cat_logp
 
     # 归一化公理: 责任度与 kind 概率行和为 1
     # (容差 1e-4: float32 exp/log 复合往返误差 ~数 ulp @ O(1) 值, 实测 3e-5)
@@ -63,7 +63,7 @@ def test_axioms() -> None:
         m.f_mu[:1],
         m.f_var[:1],
         t_mu[:1],
-        k_logp[:1],
+        cat_logp[:1],
         0.1,
         mx.zeros(4),
         mx.eye(4),
@@ -113,6 +113,51 @@ def test_instance_regression(
     assert acc > 0.99, f"可分混合 kind {acc:.3f}"
 
 
+def test_full_scene_heads() -> None:
+    """完整 Scene 离散头: kind/hue/lcol/ldir 各自归一且逐头命中。"""
+    f = mx.array(
+        [
+            [0.0, 0.0],
+            [10.0, 0.0],
+            [0.0, 10.0],
+        ]
+    )
+    t = mx.zeros((3, 1))
+    scene = mx.array(
+        [
+            [0, 1, 0, 2],
+            [1, 5, 1, 0],
+            [2, 3, 2, 1],
+        ],
+        dtype=mx.int32,
+    )
+    m = MixtureSPN.fit(
+        f,
+        t,
+        scene[:, 0],
+        rel_floor=1e-5,
+        scene_classes=scene,
+        cat_sizes=(3, 6, 3, 3),
+    )
+    _, cp, _ = m.predict(f)
+    lo = 0
+    for nc in (3, 6, 3, 3):
+        p = cp[:, lo : lo + nc]
+        # one-hot 经 log/exp 往返是 float32 近似 (δ头允许 ~1e-3 残差)
+        assert mx.allclose(mx.sum(p, axis=1), mx.ones(3), atol=1e-3)
+        lo += nc
+    got = mx.concatenate(
+        [
+            mx.argmax(cp[:, 0:3], axis=1)[:, None],
+            mx.argmax(cp[:, 3:9], axis=1)[:, None],
+            mx.argmax(cp[:, 9:12], axis=1)[:, None],
+            mx.argmax(cp[:, 12:15], axis=1)[:, None],
+        ],
+        axis=1,
+    )
+    assert mx.all(got == scene)
+
+
 def test_incremental_add(
     separable: tuple[mx.array, mx.array, mx.array],
 ) -> None:
@@ -123,7 +168,7 @@ def test_incremental_add(
     f_all, t_all, k_all = separable
     even, odd = mx.arange(0, 600, 2), mx.arange(1, 600, 2)
     m = MixtureSPN.fit(f_all[even], t_all[even], k_all[even])
-    m.add(f_all[odd], t_all[odd], k_all[odd])
+    m.add(f_all[odd], t_all[odd], k_all[odd], k_all[odd][:, None])
     assert m.f_mu.shape[0] == 600, "增量后 K 应翻倍"
     tm, kp, _ = m.predict(f_all)
     rmse = float(mx.sqrt(mx.mean((tm - t_all) ** 2)))

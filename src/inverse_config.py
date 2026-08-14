@@ -23,6 +23,9 @@ class InverseConfig:
     # σ 带宽下限 (各维全局 std 的相对比例): 核回归带宽, 插值平滑度的
     # 原理旋钮 —— 小 = 分量间硬切换 (趋最近邻), 大 = 糊向全局均值
     sigma_rel_floor: float = 1e-2
+    # 渲染残差精炼: 固定 SPN 几何/kind, 枚举 hue×lcol×ldir 候选
+    # 并用左右图残差联合裁决 (完整 Scene 的光照输出级)
+    refine_appearance: bool = True
 
     @property
     def feat_spec(self) -> tuple[tuple[str, str], ...]:
