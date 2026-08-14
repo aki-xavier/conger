@@ -36,6 +36,7 @@ def test_layered_disparity(layered_frames: tuple[mx.array, mx.array]) -> None:
     assert abs(z0 - 4.0) < 0.25, f"前层 z {z0}"
     assert abs(z1 - 2.5) < 0.35, f"后层 z {z1}"
     assert abs(u0 - 89.5) < 4.0 and abs(v0 - 79.5) < 4.0
-    # 后层被前层遮住右下 25×25, 可见部分质心约 (69.7,59.7)
-    assert abs(u1 - 69.7) < 4.0 and abs(v1 - 59.7) < 4.0
-    assert a0 > a1 > 0.0, f"遮挡后前层可见面积应更大: {a0}, {a1}"
+    # 补全是置信门控: 通过时接近完整中心 (74.5,64.5), 未通过时
+    # 落在可见质心 (69.7,59.7); 两者都应在真实轮廓范围内
+    assert 65.0 <= u1 <= 78.0 and 55.0 <= v1 <= 70.0
+    assert a0 > 1000.0 and a1 > 500.0

@@ -55,7 +55,7 @@ class InverseApp:
             cfg.replicates
         )
         assert mx.all(mx.isfinite(f_tr)), "特征含 NaN/inf"
-        # 视差管线独立评估 (单物体几何 ẑ vs GT z; 双层为全局质心诊断)
+        # 视差管线独立评估 (单物体几何 ẑ vs GT z; 双层逐层统计另有专题)
         if cfg.n_objects == 1:
             pairs = (("插值", s_ti, p_ti), ("外推", s_te, p_te))
             for nm, st, pp in pairs:
@@ -67,7 +67,7 @@ class InverseApp:
                     f"(d 中位 {float(mx.median(st[:, 1])):.2f}px)"
                 )
         else:
-            print("  视差管线: 双层遮挡下全局质心仅作特征诊断, 不作 GT 对照")
+            print("  视差管线: 双层遮挡使用 StereoLayers 逐层统计")
         t_tr = DataBuilder.targets(p_tr)
         c_tr = DataBuilder.scene_classes(p_tr)
 

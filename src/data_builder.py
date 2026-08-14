@@ -33,8 +33,8 @@ class DataBuilder:
             f"k{cb.N_KIND}h{cb.N_HUE}c{len(cb.LIGHT_COLORS)}d{len(cb.LIGHT_DIRS)}"
             f"o{cb.N_OBJECTS}sv{cb.SAMPLE_V}rp{cb.RENDER_V}"
         )
-        # st4 = 单物体拼接维缩放; sl1 = 逐层双目几何统计
-        stereo_tag = "sl1" if cb.N_OBJECTS == 2 else "st4"
+        # st4 = 单物体拼接维缩放; sl4 = 逐层视差 + soft-fusion 轮廓补全
+        stereo_tag = "sl4" if cb.N_OBJECTS == 2 else "st4"
         return f"mix_{cb.H}x{cb.W}_{feat_tag}_{lvl_tag}_{stereo_tag}"
 
     def _block_feats(self, split: str, r: int) -> tuple[mx.array, ...]:

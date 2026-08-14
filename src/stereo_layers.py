@@ -1,8 +1,7 @@
 """StereoLayers: 遮挡感知逐层双目几何。
 
 左图逐像素水平块匹配 → disparity map + 匹配置信度 → (x,y,视差) 2-means
-分为前/后两层 → 每层 (u,v,z,area)。遮挡区域不做 hallucination: 后层
-统计来自其可见像素, 中心/面积与完整物体的系统偏差留给下游 SPN 残差。
+分为前/后两层; 后层再做形状模板轮廓补全 → 每层 (u,v,z,area)。
 """
 
 from __future__ import annotations
@@ -10,6 +9,7 @@ from __future__ import annotations
 import mlx.core as mx
 
 from codebook import Codebook
+from contour_completion import ContourCompleter
 from feature_extractor import FeatureExtractor
 from stereo import StereoDepth
 from utils import Utils
@@ -153,13 +153,22 @@ class StereoLayers:
         if clustered is None:
             return cls._fallback(fl, fr)
         front, (_, _, d_front), (_, _, d_back) = clustered
-        out = []
-        for is_front, d in ((True, d_front), (False, d_back)):
-            m = front if is_front else (valid & ~front)
-            u, v, area = cls._centroid(fw * m.astype(mx.float32))
-            z = Codebook.CAM_Z - Codebook.FX * Codebook.STEREO_BASE / max(d, 1e-6)
-            out.extend([u, v, z, area])
-        return tuple(out)
+        back = valid & ~front
+        u0, v0, area0 = cls._centroid(fw * front.astype(mx.float32))
+        u1, v1, area1 = cls._centroid(fw * back.astype(mx.float32))
+        # 后层轮廓补全: 完整模板 − 前层遮挡 ↔ 观测可见区域
+        cu, cv, c_area, _, c_score = ContourCompleter.complete(front, back)
+        if c_area > 0.0:
+            # soft fusion: 轮廓残差越低权重越高; 训练集测得补全面积
+            # 中位膨胀约 1.5×, 因此先按 2/3 收缩 (sl4)
+            w = min(max((0.30 - c_score) / 0.25, 0.0), 1.0)
+            c_area *= 2.0 / 3.0
+            u1 = (1.0 - w) * u1 + w * cu
+            v1 = (1.0 - w) * v1 + w * cv
+            area1 = (1.0 - w) * area1 + w * c_area
+        z0 = Codebook.CAM_Z - Codebook.FX * Codebook.STEREO_BASE / d_front
+        z1 = Codebook.CAM_Z - Codebook.FX * Codebook.STEREO_BASE / d_back
+        return (u0, v0, z0, area0, u1, v1, z1, area1)
 
     @staticmethod
     def _fallback(fl: mx.array, fr: mx.array) -> tuple[float, ...]:
