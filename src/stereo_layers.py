@@ -11,6 +11,7 @@ import mlx.core as mx
 from codebook import Codebook
 from contour_completion import ContourCompleter
 from feature_extractor import FeatureExtractor
+from joint_layer_optimizer import JointLayerOptimizer
 from stereo import StereoDepth
 from utils import Utils
 
@@ -168,6 +169,14 @@ class StereoLayers:
             area1 = (1.0 - w) * area1 + w * c_area
         z0 = Codebook.CAM_Z - Codebook.FX * Codebook.STEREO_BASE / d_front
         z1 = Codebook.CAM_Z - Codebook.FX * Codebook.STEREO_BASE / d_back
+        joint = JointLayerOptimizer.optimize(
+            fg, disp, valid, front, back, d_front, d_back
+        )
+        if joint is not None:
+            # 联合模板负责中心/深度; 面积仍走可见区+补全 soft fusion,
+            # 因为模板尺度在错误聚类下会膨胀 (实测 s R² 大降)
+            return (joint[0], joint[1], joint[2], area0,
+                    joint[4], joint[5], joint[6], area1)
         return (u0, v0, z0, area0, u1, v1, z1, area1)
 
     @staticmethod

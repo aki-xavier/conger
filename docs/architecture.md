@@ -116,19 +116,22 @@ kind0×kind1×hue0×hue1×lcol×ldir=2916 组合全笛卡尔积, 连续位置/�
 深度逐样本随机, 约 70% 样本强制投影重叠。renderer 的最近命中自然产生
 遮挡, 无需单独标签 —— 层序就是 z 序。
 
-双层几何使用 `StereoLayers`: 左图 9×9 RGB+色度+亮度梯度块匹配,
-限制在物理视差范围 d∈[5,12], 以 second-best 比值剔除弱纹理像素,
-再按 (x,y,disparity) 加权 2-means 分前后层。后层可见掩码再经
-`ContourCompleter`: 圆/方完整模板减去前层遮挡, 与观测可见区域做
-对称差, 坐标搜索恢复完整中心/面积; 采纳权重随模板残差连续衰减,
-且补全面积按训练集中位膨胀校准 (×2/3), 可见观测仍是默认锚点。
-渲染残差精炼仍未启用 (2916 结构×外观候选需先验证逐层几何)。
+双层几何使用 `StereoLayers + JointLayerOptimizer`: 左图 9×9
+RGB+色度+亮度梯度块匹配, 限制在物理视差范围 d∈[5,12], 以
+second-best 比值剔除弱纹理像素, 先按 (x,y,disparity) 聚类得到初始
+前后层; 随后在低分辨率上联合优化两层的圆/方模板、中心、尺度、视差
+中心和像素分配。候选可见区为 T_front 与 T_back\T_front, 得分同时
+惩罚前景掩码不一致、视差不一致和后层过度遮挡。实测模板面积在错误
+聚类下会膨胀, 因此最终分工是: 联合优化给中心/深度, 面积仍由可见区
++ ContourCompleter soft fusion 提供。渲染残差精炼仍未启用 (2916
+结构×外观候选需先验证逐层几何)。
 
-首版实测 (R=1, N=2916, sv3/sl4): 插值 kind0/kind1 0.397/0.364,
-hue0/hue1 0.415/0.166, lcol/ldir 0.397/0.372; v0/u1/v1 R²
-0.723/0.395/0.356, z0 R² 0.223, 后层 s/z 仍为负 R²。调试中修正了
-前层定义错误 (相机在 z=5.5, z 大者近), 加入残差限幅和 soft-fusion
-轮廓补全; 当前策略是前层全残差、后层 u/v 残差 + s/z 锚点。
+首版实测 (R=1, N=2916, sv3/sl8): 插值 kind0/kind1 0.398/0.357,
+hue0/hue1 0.421/0.171, lcol/ldir 0.390/0.370; u0/v0/u1/v1 R²
+0.537/0.711/0.466/0.432。调试中修正了前层定义错误 (相机在 z=5.5,
+z 大者近), 加入残差限幅、轮廓 soft fusion 和遮挡联合模板优化;
+最终分工是联合模板给中心/深度, 可见区+补全给面积, 前层全残差,
+后层 u/v 残差 + s/z 锚点。
 
 ## 5. 模块结构 (一文件一类)
 
@@ -145,7 +148,7 @@ flowchart LR
     subgraph FRONT["前端"]
         RS["riesz_scale.py"] & FM["feature_maps.py"] --> RW["riesz.py: RieszWavelet"]
         RW --> FEX
-        SL["stereo_layers.py + contour_completion.py<br/>逐层视差 + 后层补全"] --> DB
+        SL["stereo_layers.py + joint_layer_optimizer.py<br/>逐层视差 + 遮挡联合优化"] --> DB
     end
     MSP["mixture_spn.py: MixtureSPN<br/>白化+实例级组装+条件期望+序列化"] --> APP
     RW --> ST["riesz_selftest.py"]
@@ -164,8 +167,8 @@ InverseConfig 防环。
 
 ## 7. 待办 (按价值排序; 已对照实例级架构审判, 过时项已删)
 
-1. **遮挡联合优化**: StereoLayers + ContourCompleter 已给可见/完整
-   轮廓双通道, 下一步把聚类、模板和后层尺寸放入同一候选似然
+1. **双层渲染残差**: 联合模板已稳定中心先验, 下一步在 SceneEstimate
+   候选中启用分层渲染残差, 重点验证后层 s/z 与遮挡边界
 2. **池外光照探针**: held-out 光向/光色, 验证完整 Scene 输出的光照
    泛化与反照率×光照联合可识别性
 3. **逐 kind PPCA 似然比**: kind 形状线索的度量升级 (各类自己的

@@ -32,6 +32,7 @@ s 重校准) × 外观候选渲染残差后验 → SceneEstimate (MAP cga.Scene 
   FeatureExtractor  帧 → 全分辨率特征向量
   DataBuilder       数据构建 (缓存) + 目标组装
   StereoLayers      遮挡感知逐层视差/前后层几何统计
+  JointLayerOptimizer 模板×遮挡×视差的联合几何优化
   MixtureSPN        实例级浅混合 + 连续/离散条件推理
   SceneReconstructor 帧对/模型输出 → 候选渲染后验 → 完整 cga.Scene
   SceneEstimate     MAP Scene + SPN/渲染候选后验 + top 假设
