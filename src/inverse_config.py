@@ -2,6 +2,7 @@
 
 场景/pipeline 说明见 inverse.py 与 docs/architecture.md。
 """
+
 from __future__ import annotations
 
 from dataclasses import dataclass
@@ -23,9 +24,12 @@ class InverseConfig:
     # σ 带宽下限 (各维全局 std 的相对比例): 核回归带宽, 插值平滑度的
     # 原理旋钮 —— 小 = 分量间硬切换 (趋最近邻), 大 = 糊向全局均值
     sigma_rel_floor: float = 1e-2
-    # 渲染残差精炼: 固定 SPN 几何/kind, 枚举 hue×lcol×ldir 候选
-    # 并用左右图残差联合裁决 (完整 Scene 的光照输出级)
+    # 渲染残差精炼: 结构候选使用逐 kind 尺寸代理, 外观枚举
+    # hue×lcol×ldir, 并用左右图残差联合裁决 (完整 Scene 输出级)
     refine_appearance: bool = True
+    # 结构候选数: 3 = 覆盖全部 kind 支持集; 1/2 是低成本截断调试。
+    # 每个 kind 使用自己的 s 几何代理后, 结构残差不再共享球尺寸偏差
+    kind_topk: int = 3
 
     @property
     def feat_spec(self) -> tuple[tuple[str, str], ...]:

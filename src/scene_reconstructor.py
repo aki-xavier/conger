@@ -2,7 +2,8 @@
 
 这里“完整”指当前场景族的全部可控自由度: kind / u / v / s / z /
 图元色相 / 光色 / 光向。相机、背景、环境光、材质和渲染 rig 由
-Codebook 的固定配置提供 (训练与推理同 renderer)。
+Codebook 的固定配置提供 (训练与推理同 renderer)。推理输出不是单个
+MAP 点, 而是 SceneEstimate: MAP Scene + 候选渲染残差 + 联合后验。
 """
 
 from __future__ import annotations
@@ -14,6 +15,7 @@ import mlx.core as mx
 from cga.engine import PerspectiveCamera, Renderer, Scene
 
 from codebook import Codebook
+from scene_estimate import SceneEstimate, SceneHypothesis
 from stereo import StereoDepth
 
 if TYPE_CHECKING:
@@ -33,15 +35,26 @@ class SceneReconstructor:
     )
 
     @staticmethod
-    def s_proxy(stats: mx.array) -> mx.array:
-        """表观尺寸代理: √(area/π)·zc/FX (形状系数留给模型残差学)。"""
-        return mx.sqrt(stats[:, 2] / math.pi) * (
-            Codebook.CAM_Z - stats[:, 0]
-        ) / Codebook.FX
+    def s_proxy(kind: int | mx.array, stats: mx.array) -> mx.array:
+        """kind-conditioned 表观尺寸代理。
+
+        sphere/cylinder 在当前 rig 的可见轮廓按圆盘面积 A≈πs_img²;
+        box 正面按 A≈(2s_img)²。掩码面积受光照/阈值影响, 剩余偏差由
+        SPN 的 s 残差学习, 不再让 box/cylinder 共享球代理的系统偏差。"""
+        q = mx.sqrt(stats[:, 2]) * (Codebook.CAM_Z - stats[:, 0]) / Codebook.FX
+        if isinstance(kind, int):
+            coef = 0.5 if kind == 2 else 1.0 / math.sqrt(math.pi)
+            return q * coef
+        coef = mx.where(
+            kind.astype(mx.int32) == 2,
+            0.5,
+            1.0 / math.sqrt(math.pi),
+        )
+        return q * coef
 
     @classmethod
     def split_cat(cls, cat_p: mx.array) -> tuple[mx.array, ...]:
-        """拼接场景后验 (N,21) → kind/hue/lcol/ldir 四个 (N,C_j)。"""
+        """拼接场景后验 (N,15) → kind/hue/lcol/ldir 四个 (N,C_j)。"""
         out, lo = [], 0
         for nc in cls.CAT_SIZES:
             out.append(cat_p[:, lo : lo + nc])
@@ -52,12 +65,12 @@ class SceneReconstructor:
     def params(
         cls,
         t_pred: mx.array,  # (N,4) 残差参数化的 u,v,s−ŝ,z−ẑ
-        cat_p: mx.array,  # (N,21) 拼接场景因子后验
+        cat_p: mx.array,  # (N,15) 拼接场景因子后验
         stats: mx.array,  # (N,3) [ẑ, 视差, 掩码面积]
     ) -> tuple[tuple[float, ...], ...]:
         """模型输出 → Codebook.to_scene 参数 (kind,u,v,s,z,hue,lcol,ldir)。"""
         probs = [mx.argmax(p, axis=1).astype(mx.int32) for p in cls.split_cat(cat_p)]
-        s = t_pred[:, 2] + cls.s_proxy(stats)
+        s = t_pred[:, 2] + cls.s_proxy(probs[0], stats)
         z = t_pred[:, 3] + stats[:, 0]
         rows = []
         for i in range(t_pred.shape[0]):
@@ -77,17 +90,24 @@ class SceneReconstructor:
 
     @classmethod
     def physical_targets(
-        cls, t_pred: mx.array, stats: mx.array
+        cls, t_pred: mx.array, stats: mx.array, kind: mx.array
     ) -> mx.array:
         """残差目标 → 物理连续目标 [u,v,s,z] (评估/可视化用)。"""
         return mx.concatenate(
             [
                 t_pred[:, :2],
-                (t_pred[:, 2] + cls.s_proxy(stats))[:, None],
+                (t_pred[:, 2] + cls.s_proxy(kind, stats))[:, None],
                 (t_pred[:, 3] + stats[:, 0])[:, None],
             ],
             axis=1,
         )
+
+    @staticmethod
+    def targets_from_params(
+        params: tuple[tuple[float, ...], ...]
+    ) -> mx.array:
+        """完整场景参数 → 物理连续目标 [u,v,s,z] (评估最终 Scene)。"""
+        return mx.array([p[1:5] for p in params], dtype=mx.float32)
 
     @staticmethod
     def scenes(
@@ -101,13 +121,22 @@ class SceneReconstructor:
         observed: mx.array, candidate: mx.array, weights: mx.array
     ) -> float:
         """前景加权 RGB MSE (左右两视图同一权重的观测侧定义)。"""
-        d = (
-            observed[..., :3].astype(mx.float32)
-            - candidate[..., :3].astype(mx.float32)
-        )
+        d = observed[..., :3].astype(mx.float32) - candidate[..., :3].astype(mx.float32)
         num = mx.sum(weights * mx.sum(d * d, axis=2))
         den = mx.maximum(mx.sum(weights), 1e-8)
         return float(num / den)
+
+    @staticmethod
+    def appearance_candidates(
+        base_params: tuple[float, ...],
+    ) -> tuple[tuple[float, ...], ...]:
+        """固定 kind/u/v/s/z 的 54 个 hue×lcol×ldir 候选。"""
+        out = []
+        for hue in range(Codebook.N_HUE):
+            for lcol in range(len(Codebook.LIGHT_COLORS)):
+                for ldir in range(len(Codebook.LIGHT_DIRS)):
+                    out.append(base_params[:5] + (float(hue), float(lcol), float(ldir)))
+        return tuple(out)
 
     @classmethod
     def refine_appearance(
@@ -119,34 +148,83 @@ class SceneReconstructor:
         renderer: Renderer | None = None,
         cam_l: PerspectiveCamera | None = None,
         cam_r: PerspectiveCamera | None = None,
-    ) -> tuple[tuple[float, ...], float]:
+    ) -> tuple[tuple[float, ...], float, mx.array]:
         """固定 kind/u/v/s/z, 用渲染残差联合精炼 hue/lcol/ldir。
 
         候选 = 6 图元色相 × 3 光色 × 3 光向; 每候选同时渲染左右视图,
-        以观测前景权重计算 RGB MSE。这个方法把反照率×光照的联合歧义
-        交还给正向渲染模型裁决, 而不是让共享 SPN 责任度独立猜三个
-        边缘类别。返回 (最佳完整参数, 最佳残差)。"""
+        以观测前景权重计算 RGB MSE。返回 (最佳完整参数, 最佳残差,
+        全部 54 候选残差)。"""
         if renderer is None or cam_l is None or cam_r is None:
             renderer, cam_l, cam_r = Codebook.make_renderer()
         wl = StereoDepth.foreground_weights(fl)
         wr = StereoDepth.foreground_weights(fr)
-        best, best_score = base_params, float("inf")
-        for hue in range(Codebook.N_HUE):
-            for lcol in range(len(Codebook.LIGHT_COLORS)):
-                for ldir in range(len(Codebook.LIGHT_DIRS)):
-                    prm = base_params[:5] + (
-                        float(hue), float(lcol), float(ldir)
-                    )
-                    scene = codebook.to_scene(prm)
-                    cl = renderer.render(scene, cam_l)
-                    cr = renderer.render(scene, cam_r)
-                    score = 0.5 * (
-                        cls._masked_mse(fl, cl, wl)
-                        + cls._masked_mse(fr, cr, wr)
-                    )
-                    if score < best_score:
-                        best, best_score = prm, score
-        return best, best_score
+        scores = []
+        candidates = cls.appearance_candidates(base_params)
+        for prm in candidates:
+            scene = codebook.to_scene(prm)
+            cl = renderer.render(scene, cam_l)
+            cr = renderer.render(scene, cam_r)
+            scores.append(
+                0.5 * (cls._masked_mse(fl, cl, wl) + cls._masked_mse(fr, cr, wr))
+            )
+        score_arr = mx.array(scores, dtype=mx.float32)
+        best_i = int(mx.argmin(score_arr))
+        return candidates[best_i], float(score_arr[best_i]), score_arr
+
+    @classmethod
+    def refine_scene(
+        cls,
+        codebook: Codebook,
+        base_params: tuple[float, ...],
+        kind_p: mx.array,
+        stats: mx.array,
+        fl: mx.array,
+        fr: mx.array,
+        kind_topk: int = 3,
+        renderer: Renderer | None = None,
+        cam_l: PerspectiveCamera | None = None,
+        cam_r: PerspectiveCamera | None = None,
+    ) -> tuple[
+        tuple[float, ...], tuple[tuple[float, ...], ...], mx.array, mx.array, float
+    ]:
+        """top-k kind × 54 外观候选的联合渲染后验。
+
+        结构评分沿用共享几何, 避免把 kind 选择过度耦合到面积代理偏差;
+        候选返回前再按各自 kind 重校准 s (保留 SPN 学到的残差)。后验
+        log 形式 = −残差/T + log P(kind|SPN)。温度
+        T=max(2·best_residual,1) 用最佳残差估计观测噪声尺度并随
+        SceneEstimate 返回; 该后验表达候选间相对置信度, 不声称绝对
+        校准。"""
+        if renderer is None or cam_l is None or cam_r is None:
+            renderer, cam_l, cam_r = Codebook.make_renderer()
+        kind_topk = max(1, min(kind_topk, Codebook.N_KIND))
+        order = mx.argsort(kind_p)[::-1][:kind_topk].tolist()
+        stats = stats[None, :] if stats.ndim == 1 else stats
+        s_resid = base_params[3] - float(
+            cls.s_proxy(int(base_params[0]), stats)[0]
+        )
+        params, scores, weights = [], [], []
+        for k in order:
+            base = (float(k),) + base_params[1:]
+            _, _, block_scores = cls.refine_appearance(
+                codebook, base, fl, fr, renderer, cam_l, cam_r
+            )
+            params.extend(cls.appearance_candidates(base))
+            scores.append(block_scores)
+            weights.extend([float(kind_p[k])] * block_scores.shape[0])
+        score_arr = mx.concatenate(scores)
+        weight_arr = mx.maximum(mx.array(weights, dtype=mx.float32), 1e-12)
+        temperature = max(2.0 * float(mx.min(score_arr)), 1.0)
+        logp = -score_arr / temperature + mx.log(weight_arr)
+        posterior = mx.exp(logp - mx.logsumexp(logp))
+        calibrated = tuple(
+            p[:3]
+            + (float(cls.s_proxy(int(p[0]), stats)[0]) + s_resid,)
+            + p[4:]
+            for p in params
+        )
+        best_i = int(mx.argmax(posterior))
+        return calibrated[best_i], calibrated, score_arr, posterior, temperature
 
     @staticmethod
     def frame_features(
@@ -159,9 +237,7 @@ class SceneReconstructor:
         vec, rw = app.extractor.of_frame(fl, rw)
         z_hat, d, area = StereoDepth().estimate(fl, fr)
         vec = mx.concatenate([vec, mx.array([z_hat, area / 1000.0])])
-        return vec[None, :], mx.array(
-            [[z_hat, d, area]], dtype=mx.float32
-        ), rw
+        return vec[None, :], mx.array([[z_hat, d, area]], dtype=mx.float32), rw
 
     @classmethod
     def from_frames(
@@ -172,18 +248,48 @@ class SceneReconstructor:
         fr: mx.array,
         rw: RieszWavelet | None = None,
         refine: bool = True,
-    ) -> tuple[Scene, tuple[float, ...], mx.array]:
-        """左/右二维图像 → 完整 cga.Scene (含精炼光照)。
+        kind_topk: int = 3,
+    ) -> SceneEstimate:
+        """左/右二维图像 → SceneEstimate (MAP Scene + 候选联合后验)。
 
-        返回 (scene, 场景参数, SPN 场景因子后验)。渲染 rig 保持
-        Codebook.make_renderer 的训练配置; refine=True 时 hue/lcol/ldir
-        由候选渲染残差联合精炼, SPN 后验仍随返回值保留。"""
+        渲染 rig 保持 Codebook.make_renderer 的训练配置。refine=True 时
+        kind_topk 个结构候选 × 54 个外观候选进入渲染残差联合后验;
+        SPN 原始后验仍随返回值保留。"""
         f, stats, _ = cls.frame_features(app, fl, fr, rw)
         t, cat_p, _ = net.predict(f)
         prm = cls.params(t, cat_p, stats)[0]
-        if refine:
-            prm, _ = cls.refine_appearance(app.codebook, prm, fl, fr)
-        return app.codebook.to_scene(prm), prm, cat_p
+        if not refine:
+            return SceneEstimate(
+                scene=app.codebook.to_scene(prm),
+                params=prm,
+                spn_posterior=cat_p[0],
+                candidate_params=(prm,),
+                hypotheses=(SceneHypothesis(prm, 1.0, None),),
+            )
+        prm, candidates, scores, posterior, temperature = cls.refine_scene(
+            app.codebook,
+            prm,
+            cat_p[0, : Codebook.N_KIND],
+            stats,
+            fl,
+            fr,
+            kind_topk=kind_topk,
+        )
+        order = mx.argsort(posterior)[::-1][:5].tolist()
+        hypotheses = tuple(
+            SceneHypothesis(candidates[i], float(posterior[i]), float(scores[i]))
+            for i in order
+        )
+        return SceneEstimate(
+            scene=app.codebook.to_scene(prm),
+            params=prm,
+            spn_posterior=cat_p[0],
+            candidate_params=candidates,
+            candidate_scores=scores,
+            candidate_posterior=posterior,
+            candidate_temperature=temperature,
+            hypotheses=hypotheses,
+        )
 
     @staticmethod
     def rig() -> tuple[Renderer, PerspectiveCamera, PerspectiveCamera]:

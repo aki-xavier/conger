@@ -27,17 +27,23 @@ flowchart LR
     FEAT --> W["PCA 白化 (Gram eigh, CPU)<br/>228K→D≤N−1 无损降维<br/>对角高斯≡原空间全协方差"]
     W --> ASM["实例级组装 (无 EM):<br/>逐 kind 分层, 分量=全部样本,<br/>类内 tied 方差, 均匀权重"]
     ASM --> PRED["predict: 责任度 (特征证据)<br/>E[u,v,s−ŝ,z−ẑ|x] ≡ 分层核回归<br/>P(kind,hue,lcol,ldir|x)=场景因子后验"]
-    PRED --> REFINE["SceneReconstructor 渲染残差精炼:<br/>固定 kind/u/v/s/z, 枚举 hue6×光色3×光向3<br/>左右图前景加权 RGB MSE 联合裁决"]
-    REFINE --> EVAL["Evaluator: 物理单位 RMSE/R²<br/>+ kind/hue/lcol/ldir 分类准确率<br/>插值 vs 外推分裂"]
-    REFINE --> RECON["完整预测参数 → to_scene → cga.Scene"]
+    PRED --> REFINE["SceneReconstructor 渲染残差精炼:<br/>top-k kind × hue6×光色3×光向3<br/>左右图前景加权 RGB MSE"]
+    REFINE --> POST["SceneEstimate:<br/>MAP Scene + 候选分数 + 联合后验<br/>+ top 完整场景假设"]
+    POST --> EVAL["Evaluator: 物理单位 RMSE/R²<br/>+ kind/hue/lcol/ldir 分类准确率<br/>插值 vs 外推分裂"]
+    POST --> RECON["完整预测参数 → to_scene → cga.Scene"]
 ```
 
-实测 (渲染残差精炼版, N=1296): 插值 u,v RMSE 4.95/4.43px
-(R² 0.930/0.945) / s R² 0.332 / z R² 0.831 / kind 0.577 / hue 0.994 /
-lcol 0.972 / ldir 0.830; 外推 u,v R² 0.949/0.953 / s,z R² 0.909/0.956 /
-kind 0.515 / hue 0.981 / lcol 0.861 / ldir 0.731。精炼前共享责任度的
-lcol/ldir 仅 0.457/0.367; 候选重渲染把反照率×光照歧义交回正向模型,
-是外观辨识的主要来源。
+实测 (结构-外观联合精炼版, N=1296, kind_topk=3): 插值 u,v RMSE
+4.95/4.43px (R² 0.930/0.945) / s R² 0.508 / z R² 0.831 / kind 0.753 /
+hue 1.000 / lcol 0.994 / ldir 0.895; 外推 u,v R² 0.949/0.953 / s,z
+R² 0.922/0.956 / kind 0.617 / hue 0.981 / lcol 0.880 / ldir 0.772。
+精炼前共享责任度的 lcol/ldir 仅 0.457/0.367; 候选重渲染把反照率×
+光照歧义交回正向模型, 是外观辨识的主要来源。
+
+结构似然消融 (均全 kind): 旧共享几何 kind 0.753 / s R² 0.332;
+候选内直接切换逐 kind 几何 kind 0.704 / s R² 0.160 (面积掩码观测
+偏差被放大); 责任度条件化几何 kind 0.698 / s R² 0.340; 现版共享几何
+评分 + kind 后校准 s 达到 kind 0.753 / s R² 0.508。
 
 ## 2. 机制决策录 (全部实测驱动, 按时间序)
 
@@ -73,23 +79,34 @@ flowchart TD
 平均到流形外。数据均匀采样 ⟹ 均匀权重是正确先验 (学权重反而
 引入 log_w≈−20 死亡螺旋)。
 
-## 3. 渲染残差光照精炼 (SceneReconstructor)
+## 3. 渲染残差光照/结构精炼 (SceneReconstructor)
 
 SPN 的共享责任度擅长几何与类别近邻, 但光照只贡献弱特征差异; 让
 `hue/lcol/ldir` 三个边缘后验独立 argmax, 还会把反照率×光照的联合
-歧义错误拆开。精炼级改为分析-合成: 固定 SPN 估计的 kind/u/v/s/z,
-枚举 6×3×3 个外观候选, 用同一 cga renderer 重渲染左右视图, 并以
-前景加权 RGB MSE 选择联合 MAP:
+歧义错误拆开。精炼级改为分析-合成: 默认覆盖全部 kind; 结构评分沿用
+共享几何以避免候选间尺寸代理偏差, 候选返回前再按各自 kind 的面积→
+尺寸代理重校准 s (sphere/cylinder 圆盘, box 正面), 并保留 SPN 学到的
+s 残差。随后枚举 6×3×3 个外观候选, 用同一 cga renderer 重渲染左右
+视图, 以前景加权 RGB MSE 得到候选分数:
 
 ```math
-\ell(h,c,d)=\frac12\sum_{v\in\{L,R\}}
-\frac{\sum_x m_v(x)\|I_v(x)-R_v(h,c,d)(x)\|^2}{\sum_x m_v(x)}
+\ell(k,h,c,d)=\frac12\sum_{v\in\{L,R\}}
+\frac{\sum_x m_v(x)\|I_v(x)-R_v(k,h,c,d)(x)\|^2}{\sum_x m_v(x)}
+```
+
+`--kind-topk 1|2` 只是低成本截断调试; 默认 `kind_topk=3` 覆盖当前
+结构支持集。联合后验:
+
+```math
+p(k,h,c,d\mid I)\propto
+p_{\mathrm{SPN}}(k\mid I)\exp(-\ell(k,h,c,d)/T),
+\quad T=\max(2\ell_{\min},1)
 ```
 
 `m_v` 与立体前景掩码同定义 (色度能量 + 背景亮度对比)。几何误差
-对所有外观候选近似同置, 不改变排序; 色相与光照则由正向模型联合
-裁决。该级只替换外观三因子, 不掩盖 SPN 后验 —— 公共接口仍返回
-SPN posterior 供不确定性检查。
+对外观候选近似同置, 不改变排序; 结构候选则通过渲染残差与 SPN
+结构先验共同裁决。公开接口返回 `SceneEstimate`: MAP Scene、SPN 原始
+后验、候选残差/联合后验和 top 完整场景假设, 不再把歧义硬压成单点。
 
 ## 4. 模块结构 (一文件一类)
 
@@ -100,6 +117,7 @@ flowchart LR
         CBK & FEX & DCFG --> DB["data_builder.py"] & EV["evaluator.py"]
         DB & EV --> APP["inverse_app.py: InverseApp"]
         APP --> REC["scene_reconstructor.py<br/>帧对/参数 → 完整 cga.Scene"]
+        REC --> EST["scene_estimate.py<br/>MAP + 候选后验 + top 假设"]
         APP --> ENTRY["inverse.py 薄入口"]
     end
     subgraph FRONT["前端"]
@@ -118,15 +136,18 @@ InverseConfig 防环。
 - 数据缓存: `artifacts/mix_*.safetensors` (配置指纹文件名, gitignore);
 - 模型: MixtureSPN.save/load —— 参数张量 (含白化基 basis (V,D),
   全量约 1.5GB) + rel_floor 入 JSON 明文头; Utils.st_metadata 可查;
-  默认路径 `spn_full_<数据指纹>` (`full` 标记完整场景类目头输出契约)。
+  默认路径 `spn_kindgeo_<数据指纹>` (`kindgeo` 标记 kind-conditioned
+  s 残差输出契约)。
 
 ## 6. 待办 (按价值排序; 已对照实例级架构审判, 过时项已删)
 
-1. **逐 kind PPCA 似然比**: kind 形状线索的度量升级 (各类自己的
-   白化子空间 + log|det| 修正, 跨类密度可比化)
+1. **遮挡/层场景族**: 当前 Scene 后验已结构化, 下一步把单图元
+   支持集扩展为多物体/前后层, 让遮挡这一硬物理先验进入生成模型
 2. **池外光照探针**: held-out 光向/光色, 验证完整 Scene 输出的光照
    泛化与反照率×光照联合可识别性
-3. **大数据逃生通道** (N~10⁴ 触发): PCA 基按内在维度截断 /
+3. **逐 kind PPCA 似然比**: kind 形状线索的度量升级 (各类自己的
+   白化子空间 + log|det| 修正, 跨类密度可比化)
+4. **大数据逃生通道** (N~10⁴ 触发): PCA 基按内在维度截断 /
    子样本估基全量套用 / ANN 索引加速推理 / 压缩蒸馏 —— EM 若
    回归只能作实例模型的对照验证压缩件 (退化通道病历见 §2.2)
 

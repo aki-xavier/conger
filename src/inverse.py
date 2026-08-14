@@ -5,8 +5,8 @@
 
 模型: MixtureSPN —— 全分辨率实例级浅混合 SPN (PCA 白化 + 逐 kind
 分层, 每样本一个对角高斯块, 类内 tied 方差; 连续条件期望 ≡ 分层
-核回归, 离散场景因子 ≡ 条件后验分类; 无 EM, 确定性组装)。外观
-精炼: 固定 SPN 几何/kind, 枚举 hue×光色×光向 54 候选, 用左右图
+核回归, 离散场景因子 ≡ 条件后验分类; 无 EM, 确定性组装)。外观/结构
+精炼: 覆盖全部 kind, 逐 kind 尺寸代理 × hue×光色×光向候选, 用左右图
 渲染残差做联合裁决。
 
 场景: 暗背景 + 单图元 (sphere/cylinder/box), 位置/尺寸/深度连续,
@@ -18,10 +18,11 @@
 左帧 Riesz 特征 (L + 复数色相 + 带符号拮抗, 11 通道全分辨率) +
 视差几何观测 (ẑ, 掩码面积) → 实例级组装。
 推理: 责任度 (特征证据) → E[u,v,s−ŝ,z−ẑ|特征] +
-P(kind,hue,lcol,ldir|特征) → 候选渲染残差精炼 hue/lcol/ldir →
-参数 → cga.Scene。
+P(kind,hue,lcol,ldir|特征) → 全 kind 结构候选 (共享几何评分 + 逐 kind
+s 重校准) × 外观候选渲染残差后验 → SceneEstimate (MAP cga.Scene +
+候选不确定性)。
 评估: 物理单位 RMSE/R² (基线 = 训练均值) + 4 个场景因子分类准确率,
-插值 vs 外推分裂。kind 形状线索密度封顶 ≈0.55。
+插值 vs 外推分裂。
 
 结构 (无游离状态: 配置集中 InverseConfig, 机制分属各类):
   Codebook          连续场景参数 ⇄ cga 场景 (领域常量 + 组合采样)
@@ -29,7 +30,8 @@ P(kind,hue,lcol,ldir|特征) → 候选渲染残差精炼 hue/lcol/ldir →
   FeatureExtractor  帧 → 全分辨率特征向量
   DataBuilder       数据构建 (缓存) + 目标组装
   MixtureSPN        实例级浅混合 + 连续/离散条件推理
-  SceneReconstructor 帧对/模型输出 → 完整 cga.Scene
+  SceneReconstructor 帧对/模型输出 → 候选渲染后验 → 完整 cga.Scene
+  SceneEstimate     MAP Scene + SPN/渲染候选后验 + top 假设
   Evaluator         回归 + 完整场景因子分类指标
   InverseApp        主流程 (训练/推理/评估/可视化/自检)
 
