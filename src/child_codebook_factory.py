@@ -72,6 +72,7 @@ class ChildCodebookFactory:
                 * LayeredCodebook.N_LIGHT_DIRS
             ),
             "TEMPLATE_VARIANT": spec.name,
+            "STEREO_V": "sl8c1",  # 受限 layer 的全残差目标契约
             "TEMPLATE_LINEAGE": spec.lineage(),
             "__module__": "child_codebook_factory",
         }

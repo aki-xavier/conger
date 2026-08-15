@@ -322,11 +322,12 @@ held-out 样本上, 子模板对父 composite 门控 3/3 (posterior
 0.815/0.699/0.599)。该验收证明“提案→约束→子模板→注册→门控”闭环,
 但仍是受控合成漂移, 不等于开放世界自动模板发明。
 
-多操作 smoke: layer/mirror/repeat 的 ChildTemplateSpec 均已物化、渲染、
-逐块缓存并完成训练。layer 子族仍暴露双层后层 s/z 瓶颈; 9 组合
-mirror/repeat 小子族 kind/hue 全部 1.000, 外推 u/v R² 分别 ≥0.958/0.987
-与 ≥0.985/0.991。加入 lateral 几何证据后, 原 single/layered/composite
-联合门控两个种子仍保持 18/18, 且 lateral 样本不会被误判为 layered。
+多操作真实闭环: `child_operation_benchmark.py` 对 layer/mirror/repeat 均
+执行真实渲染提案 → spec 学习 → 动态 Codebook → 显式训练 → 父子门控。
+mirror/repeat (R=8) held-out 均 3/3; layer 子模板使用受限全残差解码
+(R=4) 后 2/3, 后层 s/z 仍受双层几何瓶颈限制。加入 lateral 几何证据后,
+原 single/layered/composite 联合门控两个种子仍保持 18/18, 且 lateral
+样本不会被误判为 layered。
 
 **实施顺序**:
 1. 类别契约序列化 + padding 扩展;

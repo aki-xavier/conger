@@ -23,6 +23,7 @@ from data_builder import DataBuilder
 from evaluator import LAYERED_TARGET_COLS, Evaluator
 from feature_extractor import FeatureExtractor
 from inverse_config import InverseConfig
+from layered_child_reconstructor import ConstrainedLayeredReconstructor
 from layered_codebook import LayeredCodebook
 from layered_reconstructor import LayeredReconstructor
 from mixture_spn import MixtureSPN
@@ -46,6 +47,12 @@ class InverseApp:
             raise ValueError(f"未知 scene_family: {cfg.family}")
         self.extractor = FeatureExtractor(cfg)
         self.data = DataBuilder(cfg, self.codebook, self.extractor)
+
+    def layered_reconstructor(self):
+        """父 layered 后层锚定; 受限子模板允许全残差学习。"""
+        if self.codebook.TEMPLATE_VARIANT:
+            return ConstrainedLayeredReconstructor
+        return LayeredReconstructor
 
     def default_model_path(self, artifacts: Path | None = None) -> Path:
         """当前结构专家配置的默认模型路径 (注册表/训练共用契约)。"""
@@ -111,7 +118,7 @@ class InverseApp:
         elif cfg.family == "composite":
             t_tr = CompositeReconstructor.residual_targets(t_tr, c_tr, s_tr)
         else:
-            t_tr = LayeredReconstructor.residual_targets(t_tr, c_tr, s_tr)
+            t_tr = self.layered_reconstructor().residual_targets(t_tr, c_tr, s_tr)
 
         # 模型默认持久化: 路径随数据指纹 + 输出/几何残差契约 (旧
         # spn_full_ 模型的 s 残差仍基于统一球代理, 不复用)。加载后
@@ -190,10 +197,11 @@ class InverseApp:
             else:
                 print("  附着组合: base/part 模板锚点 + SPN 有界残差")
         else:
-            ci_pred = LayeredReconstructor.params(ti_raw, ci_p, s_ti)
-            ce_pred = LayeredReconstructor.params(te_raw, ce_p, s_te)
-            ti_pred = LayeredReconstructor.targets_from_params(ci_pred)
-            te_pred = LayeredReconstructor.targets_from_params(ce_pred)
+            reconstructor = self.layered_reconstructor()
+            ci_pred = reconstructor.params(ti_raw, ci_p, s_ti)
+            ce_pred = reconstructor.params(te_raw, ce_p, s_te)
+            ti_pred = reconstructor.targets_from_params(ci_pred)
+            te_pred = reconstructor.targets_from_params(ce_pred)
             print("  双层遮挡: SPN 后验报告模式 (渲染残差精炼待分层几何)")
 
         print("[4/4] 评估 (物理单位 + 完整场景离散因子; 基线 = 训练均值)")
@@ -219,7 +227,7 @@ class InverseApp:
         公开推理接口: 帧必须是 Codebook.make_renderer 训练 rig 的渲染
         输出; 返回值包含 SPN 后验、渲染候选后验和 top 场景假设。"""
         if self.cfg.family == "layered":
-            return LayeredReconstructor.from_frames(self, net, fl, fr)
+            return self.layered_reconstructor().from_frames(self, net, fl, fr)
         if self.cfg.family == "composite":
             return CompositeReconstructor.from_frames(
                 self, net, fl, fr, refine=self.cfg.refine_composite

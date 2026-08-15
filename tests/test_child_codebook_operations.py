@@ -8,9 +8,13 @@ from inverse_app import InverseApp
 from inverse_config import InverseConfig
 from lateral_codebook import LateralCompositeCodebook
 from lateral_composite_geometry import LateralCompositeGeometry
+from layered_child_reconstructor import ConstrainedLayeredReconstructor
 from layered_codebook import LayeredCodebook
 from scene_reconstructor import SceneReconstructor
+from structure_birth import StructureBirthRequest
+from template_delta_learner import TemplateDeltaLearner
 from template_lineage import ChildTemplateSpec
+from template_proposal import TemplateProposal
 
 
 def _spec(operation: str, name: str) -> ChildTemplateSpec:
@@ -45,6 +49,9 @@ def test_layer_child_codebook_constraints() -> None:
     cls = ChildCodebookFactory.build(_spec("layer", "layer_child"))
     assert issubclass(cls, LayeredCodebook)
     assert cls.N_COMBO == 3 * 1 * 6 * 1 * 3 * 3
+    cfg = InverseConfig(scene_family="layered")
+    app = InverseApp(cfg, codebook=cls(cfg))
+    assert app.layered_reconstructor() is ConstrainedLayeredReconstructor
     vals = cls._sample_pair(random.Random(1), False)
     assert 0.4 <= vals[6] / vals[2] <= 0.6
     assert 0.7 <= vals[3] - vals[7] <= 0.9
@@ -65,6 +72,38 @@ def test_lateral_child_codebooks_constraints() -> None:
         assert vals[4] > vals[0]
         assert vals[7] == vals[3]
         assert 0.4 <= vals[6] / vals[2] <= 0.6
+
+
+def test_delta_learner_feeds_all_child_factories() -> None:
+    """layer/mirror/repeat 提案应聚合为对应 spec 并成功物化。"""
+    for op in ("layer", "mirror", "repeat"):
+        delta = {
+            "relation": op,
+            "ratio": 0.5,
+            "lateral_ratio": 0.0 if op == "layer" else 0.2,
+            "part_kind": 1,
+            "part_hue": 2,
+        }
+        if op == "layer":
+            delta["depth_gap"] = 0.8
+        proposals = tuple(
+            TemplateProposal(
+                family="layered" if op == "layer" else "composite",
+                operation=op,
+                params=tuple(float(x) for x in range(14)),
+                residual=1.0,
+                complexity=1.5,
+                score=2.5,
+                parent_family="composite",
+                delta=delta,
+            )
+            for _ in range(2)
+        )
+        request = StructureBirthRequest((), 1.0, 0.5, "test", proposals)
+        specs = TemplateDeltaLearner(min_evidence=2).learn((request,))
+        assert len(specs) == 1
+        cls = ChildCodebookFactory.build(specs[0])
+        assert cls.TEMPLATE_LINEAGE.operation == op
 
 
 def test_lateral_geometry_and_frame_features() -> None:
