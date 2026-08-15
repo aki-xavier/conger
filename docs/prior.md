@@ -104,7 +104,8 @@ p(S,M\mid I)\propto p(I\mid S,M)p(S\mid M)p(M)
 进一步记录父模板和 delta, 使子模板继承成为显式先验而不是平铺新增
 结构。出生请求携带的残差驱动提案来自 depth≤2 的
 attach/layer/mirror/repeat 文法; `TemplateDeltaLearner` 对相似提案的
-delta 分布估计约束, `ChildCodebookFactory` 再把约束物化为可训练子模板。
+delta 分布估计约束, `ChildCodebookFactory` 再把约束物化为可训练子模板;
+注册表可自动维护 pending spec, 但训练注册必须显式 confirm。
 当前 attach 子模板已支持这一路径, 并在受控合成漂移上完成
 “提案→约束→子模板训练→父子门控”闭环。该设计把“学习新样本”与“发现新世界结构”
 分开, 防止旧模型被不可比较的新参数空间污染。`ToySeriesFamily` 的

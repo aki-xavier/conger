@@ -2,7 +2,6 @@
 
 import mlx.core as mx
 
-from child_template_workflow import ChildTemplateWorkflow
 from codebook import Codebook
 from composite_codebook import CompositeCodebook
 from composite_template_proposer import CompositeTemplateProposer
@@ -70,10 +69,12 @@ def test_child_template_workflow_end_to_end(monkeypatch, tmp_path) -> None:
     monkeypatch.setattr(
         MixtureSPN, "load", classmethod(lambda cls, path: object())
     )
-    workflow = ChildTemplateWorkflow()
-    registrations = workflow.run((request,), registry, artifacts=tmp_path)
-    assert len(registrations) == 1
-    reg = registrations[0]
+    registry.enable_child_template_learning()
+    pending = registry.observe_birth_request(request)
+    assert len(pending) == 1
+    reg = registry.confirm_child_template(
+        pending[0].name, artifacts=tmp_path
+    )
     assert reg.spec.parent_family == "layered"
     assert reg.spec.operation == "attach"
     assert reg.spec.evidence_count == 2

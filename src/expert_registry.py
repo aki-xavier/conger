@@ -5,6 +5,7 @@ from __future__ import annotations
 from collections.abc import Mapping
 from dataclasses import dataclass
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 import mlx.core as mx
 
@@ -16,7 +17,13 @@ from mixture_spn import MixtureSPN
 from structure_birth import StructureBirthController, StructureBirthRequest
 from structure_gate import StructureGate
 from structured_hypothesis import StructuredHypothesis
-from template_lineage import TemplateLineage
+from template_lineage import ChildTemplateSpec, TemplateLineage
+
+if TYPE_CHECKING:
+    from child_template_workflow import (
+        ChildTemplateRegistration,
+        ChildTemplateWorkflow,
+    )
 
 
 @dataclass
@@ -58,12 +65,16 @@ class ExpertRegistry:
         experts: Mapping[str, SceneExpert],
         gate: StructureGate | None = None,
         birth_controller: StructureBirthController | None = None,
+        child_workflow: ChildTemplateWorkflow | None = None,
     ):
         assert experts, "至少注册一个结构专家"
         self.experts = dict(experts)
         self.gate = gate or StructureGate()
         self.birth_controller = birth_controller
+        self.child_workflow = child_workflow
         self.last_birth_request: StructureBirthRequest | None = None
+        self.birth_requests: list[StructureBirthRequest] = []
+        self.pending_child_specs: dict[str, ChildTemplateSpec] = {}
 
     def lineages(self) -> dict[str, TemplateLineage]:
         """当前专家树/森林的血缘表。"""
@@ -76,6 +87,51 @@ class ExpertRegistry:
             for name, lineage in self.lineages().items()
             if lineage.parent_family == parent_family
         )
+
+    def enable_child_template_learning(
+        self, workflow: ChildTemplateWorkflow | None = None
+    ) -> ChildTemplateWorkflow:
+        """启用出生请求 → pending 子模板规格学习 (不自动训练)。"""
+        from child_template_workflow import ChildTemplateWorkflow
+
+        self.child_workflow = workflow or ChildTemplateWorkflow()
+        return self.child_workflow
+
+    def observe_birth_request(
+        self, request: StructureBirthRequest
+    ) -> tuple[ChildTemplateSpec, ...]:
+        """记录出生请求, 并用已启用 workflow 更新 pending 子模板规格。"""
+        self.last_birth_request = request
+        self.birth_requests.append(request)
+        if self.child_workflow is None:
+            return ()
+        specs = self.child_workflow.learn(self.birth_requests, self)
+        new = []
+        for spec in specs:
+            if spec.name not in self.experts and (
+                spec.name not in self.pending_child_specs
+            ):
+                self.pending_child_specs[spec.name] = spec
+                new.append(spec)
+        return tuple(new)
+
+    def confirm_child_template(
+        self,
+        name: str,
+        cfg: InverseConfig | None = None,
+        artifacts: Path | None = None,
+    ) -> ChildTemplateRegistration:
+        """显式确认 pending 子模板: 物化、训练并注册。"""
+        if self.child_workflow is None:
+            raise RuntimeError("尚未启用 child template learning")
+        if name not in self.pending_child_specs:
+            raise KeyError(f"没有 pending 子模板: {name}")
+        spec = self.pending_child_specs[name]
+        registration = self.child_workflow.train_and_register(
+            self, spec, cfg=cfg, artifacts=artifacts
+        )
+        del self.pending_child_specs[name]
+        return registration
 
     @classmethod
     def from_configs(
@@ -165,9 +221,11 @@ class ExpertRegistry:
             for name, expert in self.experts.items()
         }
         decision = self.gate.decide(estimates, fl, fr)
-        self.last_birth_request = (
+        request = (
             self.birth_controller.observe(decision, fl, fr)
             if self.birth_controller is not None
             else None
         )
+        if request is not None:
+            self.observe_birth_request(request)
         return decision

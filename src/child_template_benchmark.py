@@ -10,7 +10,6 @@ from __future__ import annotations
 
 import argparse
 
-from child_template_workflow import ChildTemplateWorkflow
 from codebook import Codebook
 from composite_codebook import CompositeCodebook
 from composite_template_proposer import CompositeTemplateProposer
@@ -71,9 +70,13 @@ def main() -> None:
     parent_cfg = InverseConfig(scene_family="composite", replicates=1)
     parent = SceneExpert.from_config("composite", parent_cfg)
     registry = ExpertRegistry({"composite": parent})
+    registry.enable_child_template_learning()
+    pending = registry.observe_birth_request(request)
+    assert pending, "出生请求未产生可学习子模板"
     child_cfg = InverseConfig(scene_family="composite", replicates=4)
-    registrations = ChildTemplateWorkflow().run((request,), registry, cfg=child_cfg)
-    reg = registrations[0]
+    reg = registry.confirm_child_template(
+        pending[0].name, cfg=child_cfg
+    )
     print("child:", reg.spec.name)
     print("constraints:", reg.spec.constraints)
     print("lineage:", reg.expert.lineage().signature())

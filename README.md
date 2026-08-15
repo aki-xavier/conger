@@ -123,12 +123,23 @@ part kind/hue 等 delta 字段估计带边距的约束范围, 生成
 `ChildTemplateSpec`。`ChildCodebookFactory` 当前可把 attach 子模板规格
 物化为受限 `CompositeCodebook` 子类, 并通过 `TEMPLATE_VARIANT` 隔离数据
 缓存; `ExpertRegistry.train_and_register(..., codebook_cls=...)`
-可把该子模板显式训练并注册。自动学习只生成规格和类, 训练仍保持显式。
+可把该子模板显式训练并注册。`enable_child_template_learning()` 后,
+出生请求会自动转换为 `pending_child_specs`, 但只有调用
+`confirm_child_template(name)` 才会物化、训练并注册; 自动学习只生成
+规格和类, 训练仍保持显式。
 
 端到端基准:
 
 ```bash
 uv run python src/child_template_benchmark.py --seed 12345
+```
+
+手动接线形态为:
+
+```python
+registry.enable_child_template_learning()
+pending = registry.observe_birth_request(request)  # 只学习规格
+registration = registry.confirm_child_template(pending[0].name)  # 显式训练
 ```
 
 该基准用真实渲染样本产生 attach 提案, 学习得到

@@ -304,9 +304,10 @@ winning structure, `TemplateProposal` 携带 `parent_family` 与具体 delta。
 出生请求的 `TemplateProposal`, 按 `parent_family+operation` 分组并估计
 数值约束范围 (ratio/lateral/depth) 与离散支持集 (part kind/hue);
 `ChildCodebookFactory` 当前支持把 attach spec 物化为受限
-`CompositeCodebook` 子类, `TEMPLATE_VARIANT` 进入数据缓存指纹,
-`ExpertRegistry.train_and_register(..., codebook_cls=...)` 显式训练并
-注册。该阶段不会自动训练, 也不会把单次异常提案提升为模板。
+`CompositeCodebook` 子类, `TEMPLATE_VARIANT` 进入数据缓存指纹。
+`ExpertRegistry.enable_child_template_learning()` 会把后续出生请求自动
+学习为 `pending_child_specs`; 只有显式 `confirm_child_template(name)`
+才物化、训练并注册。该阶段不会自动训练, 也不会把单次异常提案提升为模板。
 
 真实样本闭环 (`child_template_benchmark.py`): 两个受约束 attach 渲染样本
 先由提案器产生候选, learner 得到 `composite → composite_attach_5025cfd1`
