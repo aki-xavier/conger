@@ -52,6 +52,7 @@ class GenericStructureGate:
         best_name = min(residuals, key=residuals.get)
         best = replace(
             estimates[best_name],
+            structure_id=best_name,
             structure_posterior=posterior[best_name],
             structure_posteriors=posterior,
         )

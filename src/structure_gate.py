@@ -1,44 +1,38 @@
-"""StructureGate: 结构专家混合与未知结构出生检测。
+"""StructureGate: 视觉结构专家门控 (GenericStructureGate 适配层)。
 
-每个结构专家先独立给出 SceneEstimate; 门控用候选 Scene 的左右图渲染
-残差计算 p(structure|images)。残差含未知绝对尺度, 因此温度仍采用
-T=max(2·best,1) 的相对校准, 出生检测另看绝对残差阈值。
+视觉特有部分只有左右图重渲染残差; 结构后验/出生检测由
+`GenericStructureGate` 提供。
 """
 
 from __future__ import annotations
 
-from dataclasses import dataclass, replace
+from dataclasses import replace
 from typing import Mapping
 
 import mlx.core as mx
 
+from generic_structure_gate import GenericStructureDecision, GenericStructureGate
 from scene_estimate import SceneEstimate
 from scene_reconstructor import SceneReconstructor
 from stereo import StereoDepth
 
-
-@dataclass(frozen=True)
-class StructureDecision:
-    """结构门控结果: 最佳专家、结构后验、残差和出生信号。"""
-
-    estimate: SceneEstimate
-    posterior: dict[str, float]
-    residuals: dict[str, float]
-    needs_new_structure: bool
+StructureDecision = GenericStructureDecision
 
 
-class StructureGate:
-    """按渲染残差融合多个结构专家。"""
+class StructureGate(GenericStructureGate):
+    """按左右图渲染残差融合多个视觉结构专家。"""
 
     def __init__(
         self,
         birth_residual: float = 10000.0,
-        posterior_floor: float = 0.6,
+        posterior_floor: float | None = 0.6,
         priors: Mapping[str, float] | None = None,
     ):
-        self.birth_residual = birth_residual
-        self.posterior_floor = posterior_floor
-        self.priors = dict(priors or {})
+        super().__init__(
+            birth_residual=birth_residual,
+            posterior_floor=posterior_floor,
+            priors=priors,
+        )
 
     @staticmethod
     def residual(
@@ -64,28 +58,8 @@ class StructureGate:
         fr: mx.array,
     ) -> StructureDecision:
         """多结构 SceneEstimate → 结构后验 + 最佳估计 + 出生信号。"""
-        assert estimates, "至少需要一个结构专家"
-        residuals = {
-            name: self.residual(est, fl, fr) for name, est in estimates.items()
+        with_residual = {
+            name: replace(est, residual=self.residual(est, fl, fr))
+            for name, est in estimates.items()
         }
-        best_score = min(residuals.values())
-        temperature = max(2.0 * best_score, 1.0)
-        logp = {}
-        for name, score in residuals.items():
-            prior = self.priors.get(name, 1.0)
-            logp[name] = -score / temperature + mx.log(prior).item()
-        mxp = mx.array(list(logp.values()))
-        p = mx.exp(mxp - mx.logsumexp(mxp)).tolist()
-        posterior = dict(zip(logp.keys(), map(float, p), strict=True))
-        best_name = min(residuals, key=residuals.get)
-        best = replace(
-            estimates[best_name],
-            structure_id=best_name,
-            structure_posterior=posterior[best_name],
-            structure_posteriors=posterior,
-        )
-        needs_new = (
-            best_score > self.birth_residual
-            and posterior[best_name] < self.posterior_floor
-        )
-        return StructureDecision(best, posterior, residuals, needs_new)
+        return super().decide(with_residual)

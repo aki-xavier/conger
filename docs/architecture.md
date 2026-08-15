@@ -251,8 +251,9 @@ p(S,M\mid I)\propto p(I\mid S,M)p(S\mid M)p(M)
 **通用化验证**: `StructuredHypothesis` / `ForwardModel` /
 `GenericStructureGate` / `GenericExpertRegistry` 已把上述机制从视觉
 命名中剥离; `ToySeriesFamily`/`ToySeriesExpert` 提供线性/振荡两个
-非视觉结构专家, 测试验证正确机制门控和二次机制出生请求。下一步可
-把视觉 `SceneEstimate` 迁移到该通用接口, 再接入第二个真实领域。
+非视觉结构专家, 测试验证正确机制门控和二次机制出生请求。视觉路径
+已迁回通用接口: `SceneEstimate` 是 `StructuredHypothesis` 兼容别名,
+视觉 `StructureGate` 继承 `GenericStructureGate`, 只保留图像残差适配。
 
 已删过时项 (2026-08-13 审判): DP-SVI 自动定 K (实例模型 K=N, 无
 分量数可定) / online EM (无 EM 可 online, 需求并入逃生通道) /

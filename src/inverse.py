@@ -35,7 +35,7 @@ s 重校准) × 外观候选渲染残差后验 → SceneEstimate (MAP cga.Scene 
   JointLayerOptimizer 模板×遮挡×视差的联合几何优化
   MixtureSPN        实例级浅混合 + 连续/离散条件推理
   SceneReconstructor 帧对/模型输出 → 候选渲染后验 → 完整 cga.Scene
-  SceneEstimate     MAP Scene + SPN/渲染候选后验 + top 假设
+  SceneEstimate     StructuredHypothesis 视觉别名: MAP Scene + 候选后验
   StructureGate     结构专家渲染残差门控 + 未知结构出生检测
   ExpertRegistry    单/双层结构专家注册、按需加载与统一调用
   StructureBirth    未知结构样本队列、出生请求与训练后注册
