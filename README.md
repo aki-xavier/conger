@@ -24,6 +24,8 @@ python inverse.py            # 全量立体 (1296 帧对): 完整 Scene 重建
 
 选项: `--sigma-rel-floor` (核带宽下限)、`--replicates R` (训练集复制数, 调大触发增量训练)、`--no-cache` (跳过数据缓存)、`--no-refine-appearance` (跳过候选渲染残差精炼)、`--kind-topk {1,2,3}` (结构候选数, 默认 3 = 覆盖全部 kind)、`--n-objects {1,2}` (1 单图元 / 2 双图元遮挡前后层)、`--model-path` (模型 safetensors 存取, 默认 `artifacts/spn_kindgeo_<数据指纹>` 或 `spn_layered_<数据指纹>`; 存在即加载, K 不足则增量追加)。
 
+- 通用结构学习: `src/structured_hypothesis.py` / `forward_model.py` / `generic_structure_gate.py` / `generic_expert_registry.py`; 非视觉验证域为 `src/toy_series_family.py` + `src/toy_series_expert.py`
+
 ## 推理接口
 
 ```python
@@ -73,6 +75,15 @@ print(decision.posterior, decision.needs_new_structure)
 
 `ExpertRegistry.default()` 要求对应结构模型已存在; 缺模型时默认
 fail closed，可用 `missing_ok=True` 显式跳过。
+
+## 通用结构学习框架 (非视觉验证)
+
+`StructuredHypothesis`/`ForwardModel`/`GenericStructureGate`/
+`GenericExpertRegistry` 把视觉管线抽象为: 观测编码 → 结构内参数估计 →
+正向模拟残差 → 结构后验 → 出生请求。`ToySeriesFamily` 提供线性/振荡
+两个非视觉专家; 测试验证线性/振荡输入被正确门控, 二次机制触发
+`StructureBirthRequest`。这说明 MixtureSPN、结构门控和出生控制不依赖
+图像或 cga。
 
 实测 (结构-外观联合精炼版, 全量立体 N=1296, `kind_topk=3`): 插值 u,v R² 0.930/0.945 / s R² 0.508 / z R² 0.831 / kind 0.753 / hue 1.000 / lcol 0.994 / ldir 0.895; 外推 u,v R² 0.949/0.953 / s,z R² 0.922/0.956 / kind 0.617 / hue 0.981 / lcol 0.880 / ldir 0.772。结构评分沿用共享几何避免尺寸代理偏差，MAP 后按 kind 重校准 s; 色相与光照由候选重渲染联合裁决。
 

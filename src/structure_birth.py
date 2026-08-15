@@ -8,19 +8,26 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Mapping
+from typing import Mapping, Protocol
 
-import mlx.core as mx
 
-from structure_gate import StructureDecision
+class GateDecision(Protocol):
+    """StructureBirthController 所需的最小门控结果协议。"""
+
+    needs_new_structure: bool
+    residuals: Mapping[str, float]
+    posterior: Mapping[str, float]
+
+    @property
+    def estimate(self): ...
 
 
 @dataclass(frozen=True)
 class StructureCase:
     """一个未知结构样本及其各专家残差/后验证据。"""
 
-    fl: mx.array
-    fr: mx.array
+    fl: object
+    fr: object
     residuals: Mapping[str, float]
     posterior: Mapping[str, float]
     params: tuple[float, ...]
@@ -47,7 +54,7 @@ class StructureBirthController:
         self.cases: list[StructureCase] = []
 
     def observe(
-        self, decision: StructureDecision, fl: mx.array, fr: mx.array
+        self, decision: GateDecision, fl: object, fr: object
     ) -> StructureBirthRequest | None:
         """记录一次结构门控结果; 未触发或证据不足时返回 None。"""
         if not decision.needs_new_structure:
