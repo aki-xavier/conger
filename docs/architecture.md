@@ -307,8 +307,9 @@ winning structure, `TemplateProposal` 携带 `parent_family` 与具体 delta。
 **数据驱动子模板** (第一阶段当前实现): `TemplateDeltaLearner` 聚合多个
 出生请求的 `TemplateProposal`, 按 `parent_family+operation` 分组并估计
 数值约束范围 (ratio/lateral/depth) 与离散支持集 (part kind/hue);
-`ChildCodebookFactory` 当前支持把 attach spec 物化为受限
-`CompositeCodebook` 子类, `TEMPLATE_VARIANT` 进入数据缓存指纹。
+`ChildCodebookFactory` 支持把 attach/layer/mirror/repeat spec 物化为受限
+Codebook 子类; attach 使用上下接触几何, layer 使用 StereoLayers,
+mirror/repeat 使用 `LateralCompositeGeometry` 的垂直分隔与部件视差。
 `ExpertRegistry.enable_child_template_learning()` 会把后续出生请求自动
 学习为 `pending_child_specs`; 只有显式 `confirm_child_template(name)`
 才物化、训练并注册。该阶段不会自动训练, 也不会把单次异常提案提升为模板。
@@ -320,6 +321,12 @@ winning structure, `TemplateProposal` 携带 `parent_family` 与具体 delta。
 held-out 样本上, 子模板对父 composite 门控 3/3 (posterior
 0.815/0.699/0.599)。该验收证明“提案→约束→子模板→注册→门控”闭环,
 但仍是受控合成漂移, 不等于开放世界自动模板发明。
+
+多操作 smoke: layer/mirror/repeat 的 ChildTemplateSpec 均已物化、渲染、
+逐块缓存并完成训练。layer 子族仍暴露双层后层 s/z 瓶颈; 9 组合
+mirror/repeat 小子族 kind/hue 全部 1.000, 外推 u/v R² 分别 ≥0.958/0.987
+与 ≥0.985/0.991。加入 lateral 几何证据后, 原 single/layered/composite
+联合门控两个种子仍保持 18/18, 且 lateral 样本不会被误判为 layered。
 
 **实施顺序**:
 1. 类别契约序列化 + padding 扩展;

@@ -55,6 +55,16 @@ class LayeredCodebook:
         generation=1,
         delta={"relation": "independent_front_back", "n_objects": 2},
     )
+    BASE_KINDS = tuple(range(Codebook.N_KIND))
+    PART_KINDS = tuple(range(Codebook.N_KIND))
+    BASE_HUES = tuple(range(Codebook.N_HUE))
+    PART_HUES = tuple(range(Codebook.N_HUE))
+    TEMPLATE_VARIANT = ""
+    GEOMETRY_FAMILY = "layered"
+    # None = 父 layered 独立采样; 子模板可设置比例/横向/深度约束
+    PART_SCALE_RANGE = None
+    PART_LATERAL_RANGE = None
+    DEPTH_GAP_RANGE = (0.7, 1.4)
     TARGET_IDX = (1, 2, 3, 4, 7, 8, 9, 10)
     CLASS_IDX = (0, 6, 5, 11, 12, 13)  # k0,k1,h0,h1,lcol,ldir
     CAT_SIZES = (3, 3, 6, 6, 3, 3)
@@ -67,6 +77,12 @@ class LayeredCodebook:
         zc = Codebook.CAM_Z - z
         m = Codebook.EXTENT * s * Codebook.FX / zc + 2.0
         return m + Codebook.STEREO_BASE / 2 * Codebook.FX / zc
+
+    @classmethod
+    def _inside(cls, u: float, v: float, s: float, z: float) -> bool:
+        """单个图元连同立体偏移是否完整落入画面。"""
+        m = cls._margin(s, z)
+        return m <= u <= Codebook.W - m and m <= v <= Codebook.H - m
 
     @classmethod
     def _sample_free(
@@ -96,9 +112,24 @@ class LayeredCodebook:
 
     @classmethod
     def _sample_pair(cls, rng: random.Random, extrap: bool) -> tuple[float, ...]:
-        """前/后层连续参数; 70% 强制投影重叠 (遮挡训练支撑)。"""
-        u0, v0, s0, z0 = cls._sample_free(rng, extrap, (3.1, 4.2))
-        z1 = max(z0 - rng.uniform(0.7, 1.4), 2.3)
+        """前/后层连续参数; 父族独立采样, 子族可按 scale/lateral/depth 约束。"""
+        for _ in range(8):
+            u0, v0, s0, z0 = cls._sample_free(rng, extrap, (3.1, 4.2))
+            if cls.PART_SCALE_RANGE is None:
+                break
+            s1 = s0 * rng.uniform(*cls.PART_SCALE_RANGE)
+            z1 = max(z0 - rng.uniform(*cls.DEPTH_GAP_RANGE), 2.3)
+            a0 = Codebook.EXTENT * s0 * Codebook.FX / (Codebook.CAM_Z - z0)
+            a1 = Codebook.EXTENT * s1 * Codebook.FX / (Codebook.CAM_Z - z1)
+            lateral = cls.PART_LATERAL_RANGE or (-0.75, 0.75)
+            u1 = u0 + rng.uniform(*lateral) * (a0 + a1)
+            v1 = v0
+            if cls._inside(u0, v0, s0, z0) and cls._inside(u1, v1, s1, z1):
+                return u0, v0, s0, z0, u1, v1, s1, z1
+        else:
+            raise RuntimeError("LayeredCodebook 子模板取景拒绝重采失败")
+
+        z1 = max(z0 - rng.uniform(*cls.DEPTH_GAP_RANGE), 2.3)
         u1, v1, s1, _ = cls._sample_free(rng, extrap, (2.3, 3.5))
         z1 = min(z1, z0 - 0.05)
         if rng.random() < 0.7:
@@ -110,7 +141,7 @@ class LayeredCodebook:
             m1 = cls._margin(s1, z1)
             if not (m1 <= u1 <= Codebook.W - m1 and m1 <= v1 <= Codebook.H - m1):
                 u1, v1, s1, _ = cls._sample_free(rng, extrap)
-                z1 = max(z0 - rng.uniform(0.7, 1.4), 2.3)
+                z1 = max(z0 - rng.uniform(*cls.DEPTH_GAP_RANGE), 2.3)
         return u0, v0, s0, z0, u1, v1, s1, z1
 
     @classmethod
@@ -118,10 +149,10 @@ class LayeredCodebook:
         """单复制块 → (2916,14), 离散因子全笛卡尔积。"""
         rng = random.Random(seed)
         rows = []
-        for k0 in range(cls.N_KIND):
-            for k1 in range(cls.N_KIND):
-                for h0 in range(cls.N_HUE):
-                    for h1 in range(cls.N_HUE):
+        for k0 in cls.BASE_KINDS:
+            for k1 in cls.PART_KINDS:
+                for h0 in cls.BASE_HUES:
+                    for h1 in cls.PART_HUES:
                         for lc in range(cls.N_LIGHT_COLORS):
                             for ld in range(cls.N_LIGHT_DIRS):
                                 u0, v0, s0, z0, u1, v1, s1, z1 = (

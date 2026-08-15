@@ -143,7 +143,7 @@ class LayeredReconstructor:
             scene=app.codebook.to_scene(prm),
             params=prm,
             spn_posterior=cat_p[0],
-            geometry_family=app.cfg.family,
+            geometry_family=app.codebook.GEOMETRY_FAMILY,
             candidate_params=(prm,),
             hypotheses=(HypothesisCandidate(prm, 1.0, None),),
             factor_sizes=LayeredCodebook.CAT_SIZES,

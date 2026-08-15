@@ -11,6 +11,7 @@ from codebook import Codebook
 from composite_geometry import CompositeGeometry
 from feature_extractor import FeatureExtractor
 from inverse_config import InverseConfig
+from lateral_composite_geometry import LateralCompositeGeometry
 from stereo import StereoDepth
 from stereo_layers import StereoLayers
 
@@ -85,7 +86,13 @@ class DataBuilder:
             fl = renderer.render(scene, cam_l)
             fr = renderer.render(scene, cam_r)
             vec, rw = self.extractor.of_frame(fl, rw)
-            if cb.USES_COMPOSITE_STATS:
+            if cb.GEOMETRY_FAMILY == "lateral":
+                stat = LateralCompositeGeometry.estimate(fl, fr)
+                vec = mx.concatenate(
+                    [vec, StereoLayers.scaled(mx.array([stat]))[0]]
+                )
+                stats.append(stat)
+            elif cb.USES_COMPOSITE_STATS:
                 stat = CompositeGeometry.estimate(fl, fr)
                 vec = mx.concatenate(
                     [vec, StereoLayers.scaled(mx.array([stat]))[0]]

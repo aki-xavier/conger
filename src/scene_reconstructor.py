@@ -16,6 +16,7 @@ from cga.engine import PerspectiveCamera, Renderer, Scene
 
 from codebook import Codebook
 from composite_geometry import CompositeGeometry
+from lateral_composite_geometry import LateralCompositeGeometry
 from stereo import StereoDepth
 from stereo_layers import StereoLayers
 from structured_hypothesis import HypothesisCandidate, StructuredHypothesis
@@ -261,6 +262,12 @@ class SceneReconstructor:
     ) -> tuple[mx.array, mx.array, RieszWavelet | None]:
         """左/右帧 → (模型特征 (1,V), 立体统计 (1,3), Riesz 工作区)。"""
         vec, rw = app.extractor.of_frame(fl, rw)
+        if app.codebook.GEOMETRY_FAMILY == "lateral":
+            stat = LateralCompositeGeometry.estimate(fl, fr)
+            vec = mx.concatenate(
+                [vec, StereoLayers.scaled(mx.array([stat]))[0]]
+            )
+            return vec[None, :], mx.array([stat], dtype=mx.float32), rw
         if app.codebook.USES_COMPOSITE_STATS:
             stat = CompositeGeometry.estimate(fl, fr)
             vec = mx.concatenate(
@@ -304,7 +311,7 @@ class SceneReconstructor:
                 scene=app.codebook.to_scene(prm),
                 params=prm,
                 spn_posterior=cat_p[0],
-                geometry_family=app.cfg.family,
+                geometry_family=app.codebook.GEOMETRY_FAMILY,
                 candidate_params=(prm,),
                 hypotheses=(HypothesisCandidate(prm, 1.0, None),),
                 responsibility_max=float(mx.max(r)),
@@ -335,7 +342,7 @@ class SceneReconstructor:
             scene=app.codebook.to_scene(prm),
             params=prm,
             spn_posterior=cat_p[0],
-            geometry_family=app.cfg.family,
+            geometry_family=app.codebook.GEOMETRY_FAMILY,
             candidate_params=candidates,
             candidate_scores=scores,
             candidate_posterior=posterior,

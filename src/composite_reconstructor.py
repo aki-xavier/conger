@@ -159,7 +159,7 @@ class CompositeReconstructor(LayeredReconstructor):
             scene=app.codebook.to_scene(prm),
             params=prm,
             spn_posterior=cat_p[0],
-            geometry_family=app.cfg.family,
+            geometry_family=app.codebook.GEOMETRY_FAMILY,
             candidate_params=candidates,
             candidate_scores=scores,
             candidate_posterior=posterior,

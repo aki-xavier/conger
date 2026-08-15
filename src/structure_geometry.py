@@ -14,6 +14,7 @@ import mlx.core as mx
 
 from composite_geometry import CompositeGeometry
 from joint_layer_optimizer import JointLayerOptimizer
+from lateral_composite_geometry import LateralCompositeGeometry
 from stereo import StereoDepth
 from stereo_layers import StereoLayers
 from utils import Utils
@@ -85,6 +86,18 @@ class StructureGeometry:
         return min(max(split_cost + 0.7 * depth_cost, 0.0), 1.0)
 
     @classmethod
+    def _lateral_cost(cls, fl: mx.array, fr: mx.array, fg: mx.array) -> float:
+        """横向组合代价: 垂直分隔模板得分 + 两部件深度接近性。"""
+        split = LateralCompositeGeometry.split_score(fg)
+        if split is None:
+            return 1.0
+        split_cost = split[0]
+        st = LateralCompositeGeometry.estimate(fl, fr)
+        depth_gap = abs(st[2] - st[6])
+        depth_cost = min(max((depth_gap - 0.15) / 0.5, 0.0), 1.0)
+        return min(max(split_cost + 0.7 * depth_cost, 0.0), 1.0)
+
+    @classmethod
     def costs(cls, fl: mx.array, fr: mx.array) -> dict[str, float]:
         """同一观测 → single/layered/composite 三个几何代价。"""
         fw = StereoDepth.foreground_weights(fl)
@@ -94,16 +107,26 @@ class StructureGeometry:
         single = cls._single_cost(fg, split_score)
         layered = cls._layered_cost(fl, fr, fg)
         composite = cls._composite_cost(fl, fr, split)
+        lateral = cls._lateral_cost(fl, fr, fg)
         # 强结构证据作为负对数证据偏移: 只在没有前后层证据时奖励单模板,
         # 只有视差/空间双层都明确时奖励 layered, 只有接触模板很稳时奖励
         # composite。偏移用于打破渲染残差歧义, 阈值由三族基准样本标定。
         layered_raw = layered
         if single < 0.35 and layered_raw > 0.5:
             single -= 1.3
-        if layered < composite - 0.03 and layered < single + 0.05:
-            layered -= 1.0
-        if layered + 0.05 < min(single, composite):
-            layered -= 2.0
+        lateral_blocks_layer = lateral < 0.35 and layered_raw > 0.05
+        if not lateral_blocks_layer:
+            if layered < composite - 0.03 and layered < single + 0.05:
+                layered -= 1.0
+            if layered + 0.05 < min(single, composite):
+                layered -= 2.0
         if composite < 0.10:
             composite -= 0.2
-        return {"single": single, "layered": layered, "composite": composite}
+        if lateral < 0.10:
+            lateral -= 0.2
+        return {
+            "single": single,
+            "layered": layered,
+            "composite": composite,
+            "lateral": lateral,
+        }

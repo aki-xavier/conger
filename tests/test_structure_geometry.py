@@ -6,6 +6,7 @@ import pytest
 from codebook import Codebook
 from composite_codebook import CompositeCodebook
 from inverse_config import InverseConfig
+from lateral_codebook import LateralCompositeCodebook
 from layered_codebook import LayeredCodebook
 from structure_geometry import StructureGeometry
 
@@ -17,6 +18,7 @@ def frames() -> dict[str, tuple[mx.array, mx.array]]:
         "single": Codebook(InverseConfig(scene_family="single")),
         "layered": LayeredCodebook(InverseConfig(scene_family="layered")),
         "composite": CompositeCodebook(InverseConfig(scene_family="composite")),
+        "lateral": LateralCompositeCodebook(InverseConfig(scene_family="composite")),
     }
     out = {}
     for i, (name, cb) in enumerate(families.items()):

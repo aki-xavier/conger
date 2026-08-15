@@ -226,6 +226,8 @@ class CompositeTemplateProposer:
                             "ratio": ratio,
                             "lateral_ratio": lateral,
                         }
+                        if rule.operation == "layer":
+                            delta["depth_gap"] = 0.8
                         out.append(
                             TemplateProposal(
                                 family=family,

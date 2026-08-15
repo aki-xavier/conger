@@ -62,7 +62,19 @@ class TemplateDeltaLearner:
         if ratios:
             constraints["scale_ratio"] = self._range(ratios)
         if laterals:
-            constraints["lateral_ratio"] = self._range(laterals)
+            if operation in {"mirror", "repeat"}:
+                constraints["period_ratio"] = self._range(
+                    [abs(x) for x in laterals]
+                )
+            else:
+                constraints["lateral_ratio"] = self._range(laterals)
+        depth_gaps = [
+            float(p.delta["depth_gap"])
+            for p in proposals
+            if "depth_gap" in p.delta
+        ]
+        if depth_gaps:
+            constraints["depth_gap"] = self._range(depth_gaps)
         depth = [
             tuple(p.delta["depth_jitter"])
             for p in proposals

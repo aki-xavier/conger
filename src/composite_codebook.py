@@ -38,6 +38,7 @@ class CompositeCodebook(LayeredCodebook):
     BASE_HUES = tuple(range(Codebook.N_HUE))
     PART_HUES = tuple(range(Codebook.N_HUE))
     TEMPLATE_VARIANT = ""
+    GEOMETRY_FAMILY = "composite"
     TEMPLATE_LINEAGE = TemplateLineage(
         family="composite",
         parent_family="layered",

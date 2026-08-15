@@ -108,7 +108,7 @@ delta 分布估计约束, `ChildCodebookFactory` 再把约束物化为可训练�
 注册表可自动维护 pending spec, 但训练注册必须显式 confirm;
 `registry_manifest.json` 持久化血缘、约束、pending 与模型路径, 使子模板
 可跨进程恢复。
-当前 attach 子模板已支持这一路径, 并在受控合成漂移上完成
+当前 attach/layer/mirror/repeat 子模板均支持这一路径, 其中 attach 已完成
 “提案→约束→子模板训练→父子门控”闭环。该设计把“学习新样本”与“发现新世界结构”
 分开, 防止旧模型被不可比较的新参数空间污染。`ToySeriesFamily` 的
 线性/振荡机制测试表明, MixtureSPN、结构门控和出生控制可脱离视觉输入

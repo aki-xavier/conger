@@ -85,7 +85,10 @@ class InverseApp:
         elif cfg.family == "layered":
             print("  视差管线: 双层遮挡使用 StereoLayers 逐层统计")
         else:
-            print("  视差管线: 附着组合使用 CompositeGeometry base/part 统计")
+            if self.codebook.GEOMETRY_FAMILY == "lateral":
+                print("  视差管线: 横向组合使用 LateralCompositeGeometry 统计")
+            else:
+                print("  视差管线: 附着组合使用 CompositeGeometry base/part 统计")
         t_tr = DataBuilder.targets(p_tr)
         c_tr = DataBuilder.scene_classes(p_tr)
 
@@ -182,7 +185,10 @@ class InverseApp:
                 )
                 ti_pred = CompositeReconstructor.targets_from_params(ci_pred)
                 te_pred = CompositeReconstructor.targets_from_params(ce_pred)
-            print("  附着组合: base/part 模板锚点 + SPN 有界残差")
+            if self.codebook.GEOMETRY_FAMILY == "lateral":
+                print("  横向组合: 左右 part 模板锚点 + SPN 有界残差")
+            else:
+                print("  附着组合: base/part 模板锚点 + SPN 有界残差")
         else:
             ci_pred = LayeredReconstructor.params(ti_raw, ci_p, s_ti)
             ce_pred = LayeredReconstructor.params(te_raw, ce_p, s_te)
