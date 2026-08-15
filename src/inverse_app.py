@@ -70,7 +70,7 @@ class InverseApp:
         )
         assert mx.all(mx.isfinite(f_tr)), "特征含 NaN/inf"
         # 视差管线独立评估 (单物体几何 ẑ vs GT z; 双层逐层统计另有专题)
-        if cfg.n_objects == 1:
+        if cfg.family == "single":
             pairs = (("插值", s_ti, p_ti), ("外推", s_te, p_te))
             for nm, st, pp in pairs:
                 err = st[:, 0] - pp[:, 4]
@@ -80,8 +80,10 @@ class InverseApp:
                     f"bias {float(mx.mean(err)):+.4f} "
                     f"(d 中位 {float(mx.median(st[:, 1])):.2f}px)"
                 )
-        else:
+        elif cfg.family == "layered":
             print("  视差管线: 双层遮挡使用 StereoLayers 逐层统计")
+        else:
+            print("  视差管线: 附着组合使用全局 StereoDepth [ẑ,area] 统计")
         t_tr = DataBuilder.targets(p_tr)
         c_tr = DataBuilder.scene_classes(p_tr)
 

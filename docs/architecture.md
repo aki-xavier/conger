@@ -192,8 +192,8 @@ InverseConfig 防环。
    共同门控, 验证附着组合与独立前后层可由残差区分
 2. **模板复杂度门控** (已接入): 结构专家携带参数/描述复杂度,
    门控分数加入惩罚, 防止更复杂组合模板仅靠自由度占优
-3. **残差驱动模板提案**: 未知结构残差区域 → primitive 拟合 → 组合候选
-   → StructureBirthRequest
+3. **残差驱动模板提案** (已接入): 未知结构残差 → 有限组合候选
+   → StructureBirthRequest; 下一步把候选空间升级为有界文法
 4. **有界模板文法**: attach/layer/repeat/mirror, 限制深度、部件数与
    最小证据数
 5. **双层渲染残差**: 联合模板已稳定中心先验, 下一步在 StructuredHypothesis
@@ -283,6 +283,14 @@ p(M\mid I)\propto p(M)\exp(-\mathrm{score}_M/T)
    `train_and_register`)。
 非参数贝叶斯/DP 暂不进入主线 —— 当前实例记忆下, 阈值式类别出生
 更简单且可测试。
+
+**残差驱动模板提案** (当前实现): `StructureBirthController` 可挂载
+`TemplateProposer`; 达到 `min_cases` 后, `StructureBirthRequest` 除原始
+证据外还携带 `TemplateProposal` 列表。视觉侧的
+`CompositeTemplateProposer` 以最佳估计的 0 号图元为底座, 枚举 part
+kind/hue、尺度比例和横向偏移, 用同一 renderer 的左右图前景加权残差
+排序。提案只是候选描述, 不自动训练、不自动注册; 这样既保留结构出生的
+主动性, 又保留 renderer/训练数据边界。
 
 **通用化验证**: `StructuredHypothesis` / `ForwardModel` /
 `GenericStructureGate` / `GenericExpertRegistry` 已把上述机制从视觉

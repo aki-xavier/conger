@@ -8,8 +8,10 @@
 from __future__ import annotations
 
 from collections.abc import Mapping
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Protocol
+
+from template_proposal import TemplateProposal, TemplateProposer
 
 
 class GateDecision(Protocol):
@@ -42,16 +44,23 @@ class StructureBirthRequest:
     residual_mean: float
     best_posterior_mean: float
     reason: str
+    proposals: tuple[TemplateProposal, ...] = field(default_factory=tuple)
 
 
 class StructureBirthController:
     """聚合未知结构信号, 达到 min_cases 后产出一次出生请求。"""
 
-    def __init__(self, min_cases: int = 3, max_cases: int = 128):
+    def __init__(
+        self,
+        min_cases: int = 3,
+        max_cases: int = 128,
+        proposer: TemplateProposer | None = None,
+    ):
         if min_cases < 1:
             raise ValueError("min_cases 必须 >=1")
         self.min_cases = min_cases
         self.max_cases = max_cases
+        self.proposer = proposer
         self.cases: list[StructureCase] = []
 
     def observe(
@@ -81,12 +90,15 @@ class StructureBirthController:
             max(case.posterior.values()) for case in cases
         ) / len(cases)
         self.cases.clear()
+        proposals = self.proposer.propose(cases) if self.proposer is not None else ()
         return StructureBirthRequest(
             cases=cases,
             residual_mean=residual_mean,
             best_posterior_mean=best_posterior_mean,
             reason=(
                 f"{len(cases)} 个样本在所有结构专家中均不兼容; "
+                f"已生成 {len(proposals)} 个模板提案; "
                 "请提供新的可渲染结构族并训练注册"
             ),
+            proposals=proposals,
         )

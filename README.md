@@ -7,7 +7,7 @@ SPN 逆渲染研究: 左右两张二维立体图像 → Riesz 全分辨率特征
 ## 模块 (一文件一类)
 
 - 模型: `src/mixture_spn.py` (MixtureSPN)
-- demo 族: `src/inverse_config.py` (配置唯一家) / `codebook.py` (单物体组合采样+投影) / `layered_codebook.py` (双物体遮挡/前后层) / `composite_codebook.py` (双图元附着组合模板) / `feature_extractor.py` (11 通道) / `data_builder.py` / `scene_reconstructor.py` (帧对/参数 → 完整 Scene) / `layered_reconstructor.py` (双层 SPN 解码) / `composite_reconstructor.py` (组合模板 SPN 解码) / `expert_registry.py` (结构专家注册/加载) / `structure_gate.py` (结构专家门控) / `structure_birth.py` (未知结构出生队列) / `structured_hypothesis.py` (统一结构化假设/后验对象) / `evaluator.py` / `inverse_app.py`, `src/inverse.py` 为薄 CLI 入口
+- demo 族: `src/inverse_config.py` (配置唯一家) / `codebook.py` (单物体组合采样+投影) / `layered_codebook.py` (双物体遮挡/前后层) / `composite_codebook.py` (双图元附着组合模板) / `feature_extractor.py` (11 通道) / `data_builder.py` / `scene_reconstructor.py` (帧对/参数 → 完整 Scene) / `layered_reconstructor.py` (双层 SPN 解码) / `composite_reconstructor.py` (组合模板 SPN 解码) / `expert_registry.py` (结构专家注册/加载) / `structure_gate.py` (结构专家门控) / `structure_birth.py` (未知结构出生队列) / `composite_template_proposer.py` (残差驱动组合模板提案) / `structured_hypothesis.py` (统一结构化假设/后验对象) / `evaluator.py` / `inverse_app.py`, `src/inverse.py` 为薄 CLI 入口
 - 前端: `src/riesz.py` + `riesz_scale.py` + `feature_maps.py` (Riesz 小波), `src/color.py`, `src/utils.py`, `src/stereo.py` (单物体视差), `src/stereo_layers.py` + `src/contour_completion.py` + `src/joint_layer_optimizer.py` (逐层视差、轮廓补全与遮挡联合优化)
 - 测试: `tests/` (pytest; 单元黑盒 + slow 集成自检) / `src/riesz_selftest.py` (可视化脚本)
 - `docs/architecture.md` — 架构与机制决策录
@@ -59,7 +59,8 @@ SPN 初估的 4 因子后验; `candidate_posterior` 是渲染残差联合后验,
 - 新颖性: `StructuredHypothesis` 返回责任度、后验熵、渲染残差与综合诊断分;
 - 新结构: `StructureGate` 按各专家重建残差与模板复杂度计算
   `p(structure|images)`, `StructureBirthController` 聚合连续不兼容样本并生成
-  `StructureBirthRequest`; 调用方提供新结构配置后可用
+  `StructureBirthRequest`; 请求可携带 `CompositeTemplateProposer` 从左右图
+  残差筛出的组合模板提案。调用方提供新结构配置后可用
   `train_and_register()` 显式训练并注册新专家。
 
 ## 结构专家门控
@@ -75,7 +76,16 @@ print(decision.posterior, decision.needs_new_structure)
 
 `ExpertRegistry.default()` 要求对应结构模型已存在; 缺模型时默认
 fail closed，可用 `missing_ok=True` 显式跳过。组合模板模型训练完成后
-可用 `include_composite=True` 加入默认门控。
+可用 `include_composite=True` 加入默认门控。若要让未知结构请求自动
+携带组合候选:
+
+```python
+from composite_template_proposer import CompositeTemplateProposer
+from structure_birth import StructureBirthController
+
+birth = StructureBirthController(proposer=CompositeTemplateProposer())
+registry = ExpertRegistry(experts, birth_controller=birth)
+```
 
 ## 通用结构学习框架 (非视觉验证)
 
