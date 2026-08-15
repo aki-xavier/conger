@@ -7,7 +7,7 @@ SPN 逆渲染研究: 左右两张二维立体图像 → Riesz 全分辨率特征
 ## 模块 (一文件一类)
 
 - 模型: `src/mixture_spn.py` (MixtureSPN)
-- demo 族: `src/inverse_config.py` (配置唯一家) / `codebook.py` (单物体组合采样+投影) / `layered_codebook.py` (双物体遮挡/前后层) / `composite_codebook.py` (双图元附着组合模板) / `composite_geometry.py` (base/part 部分感知几何锚点) / `structure_geometry.py` (观测级结构几何证据) / `feature_extractor.py` (11 通道) / `data_builder.py` / `scene_reconstructor.py` (帧对/参数 → 完整 Scene) / `layered_reconstructor.py` (双层 SPN 解码) / `composite_reconstructor.py` (组合模板 SPN 解码) / `expert_registry.py` (结构专家注册/加载) / `structure_gate.py` (结构专家门控) / `structure_benchmark.py` (跨结构门控基准) / `structure_birth.py` (未知结构出生队列) / `template_grammar.py` + `composite_template_proposer.py` (有界文法与残差驱动组合模板提案) / `structured_hypothesis.py` (统一结构化假设/后验对象) / `evaluator.py` / `inverse_app.py`, `src/inverse.py` 为薄 CLI 入口
+- demo 族: `src/inverse_config.py` (配置唯一家) / `codebook.py` (单物体组合采样+投影) / `layered_codebook.py` (双物体遮挡/前后层) / `composite_codebook.py` (双图元附着组合模板) / `composite_geometry.py` (base/part 部分感知几何锚点) / `structure_geometry.py` (观测级结构几何证据) / `feature_extractor.py` (11 通道) / `data_builder.py` / `scene_reconstructor.py` (帧对/参数 → 完整 Scene) / `layered_reconstructor.py` (双层 SPN 解码) / `composite_reconstructor.py` (组合模板 SPN 解码) / `expert_registry.py` (结构专家注册/加载/血缘树) / `template_lineage.py` (parent/delta 模板继承契约) / `structure_gate.py` (结构专家门控) / `structure_benchmark.py` (跨结构门控基准) / `structure_birth.py` (未知结构出生队列) / `template_grammar.py` + `composite_template_proposer.py` (有界文法与残差驱动组合模板提案) / `structured_hypothesis.py` (统一结构化假设/后验对象) / `evaluator.py` / `inverse_app.py`, `src/inverse.py` 为薄 CLI 入口
 - 前端: `src/riesz.py` + `riesz_scale.py` + `feature_maps.py` (Riesz 小波), `src/color.py`, `src/utils.py`, `src/stereo.py` (单物体视差), `src/stereo_layers.py` + `src/contour_completion.py` + `src/joint_layer_optimizer.py` (逐层视差、轮廓补全与遮挡联合优化)
 - 测试: `tests/` (pytest; 单元黑盒 + slow 集成自检) / `src/riesz_selftest.py` (可视化脚本)
 - `docs/architecture.md` — 架构与机制决策录
@@ -104,6 +104,16 @@ birth = StructureBirthController(
 )
 registry = ExpertRegistry(experts, birth_controller=birth)
 ```
+
+## 模板继承血缘
+
+`TemplateLineage` 显式记录每个结构模板的 `parent_family` 与 `delta`:
+`single` 是根模板, `layered` 通过独立前后层 delta 继承 single,
+`composite` 通过 `attached_on_top` 关系 delta 继承 layered。
+`ExpertRegistry.lineages()` 返回当前专家血缘表, `children_of(parent)`
+查询直接子模板。残差提案也携带 `parent_family/delta`, 因此后续可以把
+多个出生请求中的相似 delta 聚类成数据驱动的子模板, 而不是平铺注册
+无血缘的新结构。
 
 ## 通用结构学习框架 (非视觉验证)
 

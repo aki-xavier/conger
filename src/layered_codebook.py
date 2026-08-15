@@ -21,6 +21,7 @@ from cga.engine import (
 )
 
 from codebook import Codebook
+from template_lineage import TemplateLineage
 
 if TYPE_CHECKING:
     from inverse_config import InverseConfig
@@ -46,6 +47,14 @@ class LayeredCodebook:
     USES_COMPOSITE_STATS = False
     STEREO_V = "sl8"  # 联合中心/深度 + soft-fusion 面积
     TEMPLATE_COMPLEXITY = 2.0  # 两个独立物体 + 层序
+    TEMPLATE_LINEAGE = TemplateLineage(
+        family="layered",
+        parent_family="single",
+        operation="layer",
+        complexity=TEMPLATE_COMPLEXITY,
+        generation=1,
+        delta={"relation": "independent_front_back", "n_objects": 2},
+    )
     TARGET_IDX = (1, 2, 3, 4, 7, 8, 9, 10)
     CLASS_IDX = (0, 6, 5, 11, 12, 13)  # k0,k1,h0,h1,lcol,ldir
     CAT_SIZES = (3, 3, 6, 6, 3, 3)

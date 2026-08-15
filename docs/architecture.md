@@ -292,6 +292,14 @@ p(M\mid I)\propto p(M)\exp(-\mathrm{score}_M/T)
 所有专家都不兼容时才触发结构出生候选。新结构必须有可渲染模板; 模型可以发现“现有
 结构不对”, 但不能凭空发明 renderer 不支持的几何。
 
+**模板血缘** (当前实现): `TemplateLineage` 记录
+`family/parent_family/operation/delta/generation/complexity`。当前树为
+`single → layered → composite`; `ExpertRegistry.lineages()` 暴露血缘表,
+`children_of(parent)` 查询直接子模板。`StructureCase` 记录触发出生时的
+winning structure, `TemplateProposal` 携带 `parent_family` 与具体 delta。
+这使“子模板”成为可序列化、可聚类、可审计的对象, 为后续从多个相似
+提案自动估计约束范围提供契约。
+
 **实施顺序**:
 1. 类别契约序列化 + padding 扩展;
 2. StructuredHypothesis 新颖性证据;

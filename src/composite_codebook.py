@@ -16,6 +16,7 @@ import mlx.core as mx
 
 from codebook import Codebook
 from layered_codebook import LayeredCodebook
+from template_lineage import TemplateLineage
 
 
 class CompositeCodebook(LayeredCodebook):
@@ -31,6 +32,19 @@ class CompositeCodebook(LayeredCodebook):
     LATERAL_RATIO = 0.25  # 横向偏移占 s0+s1 的最大比例
     OVERLAP_RATIO = (0.03, 0.10)  # 接触处嵌入量占较小半径比例
     DEPTH_JITTER = (-0.06, 0.06)  # 附着件相对底座的轻微深度差
+    TEMPLATE_LINEAGE = TemplateLineage(
+        family="composite",
+        parent_family="layered",
+        operation="attach",
+        complexity=TEMPLATE_COMPLEXITY,
+        generation=2,
+        delta={
+            "relation": RELATION,
+            "scale_ratio": SCALE_RATIO,
+            "lateral_ratio": (-LATERAL_RATIO, LATERAL_RATIO),
+            "depth_jitter": DEPTH_JITTER,
+        },
+    )
 
     @classmethod
     def _inside(cls, u: float, v: float, s: float, z: float) -> bool:

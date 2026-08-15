@@ -29,6 +29,8 @@ from cga.engine import (
     SphereGeometry,
 )
 
+from template_lineage import TemplateLineage
+
 if TYPE_CHECKING:
     from inverse_config import InverseConfig
 
@@ -61,6 +63,13 @@ class Codebook:
     USES_COMPOSITE_STATS = False
     STEREO_V = "st4"
     TEMPLATE_COMPLEXITY = 1.0  # 一个独立 primitive 的描述长度基准
+    TEMPLATE_LINEAGE = TemplateLineage(
+        family="single",
+        parent_family=None,
+        operation="primitive",
+        complexity=TEMPLATE_COMPLEXITY,
+        generation=0,
+    )
     # 离散因子水平 (全笛卡尔积 = 3×6×3×3 = 162 组合)。水平数取最小
     # 可行集 (覆盖要求 = 组合存在即可), 省下的样本预算换连续复制数
     # R —— 稀疏平铺实测: R=1 时每组合 1 样本, 最近分量必色差失配,

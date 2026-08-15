@@ -20,6 +20,8 @@ class TemplateProposal:
     residual: float
     complexity: float
     score: float
+    parent_family: str | None = None
+    delta: dict[str, Any] = field(default_factory=dict)
     metadata: dict[str, Any] = field(default_factory=dict)
 
 

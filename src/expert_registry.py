@@ -15,6 +15,7 @@ from mixture_spn import MixtureSPN
 from structure_birth import StructureBirthController, StructureBirthRequest
 from structure_gate import StructureGate
 from structured_hypothesis import StructuredHypothesis
+from template_lineage import TemplateLineage
 
 
 @dataclass
@@ -43,6 +44,10 @@ class SceneExpert:
         """左右图 → 该结构下的 StructuredHypothesis。"""
         return self.app.reconstruct_scene(self.net, fl, fr)
 
+    def lineage(self) -> TemplateLineage:
+        """该专家对应场景族的血缘元数据。"""
+        return self.app.codebook.TEMPLATE_LINEAGE
+
 
 class ExpertRegistry:
     """结构专家集合 + 渲染残差结构门控。"""
@@ -58,6 +63,18 @@ class ExpertRegistry:
         self.gate = gate or StructureGate()
         self.birth_controller = birth_controller
         self.last_birth_request: StructureBirthRequest | None = None
+
+    def lineages(self) -> dict[str, TemplateLineage]:
+        """当前专家树/森林的血缘表。"""
+        return {name: expert.lineage() for name, expert in self.experts.items()}
+
+    def children_of(self, parent_family: str) -> tuple[str, ...]:
+        """返回直接继承自 parent_family 的已注册专家名。"""
+        return tuple(
+            name
+            for name, lineage in self.lineages().items()
+            if lineage.parent_family == parent_family
+        )
 
     @classmethod
     def from_configs(

@@ -39,6 +39,8 @@ def test_composite_template_proposer_recovers_attached_part() -> None:
     best = proposals[0]
     assert best.family == "composite"
     assert best.operation == "attach"
+    assert best.parent_family == "layered"
+    assert best.delta["relation"] == "attach"
     assert best.metadata["part_kind"] == 2
     assert best.metadata["part_hue"] == 4
     assert best.residual < 1e-6
@@ -55,6 +57,8 @@ class _StaticProposer:
                 residual=1.0,
                 complexity=1.5,
                 score=2.5,
+                parent_family="layered",
+                delta={"relation": "attach"},
                 metadata={"n_cases": len(cases)},
             ),
         )
@@ -62,7 +66,9 @@ class _StaticProposer:
 
 def test_birth_request_carries_template_proposals() -> None:
     """结构出生请求应携带提案, 但训练/注册仍由调用方显式决定。"""
-    estimate = StructuredHypothesis(params=(0.0,), residual=10.0)
+    estimate = StructuredHypothesis(
+        structure_id="single", params=(0.0,), residual=10.0
+    )
     decision = GenericStructureDecision(
         estimate=estimate,
         posterior={"single": 0.4},
@@ -75,5 +81,8 @@ def test_birth_request_carries_template_proposals() -> None:
     request = controller.observe(decision, mx.zeros(2), mx.zeros(2))
     assert request is not None
     assert len(request.proposals) == 1
+    assert request.cases[0].structure_id == "single"
+    assert request.proposals[0].parent_family == "layered"
+    assert request.proposals[0].delta["relation"] == "attach"
     assert request.proposals[0].metadata["n_cases"] == 2
     assert "1 个模板提案" in request.reason

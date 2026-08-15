@@ -34,6 +34,7 @@ class StructureCase:
     residuals: Mapping[str, float]
     posterior: Mapping[str, float]
     params: tuple[float, ...]
+    structure_id: str = "unknown"
 
 
 @dataclass(frozen=True)
@@ -76,6 +77,7 @@ class StructureBirthController:
                 residuals=dict(decision.residuals),
                 posterior=dict(decision.posterior),
                 params=decision.estimate.params,
+                structure_id=decision.estimate.structure_id,
             )
         )
         if len(self.cases) > self.max_cases:

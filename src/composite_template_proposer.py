@@ -210,6 +210,17 @@ class CompositeTemplateProposer:
                         family = (
                             "layered" if rule.operation == "layer" else "composite"
                         )
+                        parent_family = (
+                            "layered" if rule.operation == "attach" else "single"
+                        )
+                        delta = {
+                            "relation": rule.operation,
+                            "base_kind": rule.base_kind,
+                            "part_kind": rule.part_kind,
+                            "part_hue": part_hue,
+                            "ratio": ratio,
+                            "lateral_ratio": lateral,
+                        }
                         out.append(
                             TemplateProposal(
                                 family=family,
@@ -218,6 +229,8 @@ class CompositeTemplateProposer:
                                 residual=residual,
                                 complexity=rule.complexity,
                                 score=score,
+                                parent_family=parent_family,
+                                delta=delta,
                                 metadata={
                                     "signature": rule.signature(),
                                     "relation": rule.operation,
