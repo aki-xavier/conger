@@ -126,6 +126,23 @@ def test_topk_structure_refinement_and_marginals() -> None:
     assert float(ldir_m[2]) > 0.9
 
 
+def test_novelty_metrics_contract() -> None:
+    """新颖性证据: δ责任度+δ后验低, 均匀后验熵高, 残差入综合分。"""
+    cat = mx.zeros(15)
+    cat[0] = cat[3] = cat[9] = cat[12] = 1.0
+    r0 = mx.array([[1.0, 0.0, 0.0]])
+    rn0, ent0, nov0 = SceneReconstructor.novelty_metrics(
+        cat, r0, SceneReconstructor.CAT_SIZES, None
+    )
+    assert rn0 < 1e-6 and ent0 < 1e-6 and nov0 < 1e-6
+    r1 = mx.full((1, 4), 0.25)
+    _, ent1, nov1 = SceneReconstructor.novelty_metrics(
+        cat, r1, SceneReconstructor.CAT_SIZES, 9.0
+    )
+    assert ent1 == 0.0  # 类目仍确定, 分量责任度才模糊
+    assert nov1 > nov0
+
+
 def test_evaluator_full_scene_contract() -> None:
     """Evaluator: 4 个离散场景因子与 4 个连续目标全部入指标。"""
     p_gt = mx.array(

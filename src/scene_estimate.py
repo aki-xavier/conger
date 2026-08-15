@@ -35,6 +35,13 @@ class SceneEstimate:
     hypotheses: tuple[SceneHypothesis, ...] = field(default_factory=tuple)
     factor_sizes: tuple[int, ...] = (3, 6, 3, 3)
     factor_indices: tuple[int, ...] = (0, 5, 6, 7)
+    responsibility_max: float | None = None
+    posterior_entropy: float | None = None
+    render_residual: float | None = None
+    novelty_score: float | None = None
+    structure_id: str | None = None
+    structure_posterior: float | None = None
+    structure_posteriors: dict[str, float] | None = None
 
     def factor_marginals(self) -> tuple[mx.array, ...]:
         """候选后验 → 场景离散因子边缘后验 (单/双层通用)。"""

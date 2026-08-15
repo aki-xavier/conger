@@ -213,3 +213,32 @@ def test_serialization_roundtrip(
     model.save(p)
     tm2, kp2, _ = MixtureSPN.load(p).predict(f_all)
     assert bool(mx.all(mx.equal(tm, tm2))) and bool(mx.all(mx.equal(kp, kp2)))
+
+
+def test_category_contract_expansion(tmp_path) -> None:
+    """类别动态扩展: 契约序列化, 旧分量 padding, 新类别可增量学习。"""
+    f = mx.array([[0.0, 0.0], [8.0, 0.0], [0.0, 8.0]])
+    t = mx.zeros((3, 1))
+    cls = mx.array([[0, 0], [1, 0], [2, 1]], dtype=mx.int32)
+    m = MixtureSPN.fit(
+        f, t, cls[:, 0], scene_classes=cls, cat_sizes=(3, 2)
+    )
+    path = tmp_path / "m.safetensors"
+    m.save(path)
+    loaded = MixtureSPN.load(path)
+    assert loaded.cat_sizes_tuple == (3, 2)
+
+    loaded.expand_categories((4, 3))
+    assert loaded.cat_sizes_tuple == (4, 3)
+    assert loaded.cat_logp.shape == (3, 7)
+    _, cp, _ = loaded.predict(f)
+    # 旧样本对新类别概率为 0; 各因子边缘仍归一
+    assert float(cp[0, 3]) == 0.0
+    assert mx.allclose(mx.sum(cp[:, 4:], axis=1), mx.ones(3), atol=1e-4)
+
+    f_new = mx.array([[30.0, 30.0]])
+    c_new = mx.array([[3, 2]], dtype=mx.int32)
+    loaded.add(f_new, mx.zeros((1, 1)), c_new[:, 0], c_new)
+    _, cp_new, _ = loaded.predict(f_new)
+    assert int(mx.argmax(cp_new[0, :4])) == 3
+    assert int(mx.argmax(cp_new[0, 4:])) == 2

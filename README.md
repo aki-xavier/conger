@@ -7,7 +7,7 @@ SPN 逆渲染研究: 左右两张二维立体图像 → Riesz 全分辨率特征
 ## 模块 (一文件一类)
 
 - 模型: `src/mixture_spn.py` (MixtureSPN)
-- demo 族: `src/inverse_config.py` (配置唯一家) / `codebook.py` (单物体组合采样+投影) / `layered_codebook.py` (双物体遮挡/前后层) / `feature_extractor.py` (11 通道) / `data_builder.py` / `scene_reconstructor.py` (帧对/参数 → 完整 Scene) / `layered_reconstructor.py` (双层 SPN 解码) / `scene_estimate.py` (Scene 后验返回对象) / `evaluator.py` / `inverse_app.py`, `src/inverse.py` 为薄 CLI 入口
+- demo 族: `src/inverse_config.py` (配置唯一家) / `codebook.py` (单物体组合采样+投影) / `layered_codebook.py` (双物体遮挡/前后层) / `feature_extractor.py` (11 通道) / `data_builder.py` / `scene_reconstructor.py` (帧对/参数 → 完整 Scene) / `layered_reconstructor.py` (双层 SPN 解码) / `structure_gate.py` (结构专家门控) / `scene_estimate.py` (Scene 后验返回对象) / `evaluator.py` / `inverse_app.py`, `src/inverse.py` 为薄 CLI 入口
 - 前端: `src/riesz.py` + `riesz_scale.py` + `feature_maps.py` (Riesz 小波), `src/color.py`, `src/utils.py`, `src/stereo.py` (单物体视差), `src/stereo_layers.py` + `src/contour_completion.py` + `src/joint_layer_optimizer.py` (逐层视差、轮廓补全与遮挡联合优化)
 - 测试: `tests/` (pytest; 单元黑盒 + slow 集成自检) / `src/riesz_selftest.py` (可视化脚本)
 - `docs/architecture.md` — 架构与机制决策录
@@ -48,6 +48,15 @@ for h in estimate.hypotheses:          # top 候选完整场景
 渲染残差精炼后的 `(kind,u,v,s,z,hue,lcol,ldir)`; `spn_posterior` 是
 SPN 初估的 4 因子后验; `candidate_posterior` 是渲染残差联合后验,
 避免把逆渲染歧义过早压成单个点估计。
+
+## 增量学习
+
+- 同一结构内增加样本: `MixtureSPN.add()` 追加实例分量并冻结旧 PCA 基;
+- 新类别: `expand_categories()` 对旧分量 padding, `cat_sizes/n_stratum`
+  随模型序列化;
+- 新颖性: `SceneEstimate` 返回责任度、后验熵、渲染残差与综合诊断分;
+- 新结构: `StructureGate` 按各专家重建残差计算 `p(structure|images)`,
+  所有专家都不兼容时返回 `needs_new_structure`, 不强行归类。
 
 实测 (结构-外观联合精炼版, 全量立体 N=1296, `kind_topk=3`): 插值 u,v R² 0.930/0.945 / s R² 0.508 / z R² 0.831 / kind 0.753 / hue 1.000 / lcol 0.994 / ldir 0.895; 外推 u,v R² 0.949/0.953 / s,z R² 0.922/0.956 / kind 0.617 / hue 0.981 / lcol 0.880 / ldir 0.772。结构评分沿用共享几何避免尺寸代理偏差，MAP 后按 kind 重校准 s; 色相与光照由候选重渲染联合裁决。
 

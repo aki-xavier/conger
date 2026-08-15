@@ -134,8 +134,11 @@ class LayeredReconstructor:
     ) -> SceneEstimate:
         """左/右二维图像 → 双层 SceneEstimate (SPN 后验, 无渲染精炼)。"""
         f, stats, _ = SceneReconstructor.frame_features(app, fl, fr, rw)
-        t, cat_p, _ = net.predict(f)
+        t, cat_p, r = net.predict(f)
         prm = cls.params(t, cat_p, stats)[0]
+        rn, ent, novelty = SceneReconstructor.novelty_metrics(
+            cat_p[0], r, cls.CAT_SIZES, None
+        )
         return SceneEstimate(
             scene=app.codebook.to_scene(prm),
             params=prm,
@@ -144,6 +147,10 @@ class LayeredReconstructor:
             hypotheses=(SceneHypothesis(prm, 1.0, None),),
             factor_sizes=LayeredCodebook.CAT_SIZES,
             factor_indices=LayeredCodebook.CLASS_IDX,
+            responsibility_max=float(mx.max(r)),
+            posterior_entropy=ent,
+            render_residual=None,
+            novelty_score=novelty,
         )
 
     @staticmethod

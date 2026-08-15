@@ -61,14 +61,19 @@ class MixtureSPN:
         f_mu: mx.array,  # (K, D) 白化空间特征均值 (实例级 = 样本)
         f_var: mx.array,  # (K, D) 白化空间特征方差 (类内 tied)
         t_mu: mx.array,  # (K, T) 连续目标 (= 样本目标)
-        cat_logp: mx.array,  # (K, 21) 场景因子类目 log 概率 (行 one-hot)
+        cat_logp: mx.array,  # (K, ΣC) 场景因子类目 log 概率 (行 one-hot)
         rel_floor: float,
         f_mean: mx.array | None = None,  # (V,) 白化中心
         basis: mx.array | None = None,  # (V, D) 白化基 (随模型序列化)
+        cat_sizes: tuple[int, ...] | None = None,  # 显式类别契约
+        n_stratum: int | None = None,
     ):
         self.log_w, self.f_mu, self.f_var = log_w, f_mu, f_var
         self.t_mu, self.cat_logp = t_mu, cat_logp
         self.f_mean, self.basis = f_mean, basis
+        self.cat_sizes_tuple = cat_sizes or self.cat_sizes(cat_logp)
+        self.n_stratum = n_stratum or self.cat_sizes_tuple[0]
+        assert sum(self.cat_sizes_tuple) == cat_logp.shape[1]
         self.rel_floor = rel_floor
         # 预计算特征侧归一常数 (K,): log_w − ½·Σ_d(log var + log2π)
         self._norm = log_w - 0.5 * mx.sum(
@@ -103,11 +108,12 @@ class MixtureSPN:
     # ── 组装 (学习) ─────────────────────────────────────────────────
 
     @staticmethod
-    def _tied_vars(z: mx.array, stratum: mx.array, rel_floor: float) -> mx.array:
-        """逐分层 tied 对角方差 → (N_STRATUM, D) (类内全子集估计 = 核带宽,
-        地板防零; 缺场分层行无引用, 填 1 占位)。"""
+    def _tied_vars(
+        z: mx.array, stratum: mx.array, rel_floor: float, n_stratum: int
+    ) -> mx.array:
+        """逐分层 tied 对角方差 (类内全子集估计 = 核带宽, 地板防零)。"""
         out = []
-        for j in range(MixtureSPN.N_STRATUM):
+        for j in range(n_stratum):
             sel = Utils.nonzero(stratum == j)
             if sel.shape[0] == 0:
                 out.append(mx.ones((1, z.shape[1])))
@@ -153,14 +159,15 @@ class MixtureSPN:
         f_mean, basis, z = cls._whiten(f)
         mus, vars_, tmus, ws = [], [], [], []
         n = z.shape[0]
-        gvar = cls._tied_vars(z, stratum, rel_floor)
-        clps = []
         if scene_classes is None:
             scene_classes = stratum[:, None].astype(mx.int32)
             cat_sizes = (cls.N_STRATUM,)
         assert cat_sizes is not None
+        n_stratum = cat_sizes[0]
+        gvar = cls._tied_vars(z, stratum, rel_floor, n_stratum)
+        clps = []
         assert scene_classes.shape[1] == len(cat_sizes)
-        for j in range(cls.N_STRATUM):
+        for j in range(n_stratum):
             sel = Utils.nonzero(stratum == j)
             nj = sel.shape[0]
             if nj == 0:
@@ -174,10 +181,32 @@ class MixtureSPN:
         m = cls(
             mx.concatenate(ws), mx.concatenate(mus), mx.concatenate(vars_),
             mx.concatenate(tmus), mx.concatenate(clps), rel_floor, f_mean,
-            basis,
+            basis, cat_sizes, n_stratum,
         )
         mx.eval(m.log_w, m.f_mu, m.f_var, m.t_mu, m.cat_logp)
         return m
+
+    def expand_categories(self, new_sizes: tuple[int, ...]) -> None:
+        """类别契约扩展: 旧分量对新类别补零概率 (logp=-inf)。
+
+        只支持同一组因子的逐位扩展; 新类别样本随后走 add() 追加。
+        结构/参数维度变化不属于本方法, 应新建结构专家。"""
+        old = self.cat_sizes_tuple
+        assert len(old) == len(new_sizes), "类别扩展不能改变因子数量"
+        assert all(n >= o for o, n in zip(old, new_sizes, strict=True))
+        cols = []
+        lo = 0
+        for o, n in zip(old, new_sizes, strict=True):
+            part = self.cat_logp[:, lo : lo + o]
+            if n > o:
+                pad = mx.full((self.cat_logp.shape[0], n - o), -float("inf"))
+                part = mx.concatenate([part, pad], axis=1)
+            cols.append(part)
+            lo += o
+        self.cat_logp = mx.concatenate(cols, axis=1)
+        self.cat_sizes_tuple = new_sizes
+        self.n_stratum = new_sizes[0]
+        mx.eval(self.cat_logp)
 
     def add(
         self,
@@ -196,7 +225,7 @@ class MixtureSPN:
         z_new = self._z(f)  # 冻结基白化
         self.f_mu = mx.concatenate([self.f_mu, z_new])
         self.t_mu = mx.concatenate([self.t_mu, t])
-        cat_sizes = self.cat_sizes(self.cat_logp)
+        cat_sizes = self.cat_sizes_tuple
         assert scene_classes.shape[1] == len(cat_sizes)
         self.cat_logp = mx.concatenate(
             [self.cat_logp, self._cat_logp(scene_classes, cat_sizes)]
@@ -206,12 +235,14 @@ class MixtureSPN:
         s_all = mx.concatenate(
             [
                 mx.argmax(
-                    self.cat_logp[:-n_new, : self.N_STRATUM], axis=1
+                    self.cat_logp[:-n_new, : self.n_stratum], axis=1
                 ),
                 stratum.astype(mx.int32),
             ]
         )
-        gvar = self._tied_vars(self.f_mu, s_all, self.rel_floor)
+        gvar = self._tied_vars(
+            self.f_mu, s_all, self.rel_floor, self.n_stratum
+        )
         self.f_var = gvar[s_all]
         self.log_w = mx.full((n,), -math.log(n))
         self._norm = self.log_w - 0.5 * mx.sum(
@@ -266,7 +297,11 @@ class MixtureSPN:
                 "f_mean": self.f_mean,
                 "basis": self.basis,
             },
-            {"rel_floor": json.dumps(self.rel_floor)},
+            {
+                "rel_floor": json.dumps(self.rel_floor),
+                "cat_sizes": json.dumps(self.cat_sizes_tuple),
+                "n_stratum": json.dumps(self.n_stratum),
+            },
         )
 
     @staticmethod
@@ -275,9 +310,16 @@ class MixtureSPN:
 
         d = mx.load(str(path))
         hd = Utils.st_metadata(path).get("__metadata__", {})
+        cat_sizes = (
+            tuple(json.loads(hd["cat_sizes"])) if "cat_sizes" in hd else None
+        )
+        n_stratum = (
+            int(json.loads(hd["n_stratum"])) if "n_stratum" in hd else None
+        )
         return MixtureSPN(
             d["log_w"], d["f_mu"], d["f_var"], d["t_mu"], d["cat_logp"],
             float(json.loads(hd["rel_floor"])), d["f_mean"], d["basis"],
+            cat_sizes, n_stratum,
         )
 
 

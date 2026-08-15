@@ -36,6 +36,30 @@ class SceneReconstructor:
     )
 
     @staticmethod
+    def novelty_metrics(
+        cat_p: mx.array,
+        r: mx.array,
+        cat_sizes: tuple[int, ...],
+        render_residual: float | None,
+    ) -> tuple[float, float, float]:
+        """→ (责任度新颖性, 归一化后验熵, 综合新颖性诊断分)。"""
+        max_r = float(mx.max(r)) + 1e-12
+        responsibility_novelty = -math.log(max_r) / math.log(r.shape[1])
+        lo = 0
+        ent = 0.0
+        for nc in cat_sizes:
+            p = cat_p[lo : lo + nc]
+            ent -= float(mx.sum(p * mx.log(mx.maximum(p, 1e-12)))) / math.log(nc)
+            lo += nc
+        posterior_entropy = ent / len(cat_sizes)
+        render_term = 0.0 if render_residual is None else math.log1p(render_residual)
+        return (
+            responsibility_novelty,
+            posterior_entropy,
+            responsibility_novelty + posterior_entropy + render_term,
+        )
+
+    @staticmethod
     def s_proxy(kind: int | mx.array, stats: mx.array) -> mx.array:
         """kind-conditioned 表观尺寸代理。
 
@@ -263,8 +287,11 @@ class SceneReconstructor:
         kind_topk 个结构候选 × 54 个外观候选进入渲染残差联合后验;
         SPN 原始后验仍随返回值保留。"""
         f, stats, _ = cls.frame_features(app, fl, fr, rw)
-        t, cat_p, _ = net.predict(f)
+        t, cat_p, r = net.predict(f)
         prm = cls.params(t, cat_p, stats)[0]
+        rn, ent, novelty = cls.novelty_metrics(
+            cat_p[0], r, cls.CAT_SIZES, None
+        )
         if not refine:
             return SceneEstimate(
                 scene=app.codebook.to_scene(prm),
@@ -272,6 +299,10 @@ class SceneReconstructor:
                 spn_posterior=cat_p[0],
                 candidate_params=(prm,),
                 hypotheses=(SceneHypothesis(prm, 1.0, None),),
+                responsibility_max=float(mx.max(r)),
+                posterior_entropy=ent,
+                render_residual=None,
+                novelty_score=novelty,
             )
         prm, candidates, scores, posterior, temperature = cls.refine_scene(
             app.codebook,
@@ -287,6 +318,10 @@ class SceneReconstructor:
             SceneHypothesis(candidates[i], float(posterior[i]), float(scores[i]))
             for i in order
         )
+        best_residual = float(mx.min(scores))
+        rn, ent, novelty = cls.novelty_metrics(
+            cat_p[0], r, cls.CAT_SIZES, best_residual
+        )
         return SceneEstimate(
             scene=app.codebook.to_scene(prm),
             params=prm,
@@ -296,6 +331,10 @@ class SceneReconstructor:
             candidate_posterior=posterior,
             candidate_temperature=temperature,
             hypotheses=hypotheses,
+            responsibility_max=float(mx.max(r)),
+            posterior_entropy=ent,
+            render_residual=best_residual,
+            novelty_score=novelty,
         )
 
     @staticmethod

@@ -161,7 +161,8 @@ InverseConfig 防环。
 
 - 数据缓存: `artifacts/mix_*.safetensors` (配置指纹文件名, gitignore);
 - 模型: MixtureSPN.save/load —— 参数张量 (含白化基 basis (V,D),
-  全量约 1.5GB) + rel_floor 入 JSON 明文头; Utils.st_metadata 可查;
+  全量约 1.5GB) + rel_floor/cat_sizes/n_stratum 入 JSON 明文头;
+  Utils.st_metadata 可查;
   默认路径 `spn_kindgeo_<数据指纹>` 或 `spn_layered_anchor_<数据指纹>`
   (`kindgeo` 标记 kind-conditioned s 残差, `anchor` 标记双层逐层锚点契约)。
 
@@ -211,10 +212,13 @@ appearance_topk/tolerance`。默认应先关闭, 单物体验证稳定后再考�
 **与旧结论的关系**: §2.2 否定的是小数据弯曲流形上的 EM 质心压缩;
 这里是已知 renderer 下的场景级后验推理, 问题层不同, 不构成回退。
 
-### 7.2 TODO: 动态类别与动态场景结构 (实施路线)
+### 7.2 动态类别与动态场景结构 (当前实现)
 
 目标是把增量学习从“同分布样本追加”扩展到“世界支持集增长”。分两层
-处理, 不把所有变化塞进一个固定结构模型。
+处理, 不把所有变化塞进一个固定结构模型。当前已实现前三步的机制层:
+类别契约序列化与 padding 扩展、SceneEstimate 新颖性证据、结构专家
+渲染残差门控; 结构出生目前只返回检测信号, 不自动发明 renderer 不支持
+的新几何模板。
 
 **类别动态学习** (参数维度不变, 类别数变化):
 `MixtureSPN` 需显式序列化 `cat_sizes`/因子名/结构版本; 新类别出现时

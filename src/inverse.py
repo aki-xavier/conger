@@ -36,6 +36,7 @@ s 重校准) × 外观候选渲染残差后验 → SceneEstimate (MAP cga.Scene 
   MixtureSPN        实例级浅混合 + 连续/离散条件推理
   SceneReconstructor 帧对/模型输出 → 候选渲染后验 → 完整 cga.Scene
   SceneEstimate     MAP Scene + SPN/渲染候选后验 + top 假设
+  StructureGate     结构专家渲染残差门控 + 未知结构出生检测
   Evaluator         回归 + 完整场景因子分类指标
   InverseApp        主流程 (训练/推理/评估/可视化/自检)
 
