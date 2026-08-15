@@ -150,6 +150,7 @@ class LayeredReconstructor:
             responsibility_max=float(mx.max(r)),
             posterior_entropy=ent,
             residual=None,
+            complexity=app.codebook.TEMPLATE_COMPLEXITY,
             novelty_score=novelty,
         )
 

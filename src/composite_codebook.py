@@ -25,6 +25,7 @@ class CompositeCodebook(LayeredCodebook):
     USES_LAYER_STATS = False  # 组合物是单一对象, 用全局立体锚点
     STEREO_V = "cp1"
     RELATION = "attached_on_top"
+    TEMPLATE_COMPLEXITY = 1.5  # 两图元但附着关系降低描述长度
     SCALE_RATIO = (0.35, 0.75)  # part/base 尺度比
     LATERAL_RATIO = 0.25  # 横向偏移占 s0+s1 的最大比例
     OVERLAP_RATIO = (0.03, 0.10)  # 接触处嵌入量占较小半径比例

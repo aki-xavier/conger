@@ -53,5 +53,6 @@ class ToySeriesExpert:
             responsibility_max=max_r,
             posterior_entropy=0.0,
             residual=residual,
+            complexity=float(self.family.n_params),
             novelty_score=novelty,
         )

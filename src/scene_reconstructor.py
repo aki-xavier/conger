@@ -302,6 +302,7 @@ class SceneReconstructor:
                 responsibility_max=float(mx.max(r)),
                 posterior_entropy=ent,
                 residual=None,
+                complexity=app.codebook.TEMPLATE_COMPLEXITY,
                 novelty_score=novelty,
             )
         prm, candidates, scores, posterior, temperature = cls.refine_scene(
@@ -334,6 +335,7 @@ class SceneReconstructor:
             responsibility_max=float(mx.max(r)),
             posterior_entropy=ent,
             residual=best_residual,
+            complexity=app.codebook.TEMPLATE_COMPLEXITY,
             novelty_score=novelty,
         )
 

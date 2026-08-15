@@ -25,11 +25,13 @@ class StructureGate(GenericStructureGate):
         birth_residual: float = 10000.0,
         posterior_floor: float | None = 0.6,
         priors: Mapping[str, float] | None = None,
+        complexity_weight: float = 1.0,
     ):
         super().__init__(
             birth_residual=birth_residual,
             posterior_floor=posterior_floor,
             priors=priors,
+            complexity_weight=complexity_weight,
         )
 
     @staticmethod

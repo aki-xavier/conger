@@ -62,6 +62,7 @@ class CompositeReconstructor:
             responsibility_max=float(mx.max(r)),
             posterior_entropy=ent,
             residual=None,
+            complexity=CompositeCodebook.TEMPLATE_COMPLEXITY,
             novelty_score=novelty,
         )
 

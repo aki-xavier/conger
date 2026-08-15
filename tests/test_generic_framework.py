@@ -5,6 +5,7 @@ import mlx.core as mx
 from generic_expert_registry import GenericExpertRegistry
 from generic_structure_gate import GenericStructureGate
 from structure_birth import StructureBirthController
+from structured_hypothesis import StructuredHypothesis
 from toy_series_expert import ToySeriesExpert
 from toy_series_family import ToySeriesFamily
 
@@ -35,6 +36,27 @@ def test_nonvisual_structure_gating() -> None:
     assert out_s.posterior["sine"] > 0.8
     assert not out_l.needs_new_structure
     assert not out_s.needs_new_structure
+
+
+def test_template_complexity_penalty() -> None:
+    """复杂度只惩罚结构选择分数, 不污染出生判断用的原始残差。"""
+    simple = StructuredHypothesis(
+        structure_id="simple", params=(0.0,), residual=0.20, complexity=1.0
+    )
+    complex_ = StructuredHypothesis(
+        structure_id="complex", params=(0.0,), residual=0.19, complexity=10.0
+    )
+    estimates = {"simple": simple, "complex": complex_}
+    raw = GenericStructureGate().decide(estimates)
+    assert raw.estimate.structure_id == "complex"
+
+    gate = GenericStructureGate(birth_residual=0.15, complexity_weight=0.1)
+    out = gate.decide(estimates)
+    assert out.estimate.structure_id == "simple"
+    assert abs(out.scores["simple"] - 0.3) < 1e-12
+    assert abs(out.scores["complex"] - 1.19) < 1e-12
+    assert out.residuals["complex"] == 0.19
+    assert out.needs_new_structure  # 出生阈值看原始 best residual
 
 
 def test_nonvisual_structure_birth() -> None:

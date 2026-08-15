@@ -41,6 +41,7 @@ class StructuredHypothesis:
     responsibility_max: float | None = None
     posterior_entropy: float | None = None
     residual: float | None = None
+    complexity: float | None = None  # 模板描述复杂度 (结构门控惩罚项)
     novelty_score: float | None = None
     structure_posterior: float | None = None
     structure_posteriors: dict[str, float] | None = None

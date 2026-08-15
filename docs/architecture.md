@@ -190,8 +190,8 @@ InverseConfig 防环。
 
 1. **组合模板全量标定**: 训练 `spn_composite`, 与 single/layered
    共同门控, 验证附着组合与独立前后层可由残差区分
-2. **模板复杂度门控**: 为结构专家加入参数数/描述长度惩罚, 防止更复杂
-   组合模板仅靠自由度占优
+2. **模板复杂度门控** (已接入): 结构专家携带参数/描述复杂度,
+   门控分数加入惩罚, 防止更复杂组合模板仅靠自由度占优
 3. **残差驱动模板提案**: 未知结构残差区域 → primitive 拟合 → 组合候选
    → StructureBirthRequest
 4. **有界模板文法**: attach/layer/repeat/mirror, 限制深度、部件数与
@@ -263,8 +263,16 @@ p(S,M\mid I)\propto p(I\mid S,M)p(S\mid M)p(M)
 ```
 
 每个专家有自己的 Codebook、MixtureSPN、Reconstructor; 结构门控
-`p(M|I)` 来自特征似然、最佳渲染残差和复杂度惩罚。所有专家都不兼容
-时才触发结构出生候选。新结构必须有可渲染模板; 模型可以发现“现有
+`p(M|I)` 来自最佳渲染残差、结构先验和模板复杂度惩罚:
+
+```math
+\mathrm{score}_M=\ell_M+\lambda C_M,\qquad
+p(M\mid I)\propto p(M)\exp(-\mathrm{score}_M/T)
+```
+
+`C_M` 是模板描述复杂度 (single=1.0, composite=1.5, layered=2.0);
+出生判断仍看原始 \(\ell_M\), 防止复杂度惩罚把真实未知结构误解释为
+“简单专家更合适”。所有专家都不兼容时才触发结构出生候选。新结构必须有可渲染模板; 模型可以发现“现有
 结构不对”, 但不能凭空发明 renderer 不支持的几何。
 
 **实施顺序**:

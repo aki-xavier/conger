@@ -65,6 +65,7 @@ class ExpertRegistry:
         configs: Mapping[str, InverseConfig],
         artifacts: Path | None = None,
         priors: Mapping[str, float] | None = None,
+        complexity_weight: float = 1.0,
         missing_ok: bool = False,
     ) -> ExpertRegistry:
         """按名称 → 配置注册专家; missing_ok=True 时跳过缺模型专家。"""
@@ -77,7 +78,10 @@ class ExpertRegistry:
                     raise
         if not experts:
             raise FileNotFoundError("所有结构专家模型都缺失")
-        return cls(experts, StructureGate(priors=priors))
+        return cls(
+            experts,
+            StructureGate(priors=priors, complexity_weight=complexity_weight),
+        )
 
     @classmethod
     def default(

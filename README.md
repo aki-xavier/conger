@@ -57,8 +57,8 @@ SPN 初估的 4 因子后验; `candidate_posterior` 是渲染残差联合后验,
 - 新类别: `expand_categories()` 对旧分量 padding, `cat_sizes/n_stratum`
   随模型序列化;
 - 新颖性: `StructuredHypothesis` 返回责任度、后验熵、渲染残差与综合诊断分;
-- 新结构: `StructureGate` 按各专家重建残差计算 `p(structure|images)`,
-  `StructureBirthController` 聚合连续不兼容样本并生成
+- 新结构: `StructureGate` 按各专家重建残差与模板复杂度计算
+  `p(structure|images)`, `StructureBirthController` 聚合连续不兼容样本并生成
   `StructureBirthRequest`; 调用方提供新结构配置后可用
   `train_and_register()` 显式训练并注册新专家。
 

@@ -44,6 +44,7 @@ class LayeredCodebook:
     RENDER_V = Codebook.RENDER_V
     USES_LAYER_STATS = True
     STEREO_V = "sl8"  # 联合中心/深度 + soft-fusion 面积
+    TEMPLATE_COMPLEXITY = 2.0  # 两个独立物体 + 层序
     TARGET_IDX = (1, 2, 3, 4, 7, 8, 9, 10)
     CLASS_IDX = (0, 6, 5, 11, 12, 13)  # k0,k1,h0,h1,lcol,ldir
     CAT_SIZES = (3, 3, 6, 6, 3, 3)
