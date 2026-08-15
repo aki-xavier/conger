@@ -33,8 +33,8 @@ class DataBuilder:
             f"k{cb.N_KIND}h{cb.N_HUE}c{len(cb.LIGHT_COLORS)}d{len(cb.LIGHT_DIRS)}"
             f"o{cb.N_OBJECTS}sv{cb.SAMPLE_V}rp{cb.RENDER_V}"
         )
-        # st4 = 单物体拼接维缩放; sl8 = 联合中心/深度 + soft-fusion 面积
-        stereo_tag = "sl8" if cb.N_OBJECTS == 2 else "st4"
+        # 结构族自带统计契约版本: st4 单物体 / sl8 遮挡层 / cp1 组合物
+        stereo_tag = cb.STEREO_V
         return f"mix_{cb.H}x{cb.W}_{feat_tag}_{lvl_tag}_{stereo_tag}"
 
     def _block_feats(self, split: str, r: int) -> tuple[mx.array, ...]:
@@ -83,7 +83,7 @@ class DataBuilder:
             fl = renderer.render(scene, cam_l)
             fr = renderer.render(scene, cam_r)
             vec, rw = self.extractor.of_frame(fl, rw)
-            if cb.N_OBJECTS == 2:
+            if cb.USES_LAYER_STATS:
                 stat = sl.estimate(fl, fr)
                 vec = mx.concatenate(
                     [vec, StereoLayers.scaled(mx.array([stat]))[0]]

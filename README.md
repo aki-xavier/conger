@@ -7,7 +7,7 @@ SPN 逆渲染研究: 左右两张二维立体图像 → Riesz 全分辨率特征
 ## 模块 (一文件一类)
 
 - 模型: `src/mixture_spn.py` (MixtureSPN)
-- demo 族: `src/inverse_config.py` (配置唯一家) / `codebook.py` (单物体组合采样+投影) / `layered_codebook.py` (双物体遮挡/前后层) / `feature_extractor.py` (11 通道) / `data_builder.py` / `scene_reconstructor.py` (帧对/参数 → 完整 Scene) / `layered_reconstructor.py` (双层 SPN 解码) / `expert_registry.py` (结构专家注册/加载) / `structure_gate.py` (结构专家门控) / `structure_birth.py` (未知结构出生队列) / `structured_hypothesis.py` (统一结构化假设/后验对象) / `evaluator.py` / `inverse_app.py`, `src/inverse.py` 为薄 CLI 入口
+- demo 族: `src/inverse_config.py` (配置唯一家) / `codebook.py` (单物体组合采样+投影) / `layered_codebook.py` (双物体遮挡/前后层) / `composite_codebook.py` (双图元附着组合模板) / `feature_extractor.py` (11 通道) / `data_builder.py` / `scene_reconstructor.py` (帧对/参数 → 完整 Scene) / `layered_reconstructor.py` (双层 SPN 解码) / `composite_reconstructor.py` (组合模板 SPN 解码) / `expert_registry.py` (结构专家注册/加载) / `structure_gate.py` (结构专家门控) / `structure_birth.py` (未知结构出生队列) / `structured_hypothesis.py` (统一结构化假设/后验对象) / `evaluator.py` / `inverse_app.py`, `src/inverse.py` 为薄 CLI 入口
 - 前端: `src/riesz.py` + `riesz_scale.py` + `feature_maps.py` (Riesz 小波), `src/color.py`, `src/utils.py`, `src/stereo.py` (单物体视差), `src/stereo_layers.py` + `src/contour_completion.py` + `src/joint_layer_optimizer.py` (逐层视差、轮廓补全与遮挡联合优化)
 - 测试: `tests/` (pytest; 单元黑盒 + slow 集成自检) / `src/riesz_selftest.py` (可视化脚本)
 - `docs/architecture.md` — 架构与机制决策录
@@ -22,7 +22,7 @@ python riesz_selftest.py     # Riesz 自检 + 自然图特征可视化
 python inverse.py            # 全量立体 (1296 帧对): 完整 Scene 重建
 ```
 
-选项: `--sigma-rel-floor` (核带宽下限)、`--replicates R` (训练集复制数, 调大触发增量训练)、`--no-cache` (跳过数据缓存)、`--no-refine-appearance` (跳过候选渲染残差精炼)、`--kind-topk {1,2,3}` (结构候选数, 默认 3 = 覆盖全部 kind)、`--n-objects {1,2}` (1 单图元 / 2 双图元遮挡前后层)、`--model-path` (模型 safetensors 存取, 默认 `artifacts/spn_kindgeo_<数据指纹>` 或 `spn_layered_<数据指纹>`; 存在即加载, K 不足则增量追加)。
+选项: `--sigma-rel-floor` (核带宽下限)、`--replicates R` (训练集复制数, 调大触发增量训练)、`--no-cache` (跳过数据缓存)、`--no-refine-appearance` (跳过候选渲染残差精炼)、`--kind-topk {1,2,3}` (结构候选数, 默认 3 = 覆盖全部 kind)、`--scene-family {single,layered,composite}` (单图元 / 独立前后层 / 附着组合模板)、`--n-objects {1,2}` (旧配置兼容)、`--model-path` (模型 safetensors 存取, 默认 `artifacts/spn_kindgeo_<数据指纹>`、`spn_layered_anchor_<数据指纹>` 或 `spn_composite_<数据指纹>`; 存在即加载, K 不足则增量追加)。
 
 - 通用结构学习: `src/structured_hypothesis.py` / `forward_model.py` / `generic_structure_gate.py` / `generic_expert_registry.py`; 非视觉验证域为 `src/toy_series_family.py` + `src/toy_series_expert.py`
 
@@ -74,7 +74,8 @@ print(decision.posterior, decision.needs_new_structure)
 ```
 
 `ExpertRegistry.default()` 要求对应结构模型已存在; 缺模型时默认
-fail closed，可用 `missing_ok=True` 显式跳过。
+fail closed，可用 `missing_ok=True` 显式跳过。组合模板模型训练完成后
+可用 `include_composite=True` 加入默认门控。
 
 ## 通用结构学习框架 (非视觉验证)
 
@@ -92,5 +93,7 @@ fail closed，可用 `missing_ok=True` 显式跳过。
 消融: 旧固定几何 top-3 为 kind 0.753 / s R² 0.332; 纯解析逐 kind 几何会使插值 s R² 降至 0.160 (掩码观测偏差不可忽略); 共享评分 + kind 后校准得到上述最优平衡。
 
 双层遮挡实验族 (`--n-objects 2 --replicates 1`, N=2916, sl8): StereoLayers 逐层视差 + JointLayerOptimizer 遮挡联合优化后, 插值 kind0/kind1 0.398/0.357、hue0/hue1 0.421/0.171、lcol/ldir 0.390/0.370; u0/v0/u1/v1 R² 0.537/0.711/0.466/0.432。联合模板负责中心/深度, 面积由可见区+轮廓补全 soft fusion 提供; 后层 s/z 仍为负 R², 遮挡几何仍未达到正式阈值。
+
+显式组合模板族 (`--scene-family composite`): `CompositeCodebook` 把两个已有图元组成 base + attached part; 附着件不再是独立前后层, 而是由底座按尺度比例、横向偏移、接触重叠和轻微深度差导出。首阶段使用全局立体锚点与 8 维几何直读目标, 用来验证“组合模板可训练、可渲染、可注册为结构专家”; 自动模板提案/文法搜索仍在后续阶段。
 
 依赖: mlx / matplotlib / numpy / pillow + 本地 path 依赖 [cga](../cga) (渲染引擎)。

@@ -42,6 +42,8 @@ class LayeredCodebook:
     )  # 2916
     SAMPLE_V = 3  # 3 = 修正前层 z 方向 (z0>z1) + 可分辨层间距
     RENDER_V = Codebook.RENDER_V
+    USES_LAYER_STATS = True
+    STEREO_V = "sl8"  # 联合中心/深度 + soft-fusion 面积
     TARGET_IDX = (1, 2, 3, 4, 7, 8, 9, 10)
     CLASS_IDX = (0, 6, 5, 11, 12, 13)  # k0,k1,h0,h1,lcol,ldir
     CAT_SIZES = (3, 3, 6, 6, 3, 3)

@@ -260,7 +260,7 @@ class SceneReconstructor:
     ) -> tuple[mx.array, mx.array, RieszWavelet | None]:
         """左/右帧 → (模型特征 (1,V), 立体统计 (1,3), Riesz 工作区)。"""
         vec, rw = app.extractor.of_frame(fl, rw)
-        if app.cfg.n_objects == 2:
+        if app.codebook.USES_LAYER_STATS:
             stat = StereoLayers().estimate(fl, fr)
             vec = mx.concatenate(
                 [vec, StereoLayers.scaled(mx.array([stat]))[0]]

@@ -133,13 +133,31 @@ z 大者近), 加入残差限幅、轮廓 soft fusion 和遮挡联合模板优�
 最终分工是联合模板给中心/深度, 可见区+补全给面积, 前层全残差,
 后层 u/v 残差 + s/z 锚点。
 
+### 4.1 显式组合模板 (CompositeCodebook)
+
+组合模板学习的第一阶段不是开放式“发明几何”, 而是把已有 primitive 的
+稳定组合声明为新的结构专家。`CompositeCodebook` 与 `LayeredCodebook`
+使用相同的 14 维参数契约 (两个 kind/hue + 共享光照), 但生成机制不同:
+
+- **layered**: 两个物体的位置/尺度/深度独立采样, z 序决定遮挡;
+- **composite**: 0 号图元是底座, 1 号图元由底座导出 —— 尺度比例
+  0.35–0.75, 顶部接触带少量嵌入, 横向偏移有限, 深度只有轻微抖动。
+
+首阶段 composite 使用全局 `[ẑ,area]` 立体统计和 8 维几何直读目标,
+复用 MixtureSPN/Evaluator/StructuredHypothesis; 它不启用遮挡逐层锚点,
+避免把“一个组合物”误拆成两个独立层。该专家验证组合模板可训练、可
+渲染、可注册; 后续复杂度惩罚、残差提案和文法搜索都建立在这个显式
+组合族上。
+
 ## 5. 模块结构 (一文件一类)
 
 ```mermaid
 flowchart LR
     subgraph CORE["逆渲染族"]
         CBK["codebook.py<br/>组合采样+投影+调色板"] --> FEX["feature_extractor.py<br/>11 通道"] --> DCFG["inverse_config.py"]
-        CBK & FEX & DCFG --> DB["data_builder.py"] & EV["evaluator.py"]
+        LCB["layered_codebook.py<br/>独立前后层"] --> DCFG
+        CCB["composite_codebook.py<br/>附着组合模板"] --> DCFG
+        CBK & FEX & DCFG & LCB & CCB --> DB["data_builder.py"] & EV["evaluator.py"]
         DB & EV --> APP["inverse_app.py: InverseApp"]
         APP --> REC["scene_reconstructor.py<br/>帧对/参数 → 完整 cga.Scene"]
         REC --> EST["structured_hypothesis.py<br/>MAP + 候选后验 + top 假设"]
@@ -163,18 +181,28 @@ InverseConfig 防环。
 - 模型: MixtureSPN.save/load —— 参数张量 (含白化基 basis (V,D),
   全量约 1.5GB) + rel_floor/cat_sizes/n_stratum 入 JSON 明文头;
   Utils.st_metadata 可查;
-  默认路径 `spn_kindgeo_<数据指纹>` 或 `spn_layered_anchor_<数据指纹>`
-  (`kindgeo` 标记 kind-conditioned s 残差, `anchor` 标记双层逐层锚点契约)。
+  默认路径 `spn_kindgeo_<数据指纹>`、`spn_layered_anchor_<数据指纹>`
+  或 `spn_composite_<数据指纹>`
+  (`kindgeo` 标记 kind-conditioned s 残差, `anchor` 标记双层逐层锚点契约,
+  `composite` 标记附着组合模板)。
 
 ## 7. 待办 (按价值排序; 已对照实例级架构审判, 过时项已删)
 
-1. **双层渲染残差**: 联合模板已稳定中心先验, 下一步在 StructuredHypothesis
+1. **组合模板全量标定**: 训练 `spn_composite`, 与 single/layered
+   共同门控, 验证附着组合与独立前后层可由残差区分
+2. **模板复杂度门控**: 为结构专家加入参数数/描述长度惩罚, 防止更复杂
+   组合模板仅靠自由度占优
+3. **残差驱动模板提案**: 未知结构残差区域 → primitive 拟合 → 组合候选
+   → StructureBirthRequest
+4. **有界模板文法**: attach/layer/repeat/mirror, 限制深度、部件数与
+   最小证据数
+5. **双层渲染残差**: 联合模板已稳定中心先验, 下一步在 StructuredHypothesis
    候选中启用分层渲染残差, 重点验证后层 s/z 与遮挡边界
-2. **池外光照探针**: held-out 光向/光色, 验证完整 Scene 输出的光照
+6. **池外光照探针**: held-out 光向/光色, 验证完整 Scene 输出的光照
    泛化与反照率×光照联合可识别性
-3. **逐 kind PPCA 似然比**: kind 形状线索的度量升级 (各类自己的
+7. **逐 kind PPCA 似然比**: kind 形状线索的度量升级 (各类自己的
    白化子空间 + log|det| 修正, 跨类密度可比化)
-4. **大数据逃生通道** (N~10⁴ 触发): PCA 基按内在维度截断 /
+8. **大数据逃生通道** (N~10⁴ 触发): PCA 基按内在维度截断 /
    子样本估基全量套用 / ANN 索引加速推理 / 压缩蒸馏 —— EM 若
    回归只能作实例模型的对照验证压缩件 (退化通道病历见 §2.2)
 

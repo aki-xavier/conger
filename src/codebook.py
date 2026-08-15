@@ -56,6 +56,9 @@ class Codebook:
     # 渲染管线版本 (入缓存指纹): 2 = cga 引擎线性空间光照 + 输出端
     # sRGB 编码 (cga d71e0e4 重构, 着色数值变化, 几何不变)
     RENDER_V = 2
+    # 几何统计契约: 单物体全局 [ẑ,area]; 由 DataBuilder/Reconstructor 共用
+    USES_LAYER_STATS = False
+    STEREO_V = "st4"
     # 离散因子水平 (全笛卡尔积 = 3×6×3×3 = 162 组合)。水平数取最小
     # 可行集 (覆盖要求 = 组合存在即可), 省下的样本预算换连续复制数
     # R —— 稀疏平铺实测: R=1 时每组合 1 样本, 最近分量必色差失配,

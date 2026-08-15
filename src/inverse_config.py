@@ -31,6 +31,16 @@ class InverseConfig:
     kind_topk: int = 3
     # 场景结构支持集: 1 = 单图元; 2 = 双图元遮挡/前后层 (实验路径)
     n_objects: int = 1
+    # 显式结构族: None 时由 n_objects 兼容推导; composite 是双图元
+    # 附着组合模板 (区别于 layered 的独立前后层)
+    scene_family: str | None = None
+
+    def __post_init__(self) -> None:
+        """显式结构族自动同步旧 n_objects 兼容字段。"""
+        if self.scene_family in {"layered", "composite"}:
+            object.__setattr__(self, "n_objects", 2)
+        elif self.scene_family == "single":
+            object.__setattr__(self, "n_objects", 1)
 
     @property
     def feat_spec(self) -> tuple[tuple[str, str], ...]:
@@ -38,10 +48,17 @@ class InverseConfig:
         return FeatureExtractor.FEAT
 
     @property
+    def family(self) -> str:
+        """当前结构族 (scene_family 优先; n_objects 仅作旧配置兼容)。"""
+        if self.scene_family is not None:
+            return self.scene_family
+        return "layered" if self.n_objects == 2 else "single"
+
+    @property
     def n_feat(self) -> int:
         n = len(self.feat_spec) * Codebook.H * Codebook.W
-        # +单物体 [ẑ,area] 或双层 [u,v,z,area]×2
-        return n + (8 if self.n_objects == 2 else 2)
+        # single/composite 拼全局 [ẑ,area]; layered 拼逐层 [u,v,z,area]×2
+        return n + (8 if self.family == "layered" else 2)
 
     @property
     def bg_color(self) -> int:

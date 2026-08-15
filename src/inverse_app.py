@@ -17,6 +17,8 @@ import matplotlib.pyplot as plt
 import mlx.core as mx
 
 from codebook import Codebook
+from composite_codebook import CompositeCodebook
+from composite_reconstructor import CompositeReconstructor
 from data_builder import DataBuilder
 from evaluator import LAYERED_TARGET_COLS, Evaluator
 from feature_extractor import FeatureExtractor
@@ -32,30 +34,36 @@ class InverseApp:
 
     def __init__(self, cfg: InverseConfig):
         self.cfg = cfg
-        if cfg.n_objects == 1:
+        if cfg.family == "single":
             self.codebook = Codebook(cfg)
-        elif cfg.n_objects == 2:
+        elif cfg.family == "layered":
             self.codebook = LayeredCodebook(cfg)
+        elif cfg.family == "composite":
+            self.codebook = CompositeCodebook(cfg)
         else:
-            raise ValueError(f"n_objects 只支持 1/2, 得到 {cfg.n_objects}")
+            raise ValueError(f"未知 scene_family: {cfg.family}")
         self.extractor = FeatureExtractor(cfg)
         self.data = DataBuilder(cfg, self.codebook, self.extractor)
 
     def default_model_path(self, artifacts: Path | None = None) -> Path:
         """当前结构专家配置的默认模型路径 (注册表/训练共用契约)。"""
         root = artifacts or Path(__file__).resolve().parent.parent / "artifacts"
-        prefix = "spn_kindgeo" if self.cfg.n_objects == 1 else "spn_layered_anchor"
+        prefix = {
+            "single": "spn_kindgeo",
+            "layered": "spn_layered_anchor",
+            "composite": "spn_composite",
+        }[self.cfg.family]
         return root / f"{prefix}_{self.data.cache_tag()}.safetensors"
 
     def run(self) -> None:
         cfg = self.cfg
         artifacts = Path(__file__).resolve().parent.parent / "artifacts"
         n_tr = self.codebook.N_COMBO * cfg.replicates
-        n_test = self.codebook.N_COMBO * (1 if cfg.n_objects > 1 else 2)
+        n_test = self.codebook.N_COMBO * (1 if cfg.family != "single" else 2)
         print(
             f"[1/4] 数据: train {n_tr} / 插值 {n_test} / 外推 {n_test} "
             f"({self.codebook.N_COMBO} 组合×R={cfg.replicates}, "
-            f"n_objects={cfg.n_objects}, 逐块缓存)"
+            f"n_objects={cfg.n_objects}, family={cfg.family}, 逐块缓存)"
         )
         f_tr, p_tr, f_ti, p_ti, f_te, p_te, s_tr, s_ti, s_te = self.data.build(
             cfg.replicates
@@ -77,7 +85,7 @@ class InverseApp:
         t_tr = DataBuilder.targets(p_tr)
         c_tr = DataBuilder.scene_classes(p_tr)
 
-        if cfg.n_objects == 1:
+        if cfg.family == "single":
             # 强几何观测 + 残差学习: ẑ/ŝ 直接拼特征会被白化稀释
             # (1/647 维, 实测 z R² 0.02); 模型改为学 z−ẑ 与 s−ŝ 的
             # 标定残差 (可见面≠中心偏差的形状相关部分), 推理后加回
@@ -93,6 +101,8 @@ class InverseApp:
                 axis=1,
             )
 
+        elif cfg.family == "composite":
+            pass  # 组合模板先直读 8 个几何量, 验证组合关系可学习性
         else:
             t_tr = LayeredReconstructor.residual_targets(t_tr, c_tr, s_tr)
 
@@ -126,7 +136,7 @@ class InverseApp:
                 scene_classes=c_tr,
                 cat_sizes=(
                     SceneReconstructor.CAT_SIZES
-                    if cfg.n_objects == 1
+                    if cfg.family == "single"
                     else LayeredReconstructor.CAT_SIZES
                 ),
             )
@@ -136,7 +146,7 @@ class InverseApp:
         print("[3/4] 推理: 连续目标条件期望 + 场景因子条件后验")
         ti_raw, ci_p, _ = net.predict(f_ti)
         te_raw, ce_p, _ = net.predict(f_te)
-        if cfg.n_objects == 1:
+        if cfg.family == "single":
             # 残差加回 kind-conditioned 代理 → 物理量 (s,z)
             ki0 = mx.argmax(ci_p[:, : Codebook.N_KIND], axis=1)
             ke0 = mx.argmax(ce_p[:, : Codebook.N_KIND], axis=1)
@@ -153,6 +163,12 @@ class InverseApp:
                 ce_pred = self.refine_scenes(ce_pred, ce_p, s_te, p_te, "外推")
                 ti_pred = SceneReconstructor.targets_from_params(ci_pred)
                 te_pred = SceneReconstructor.targets_from_params(ce_pred)
+        elif cfg.family == "composite":
+            ci_pred = CompositeReconstructor.params(ti_raw, ci_p)
+            ce_pred = CompositeReconstructor.params(te_raw, ce_p)
+            ti_pred = CompositeReconstructor.targets_from_params(ci_pred)
+            te_pred = CompositeReconstructor.targets_from_params(ce_pred)
+            print("  附着组合: SPN 直读几何报告模式 (组合模板一阶段)")
         else:
             ci_pred = LayeredReconstructor.params(ti_raw, ci_p, s_ti)
             ce_pred = LayeredReconstructor.params(te_raw, ce_p, s_te)
@@ -182,8 +198,10 @@ class InverseApp:
 
         公开推理接口: 帧必须是 Codebook.make_renderer 训练 rig 的渲染
         输出; 返回值包含 SPN 后验、渲染候选后验和 top 场景假设。"""
-        if self.cfg.n_objects == 2:
+        if self.cfg.family == "layered":
             return LayeredReconstructor.from_frames(self, net, fl, fr)
+        if self.cfg.family == "composite":
+            return CompositeReconstructor.from_frames(self, net, fl, fr)
         return SceneReconstructor.from_frames(
             self,
             net,
@@ -307,10 +325,10 @@ class InverseApp:
     # ── 自检断言 (阈值依据见各注释; 2026-08-12 全量运行标定) ────────
 
     def self_check(self, mi: dict[str, float], me: dict[str, float]) -> None:
-        if self.cfg.n_objects == 2:
+        if self.cfg.family in {"layered", "composite"}:
             vals = list(mi.values()) + list(me.values())
-            assert all(math.isfinite(v) for v in vals), "双层指标含 NaN/inf"
-            print("layered: 报告模式 ✓ (遮挡/双层支持集; 阈值待几何标定)")
+            assert all(math.isfinite(v) for v in vals), "多图元指标含 NaN/inf"
+            print(f"{self.cfg.family}: 报告模式 ✓ (结构族自检; 阈值待标定)")
             return
         # 全 kind 结构精炼实测 (kindgeo 契约, 2026-08-13): 插值 0.753;
         # 阈值防结构候选机制崩溃 (随机 0.33), 不把当前上限硬编码过紧
@@ -387,9 +405,21 @@ class InverseApp:
             type=int,
             default=1,
             choices=(1, 2),
-            help="场景支持集: 1 单图元 / 2 双图元遮挡前后层 (实验)",
+            help="兼容旧配置的对象数: 1 单图元 / 2 多图元 "
+            "(新配置优先用 --scene-family)",
+        )
+        ap.add_argument(
+            "--scene-family",
+            default=None,
+            choices=("single", "layered", "composite"),
+            help="结构族: single 单图元 / layered 独立前后层 / composite 附着组合模板",
         )
         a = ap.parse_args()
+        n_objects = (
+            (1 if a.scene_family == "single" else 2)
+            if a.scene_family is not None
+            else a.n_objects
+        )
         return InverseConfig(
             use_cache=not a.no_cache,
             model_path=Path(a.model_path) if a.model_path else None,
@@ -397,5 +427,6 @@ class InverseApp:
             replicates=a.replicates,
             refine_appearance=not a.no_refine_appearance,
             kind_topk=a.kind_topk,
-            n_objects=a.n_objects,
+            n_objects=n_objects,
+            scene_family=a.scene_family,
         )
