@@ -66,7 +66,9 @@ class StructureGate(GenericStructureGate):
             name: replace(
                 est,
                 residual=self.residual(est, fl, fr),
-                geometry_cost=geometry_costs.get(name, 0.0),
+                geometry_cost=geometry_costs.get(
+                    est.geometry_family or name, 0.0
+                ),
             )
             for name, est in estimates.items()
         }

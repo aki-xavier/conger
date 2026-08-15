@@ -210,8 +210,13 @@ class CompositeTemplateProposer:
                         family = (
                             "layered" if rule.operation == "layer" else "composite"
                         )
-                        parent_family = (
+                        default_parent = (
                             "layered" if rule.operation == "attach" else "single"
+                        )
+                        parent_family = (
+                            case.structure_id
+                            if case.structure_id != "unknown"
+                            else default_parent
                         )
                         delta = {
                             "relation": rule.operation,

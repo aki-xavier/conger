@@ -308,6 +308,14 @@ winning structure, `TemplateProposal` 携带 `parent_family` 与具体 delta。
 `ExpertRegistry.train_and_register(..., codebook_cls=...)` 显式训练并
 注册。该阶段不会自动训练, 也不会把单次异常提案提升为模板。
 
+真实样本闭环 (`child_template_benchmark.py`): 两个受约束 attach 渲染样本
+先由提案器产生候选, learner 得到 `composite → composite_attach_5025cfd1`
+(scale_ratio 0.43–0.62, lateral_ratio -0.02–0.02, part kind/hue 固定),
+动态子 Codebook 覆盖 162 组合并以 R=4/648 样本训练。3 个同分布
+held-out 样本上, 子模板对父 composite 门控 3/3 (posterior
+0.815/0.699/0.599)。该验收证明“提案→约束→子模板→注册→门控”闭环,
+但仍是受控合成漂移, 不等于开放世界自动模板发明。
+
 **实施顺序**:
 1. 类别契约序列化 + padding 扩展;
 2. StructuredHypothesis 新颖性证据;

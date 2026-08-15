@@ -30,6 +30,7 @@ class StructuredHypothesis:
     params: tuple[float, ...] = ()
     spn_posterior: mx.array | None = None
     structure_id: str = "unknown"
+    geometry_family: str | None = None  # 门控几何证据所属基础结构族
     representation: Any = None
     candidate_params: tuple[tuple[float, ...], ...] = ()
     candidate_scores: mx.array | None = None
