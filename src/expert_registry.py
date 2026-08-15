@@ -11,6 +11,7 @@ import mlx.core as mx
 from inverse_app import InverseApp
 from inverse_config import InverseConfig
 from mixture_spn import MixtureSPN
+from structure_birth import StructureBirthController, StructureBirthRequest
 from structure_gate import StructureDecision, StructureGate
 
 
@@ -48,10 +49,13 @@ class ExpertRegistry:
         self,
         experts: Mapping[str, SceneExpert],
         gate: StructureGate | None = None,
+        birth_controller: StructureBirthController | None = None,
     ):
         assert experts, "至少注册一个结构专家"
         self.experts = dict(experts)
         self.gate = gate or StructureGate()
+        self.birth_controller = birth_controller
+        self.last_birth_request: StructureBirthRequest | None = None
 
     @classmethod
     def from_configs(
@@ -85,10 +89,41 @@ class ExpertRegistry:
             configs["layered"] = InverseConfig(n_objects=2, replicates=1)
         return cls.from_configs(configs, artifacts=artifacts)
 
+    def register(
+        self,
+        name: str,
+        cfg: InverseConfig | None = None,
+        expert: SceneExpert | None = None,
+        artifacts: Path | None = None,
+    ) -> SceneExpert:
+        """注册已训练专家; 传 expert 或 cfg 之一。"""
+        if expert is None:
+            if cfg is None:
+                raise ValueError("register 需要 expert 或 cfg")
+            expert = SceneExpert.from_config(name, cfg, artifacts)
+        self.experts[name] = expert
+        return expert
+
+    def train_and_register(
+        self,
+        name: str,
+        cfg: InverseConfig,
+        artifacts: Path | None = None,
+    ) -> SceneExpert:
+        """结构出生后的显式候选训练: InverseApp.run() → 加载 → 注册。"""
+        InverseApp(cfg).run()
+        return self.register(name, cfg=cfg, artifacts=artifacts)
+
     def decide(self, fl: mx.array, fr: mx.array) -> StructureDecision:
         """同一左右图交给全部专家, 再按重建残差门控结构。"""
         estimates = {
             name: expert.reconstruct(fl, fr)
             for name, expert in self.experts.items()
         }
-        return self.gate.decide(estimates, fl, fr)
+        decision = self.gate.decide(estimates, fl, fr)
+        self.last_birth_request = (
+            self.birth_controller.observe(decision, fl, fr)
+            if self.birth_controller is not None
+            else None
+        )
+        return decision

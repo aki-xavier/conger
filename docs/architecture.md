@@ -217,8 +217,9 @@ appearance_topk/tolerance`。默认应先关闭, 单物体验证稳定后再考�
 目标是把增量学习从“同分布样本追加”扩展到“世界支持集增长”。分两层
 处理, 不把所有变化塞进一个固定结构模型。当前已实现机制层:
 类别契约序列化与 padding 扩展、SceneEstimate 新颖性证据、结构专家
-注册/加载 (`ExpertRegistry`)、渲染残差门控; 结构出生目前只返回检测
-信号, 不自动发明 renderer 不支持的新几何模板。
+注册/加载 (`ExpertRegistry`)、渲染残差门控、未知结构出生队列
+(`StructureBirthController`); 出生请求只聚合证据并要求可渲染结构族,
+不自动发明 renderer 不支持的新几何模板。
 
 **类别动态学习** (参数维度不变, 类别数变化):
 `MixtureSPN` 需显式序列化 `cat_sizes`/因子名/结构版本; 新类别出现时
@@ -242,7 +243,8 @@ p(S,M\mid I)\propto p(I\mid S,M)p(S\mid M)p(M)
 1. 类别契约序列化 + padding 扩展;
 2. SceneEstimate 新颖性证据;
 3. 结构专家渲染残差门控;
-4. 未知结构出生检测。
+4. 未知结构出生检测与候选训练注册 (`StructureBirthRequest` →
+   `train_and_register`)。
 非参数贝叶斯/DP 暂不进入主线 —— 当前实例记忆下, 阈值式类别出生
 更简单且可测试。
 
