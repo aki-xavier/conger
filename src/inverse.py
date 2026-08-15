@@ -42,7 +42,7 @@ s 重校准) × 外观候选渲染残差后验 → StructuredHypothesis (MAP cga
   StructureGate     结构专家渲染残差门控 + 未知结构出生检测
   ExpertRegistry    单/双层结构专家注册、按需加载与统一调用
   StructureBirth    未知结构样本队列、出生请求与训练后注册
-  CompositeTemplateProposer 残差驱动的附着组合模板提案
+  CompositeTemplateProposer 有界模板文法 + 残差驱动组合提案
   Evaluator         回归 + 完整场景因子分类指标
   InverseApp        主流程 (训练/推理/评估/可视化/自检)
 

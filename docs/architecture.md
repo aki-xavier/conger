@@ -149,6 +149,13 @@ z 大者近), 加入残差限幅、轮廓 soft fusion 和遮挡联合模板优�
 渲染、可注册; 后续复杂度惩罚、残差提案和文法搜索都建立在这个显式
 组合族上。
 
+首版全量实测 (R=1, N=2916, cp1, 无渲染残差精炼): 插值 kind0/kind1
+0.513/0.360, hue0/hue1 0.498/0.364, lcol/ldir 0.405/0.372;
+u0/v0/u1/v1 R² 0.907/0.516/0.891/0.794。外推 u/v R²
+0.929/0.733/0.915/0.833。s/z 仍弱 (插值 s0/z0 R² -0.528/-0.692),
+说明组合关系可学习位置与部分类别, 但全局 `[ẑ,area]` 锚点不足以恢复
+组合内部尺寸/深度; 后续需要部分感知几何锚点或候选渲染残差。
+
 ## 5. 模块结构 (一文件一类)
 
 ```mermaid
@@ -194,8 +201,8 @@ InverseConfig 防环。
    门控分数加入惩罚, 防止更复杂组合模板仅靠自由度占优
 3. **残差驱动模板提案** (已接入): 未知结构残差 → 有限组合候选
    → StructureBirthRequest; 下一步把候选空间升级为有界文法
-4. **有界模板文法**: attach/layer/repeat/mirror, 限制深度、部件数与
-   最小证据数
+4. **有界模板文法** (已接入): attach/layer/repeat/mirror, 限制深度、
+   部件数与候选网格; 下一步用真实出生样本统计提案命中率
 5. **双层渲染残差**: 联合模板已稳定中心先验, 下一步在 StructuredHypothesis
    候选中启用分层渲染残差, 重点验证后层 s/z 与遮挡边界
 6. **池外光照探针**: held-out 光向/光色, 验证完整 Scene 输出的光照
@@ -287,10 +294,11 @@ p(M\mid I)\propto p(M)\exp(-\mathrm{score}_M/T)
 **残差驱动模板提案** (当前实现): `StructureBirthController` 可挂载
 `TemplateProposer`; 达到 `min_cases` 后, `StructureBirthRequest` 除原始
 证据外还携带 `TemplateProposal` 列表。视觉侧的
-`CompositeTemplateProposer` 以最佳估计的 0 号图元为底座, 枚举 part
-kind/hue、尺度比例和横向偏移, 用同一 renderer 的左右图前景加权残差
-排序。提案只是候选描述, 不自动训练、不自动注册; 这样既保留结构出生的
-主动性, 又保留 renderer/训练数据边界。
+`CompositeTemplateProposer` 以最佳估计的 0 号图元为底座, 由
+`TemplateGrammar` 枚举 depth≤2 的 attach/layer/mirror/repeat 规则,
+再枚举有限的尺度比例、横向偏移和 hue, 用同一 renderer 的左右图前景
+加权残差排序。提案只是候选描述, 不自动训练、不自动注册; 这样既保留
+结构出生的主动性, 又保留 renderer/训练数据边界。
 
 **通用化验证**: `StructuredHypothesis` / `ForwardModel` /
 `GenericStructureGate` / `GenericExpertRegistry` 已把上述机制从视觉
