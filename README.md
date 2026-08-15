@@ -7,7 +7,7 @@ SPN 逆渲染研究: 左右两张二维立体图像 → Riesz 全分辨率特征
 ## 模块 (一文件一类)
 
 - 模型: `src/mixture_spn.py` (MixtureSPN)
-- demo 族: `src/inverse_config.py` (配置唯一家) / `codebook.py` (单物体组合采样+投影) / `layered_codebook.py` (双物体遮挡/前后层) / `feature_extractor.py` (11 通道) / `data_builder.py` / `scene_reconstructor.py` (帧对/参数 → 完整 Scene) / `layered_reconstructor.py` (双层 SPN 解码) / `expert_registry.py` (结构专家注册/加载) / `structure_gate.py` (结构专家门控) / `structure_birth.py` (未知结构出生队列) / `scene_estimate.py` (Scene 后验返回对象) / `evaluator.py` / `inverse_app.py`, `src/inverse.py` 为薄 CLI 入口
+- demo 族: `src/inverse_config.py` (配置唯一家) / `codebook.py` (单物体组合采样+投影) / `layered_codebook.py` (双物体遮挡/前后层) / `feature_extractor.py` (11 通道) / `data_builder.py` / `scene_reconstructor.py` (帧对/参数 → 完整 Scene) / `layered_reconstructor.py` (双层 SPN 解码) / `expert_registry.py` (结构专家注册/加载) / `structure_gate.py` (结构专家门控) / `structure_birth.py` (未知结构出生队列) / `structured_hypothesis.py` (统一结构化假设/后验对象) / `evaluator.py` / `inverse_app.py`, `src/inverse.py` 为薄 CLI 入口
 - 前端: `src/riesz.py` + `riesz_scale.py` + `feature_maps.py` (Riesz 小波), `src/color.py`, `src/utils.py`, `src/stereo.py` (单物体视差), `src/stereo_layers.py` + `src/contour_completion.py` + `src/joint_layer_optimizer.py` (逐层视差、轮廓补全与遮挡联合优化)
 - 测试: `tests/` (pytest; 单元黑盒 + slow 集成自检) / `src/riesz_selftest.py` (可视化脚本)
 - `docs/architecture.md` — 架构与机制决策录
@@ -56,7 +56,7 @@ SPN 初估的 4 因子后验; `candidate_posterior` 是渲染残差联合后验,
 - 同一结构内增加样本: `MixtureSPN.add()` 追加实例分量并冻结旧 PCA 基;
 - 新类别: `expand_categories()` 对旧分量 padding, `cat_sizes/n_stratum`
   随模型序列化;
-- 新颖性: `SceneEstimate` 返回责任度、后验熵、渲染残差与综合诊断分;
+- 新颖性: `StructuredHypothesis` 返回责任度、后验熵、渲染残差与综合诊断分;
 - 新结构: `StructureGate` 按各专家重建残差计算 `p(structure|images)`,
   `StructureBirthController` 聚合连续不兼容样本并生成
   `StructureBirthRequest`; 调用方提供新结构配置后可用
@@ -80,8 +80,9 @@ fail closed，可用 `missing_ok=True` 显式跳过。
 
 `StructuredHypothesis`/`ForwardModel`/`GenericStructureGate`/
 `GenericExpertRegistry` 把视觉管线抽象为: 观测编码 → 结构内参数估计 →
-正向模拟残差 → 结构后验 → 出生请求。`SceneEstimate` 现在是
-`StructuredHypothesis` 的兼容别名, 视觉 `StructureGate` 继承通用门控。
+正向模拟残差 → 结构后验 → 出生请求。视觉路径直接使用
+`StructuredHypothesis`, 其中 `scene` 字段承载 `cga.Scene`; 视觉
+`StructureGate` 继承通用门控。
 `ToySeriesFamily` 提供线性/振荡两个非视觉专家; 测试验证线性/振荡输入
 被正确门控, 二次机制触发 `StructureBirthRequest`。这说明 MixtureSPN、
 结构门控和出生控制不依赖图像或 cga。

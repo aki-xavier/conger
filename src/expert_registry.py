@@ -2,17 +2,19 @@
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Mapping
 
 import mlx.core as mx
 
+from generic_structure_gate import GenericStructureDecision
 from inverse_app import InverseApp
 from inverse_config import InverseConfig
 from mixture_spn import MixtureSPN
 from structure_birth import StructureBirthController, StructureBirthRequest
-from structure_gate import StructureDecision, StructureGate
+from structure_gate import StructureGate
+from structured_hypothesis import StructuredHypothesis
 
 
 @dataclass
@@ -37,8 +39,8 @@ class SceneExpert:
             raise FileNotFoundError(f"结构专家 {name} 缺模型: {path}")
         return cls(name=name, app=app, net=MixtureSPN.load(path))
 
-    def reconstruct(self, fl: mx.array, fr: mx.array):
-        """左右图 → 该结构下的 SceneEstimate。"""
+    def reconstruct(self, fl: mx.array, fr: mx.array) -> StructuredHypothesis:
+        """左右图 → 该结构下的 StructuredHypothesis。"""
         return self.app.reconstruct_scene(self.net, fl, fr)
 
 
@@ -114,7 +116,7 @@ class ExpertRegistry:
         InverseApp(cfg).run()
         return self.register(name, cfg=cfg, artifacts=artifacts)
 
-    def decide(self, fl: mx.array, fr: mx.array) -> StructureDecision:
+    def decide(self, fl: mx.array, fr: mx.array) -> GenericStructureDecision:
         """同一左右图交给全部专家, 再按重建残差门控结构。"""
         estimates = {
             name: expert.reconstruct(fl, fr)

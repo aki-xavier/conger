@@ -11,9 +11,9 @@ import mlx.core as mx
 from codebook import Codebook
 from evaluator import Evaluator
 from inverse_config import InverseConfig
-from scene_estimate import SceneEstimate
 from scene_reconstructor import SceneReconstructor
 from stereo import StereoDepth
+from structured_hypothesis import StructuredHypothesis
 
 
 def test_scene_param_decoding() -> None:
@@ -110,7 +110,7 @@ def test_topk_structure_refinement_and_marginals() -> None:
     assert scores.shape == posterior.shape == (108,)
     assert temperature > 0.0
     assert abs(float(mx.sum(posterior)) - 1.0) < 1e-5
-    estimate = SceneEstimate(
+    estimate = StructuredHypothesis(
         scene=cb.to_scene(pred),
         params=pred,
         spn_posterior=mx.zeros(15),

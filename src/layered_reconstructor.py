@@ -1,4 +1,4 @@
-"""LayeredReconstructor: 双图元遮挡场景的参数解码与 SceneEstimate。"""
+"""LayeredReconstructor: 双图元遮挡场景的参数解码与 StructuredHypothesis。"""
 
 from __future__ import annotations
 
@@ -7,8 +7,8 @@ from typing import TYPE_CHECKING
 import mlx.core as mx
 
 from layered_codebook import LayeredCodebook
-from scene_estimate import SceneEstimate, SceneHypothesis
 from scene_reconstructor import SceneReconstructor
+from structured_hypothesis import HypothesisCandidate, StructuredHypothesis
 
 if TYPE_CHECKING:
     from inverse_app import InverseApp
@@ -21,7 +21,7 @@ class LayeredReconstructor:
 
     第一版遮挡路径不做渲染残差精炼: 双层遮挡下外观候选为
     kind²×hue²×lcol×ldir=2916, 需要先建立分层几何/遮挡校验。
-    返回 SceneEstimate 保留 SPN 联合后验, 避免过早 argmax。"""
+    返回 StructuredHypothesis 保留 SPN 联合后验, 避免过早 argmax。"""
 
     CAT_SIZES = LayeredCodebook.CAT_SIZES
     # 前层通常完整可见, 允许全部残差; 后层被遮挡, 低密度 SPN 的
@@ -131,25 +131,25 @@ class LayeredReconstructor:
         fl: mx.array,
         fr: mx.array,
         rw: RieszWavelet | None = None,
-    ) -> SceneEstimate:
-        """左/右二维图像 → 双层 SceneEstimate (SPN 后验, 无渲染精炼)。"""
+    ) -> StructuredHypothesis:
+        """左/右二维图像 → 双层 StructuredHypothesis (SPN 后验, 无渲染精炼)。"""
         f, stats, _ = SceneReconstructor.frame_features(app, fl, fr, rw)
         t, cat_p, r = net.predict(f)
         prm = cls.params(t, cat_p, stats)[0]
         rn, ent, novelty = SceneReconstructor.novelty_metrics(
             cat_p[0], r, cls.CAT_SIZES, None
         )
-        return SceneEstimate(
+        return StructuredHypothesis(
             scene=app.codebook.to_scene(prm),
             params=prm,
             spn_posterior=cat_p[0],
             candidate_params=(prm,),
-            hypotheses=(SceneHypothesis(prm, 1.0, None),),
+            hypotheses=(HypothesisCandidate(prm, 1.0, None),),
             factor_sizes=LayeredCodebook.CAT_SIZES,
             factor_indices=LayeredCodebook.CLASS_IDX,
             responsibility_max=float(mx.max(r)),
             posterior_entropy=ent,
-            render_residual=None,
+            residual=None,
             novelty_score=novelty,
         )
 

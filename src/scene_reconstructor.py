@@ -3,7 +3,7 @@
 这里“完整”指当前场景族的全部可控自由度: kind / u / v / s / z /
 图元色相 / 光色 / 光向。相机、背景、环境光、材质和渲染 rig 由
 Codebook 的固定配置提供 (训练与推理同 renderer)。推理输出不是单个
-MAP 点, 而是 SceneEstimate: MAP Scene + 候选渲染残差 + 联合后验。
+MAP 点, 而是 StructuredHypothesis: MAP Scene + 候选渲染残差 + 联合后验。
 """
 
 from __future__ import annotations
@@ -15,9 +15,9 @@ import mlx.core as mx
 from cga.engine import PerspectiveCamera, Renderer, Scene
 
 from codebook import Codebook
-from scene_estimate import SceneEstimate, SceneHypothesis
 from stereo import StereoDepth
 from stereo_layers import StereoLayers
+from structured_hypothesis import HypothesisCandidate, StructuredHypothesis
 
 if TYPE_CHECKING:
     from inverse_app import InverseApp
@@ -218,7 +218,7 @@ class SceneReconstructor:
         候选返回前再按各自 kind 重校准 s (保留 SPN 学到的残差)。后验
         log 形式 = −残差/T + log P(kind|SPN)。温度
         T=max(2·best_residual,1) 用最佳残差估计观测噪声尺度并随
-        SceneEstimate 返回; 该后验表达候选间相对置信度, 不声称绝对
+        StructuredHypothesis 返回; 该后验表达候选间相对置信度, 不声称绝对
         校准。"""
         if renderer is None or cam_l is None or cam_r is None:
             renderer, cam_l, cam_r = Codebook.make_renderer()
@@ -280,8 +280,8 @@ class SceneReconstructor:
         rw: RieszWavelet | None = None,
         refine: bool = True,
         kind_topk: int = 3,
-    ) -> SceneEstimate:
-        """左/右二维图像 → SceneEstimate (MAP Scene + 候选联合后验)。
+    ) -> StructuredHypothesis:
+        """左/右二维图像 → StructuredHypothesis (MAP Scene + 候选联合后验)。
 
         渲染 rig 保持 Codebook.make_renderer 的训练配置。refine=True 时
         kind_topk 个结构候选 × 54 个外观候选进入渲染残差联合后验;
@@ -293,15 +293,15 @@ class SceneReconstructor:
             cat_p[0], r, cls.CAT_SIZES, None
         )
         if not refine:
-            return SceneEstimate(
+            return StructuredHypothesis(
                 scene=app.codebook.to_scene(prm),
                 params=prm,
                 spn_posterior=cat_p[0],
                 candidate_params=(prm,),
-                hypotheses=(SceneHypothesis(prm, 1.0, None),),
+                hypotheses=(HypothesisCandidate(prm, 1.0, None),),
                 responsibility_max=float(mx.max(r)),
                 posterior_entropy=ent,
-                render_residual=None,
+                residual=None,
                 novelty_score=novelty,
             )
         prm, candidates, scores, posterior, temperature = cls.refine_scene(
@@ -315,14 +315,14 @@ class SceneReconstructor:
         )
         order = mx.argsort(posterior)[::-1][:5].tolist()
         hypotheses = tuple(
-            SceneHypothesis(candidates[i], float(posterior[i]), float(scores[i]))
+            HypothesisCandidate(candidates[i], float(posterior[i]), float(scores[i]))
             for i in order
         )
         best_residual = float(mx.min(scores))
         rn, ent, novelty = cls.novelty_metrics(
             cat_p[0], r, cls.CAT_SIZES, best_residual
         )
-        return SceneEstimate(
+        return StructuredHypothesis(
             scene=app.codebook.to_scene(prm),
             params=prm,
             spn_posterior=cat_p[0],
@@ -333,7 +333,7 @@ class SceneReconstructor:
             hypotheses=hypotheses,
             responsibility_max=float(mx.max(r)),
             posterior_entropy=ent,
-            render_residual=best_residual,
+            residual=best_residual,
             novelty_score=novelty,
         )
 

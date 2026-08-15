@@ -6,22 +6,22 @@ import pytest
 from codebook import Codebook
 from expert_registry import ExpertRegistry, SceneExpert
 from inverse_config import InverseConfig
-from scene_estimate import SceneEstimate
 from scene_reconstructor import SceneReconstructor
+from structured_hypothesis import StructuredHypothesis
 
 
 class _DummyExpert:
-    def __init__(self, estimate: SceneEstimate):
+    def __init__(self, estimate: StructuredHypothesis):
         self.estimate = estimate
         self.calls = 0
 
-    def reconstruct(self, fl: mx.array, fr: mx.array) -> SceneEstimate:
+    def reconstruct(self, fl: mx.array, fr: mx.array) -> StructuredHypothesis:
         self.calls += 1
         return self.estimate
 
 
-def _estimate(params: tuple[float, ...], cb: Codebook) -> SceneEstimate:
-    return SceneEstimate(cb.to_scene(params), params, mx.zeros(15))
+def _estimate(params: tuple[float, ...], cb: Codebook) -> StructuredHypothesis:
+    return StructuredHypothesis(cb.to_scene(params), params, mx.zeros(15))
 
 
 def test_registry_calls_all_experts_and_gates() -> None:

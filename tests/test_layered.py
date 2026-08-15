@@ -8,7 +8,7 @@ from data_builder import DataBuilder
 from inverse_config import InverseConfig
 from layered_codebook import LayeredCodebook
 from layered_reconstructor import LayeredReconstructor
-from scene_estimate import SceneEstimate
+from structured_hypothesis import StructuredHypothesis
 
 
 def test_layered_sampling_and_scene() -> None:
@@ -40,7 +40,7 @@ def test_layered_targets_and_decoding() -> None:
     prm = LayeredReconstructor.params(t[:1], cat_p)[0]
     got = mx.array(prm, dtype=mx.float32)
     assert bool(mx.allclose(got, p[0], atol=1e-5))
-    est = SceneEstimate(
+    est = StructuredHypothesis(
         scene=cb.to_scene(prm),
         params=prm,
         spn_posterior=cat_p[0],

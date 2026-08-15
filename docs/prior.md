@@ -78,7 +78,7 @@ $$\hat{S} = argmax_S P(S|I) = argmax_S P(I|S) \cdot P(S)$$
    几何，候选返回前再按各自的面积→尺寸代理重校准 s，避免结构选择被
    观测掩码偏差污染。
 
-输出契约是 `StructuredHypothesis` (视觉别名 `SceneEstimate`): MAP
+输出契约是 `StructuredHypothesis`: MAP
 `cga.Scene` 只是展示层; 同时保留 SPN
 原始后验、全 kind × 54 外观候选的渲染残差与联合后验、top 完整
 场景假设。设计原则: 硬物理约束进支持集, 统计规律进概率/核带宽,

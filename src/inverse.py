@@ -19,7 +19,7 @@
 视差几何观测 (ẑ, 掩码面积) → 实例级组装。
 推理: 责任度 (特征证据) → E[u,v,s−ŝ,z−ẑ|特征] +
 P(kind,hue,lcol,ldir|特征) → 全 kind 结构候选 (共享几何评分 + 逐 kind
-s 重校准) × 外观候选渲染残差后验 → SceneEstimate (MAP cga.Scene +
+s 重校准) × 外观候选渲染残差后验 → StructuredHypothesis (MAP cga.Scene +
 候选不确定性)。
 评估: 物理单位 RMSE/R² (基线 = 训练均值) + 4 个场景因子分类准确率,
 插值 vs 外推分裂。
@@ -27,7 +27,7 @@ s 重校准) × 外观候选渲染残差后验 → SceneEstimate (MAP cga.Scene 
 结构 (无游离状态: 配置集中 InverseConfig, 机制分属各类):
   Codebook          单物体场景参数 ⇄ cga 场景 (领域常量 + 组合采样)
   LayeredCodebook   双物体遮挡/前后层采样与 cga 场景
-  LayeredReconstructor 双层 SPN 输出 → SceneEstimate
+  LayeredReconstructor 双层 SPN 输出 → StructuredHypothesis
   InverseConfig     运行配置 (开关唯一家, 派生量全 property)
   FeatureExtractor  帧 → 全分辨率特征向量
   DataBuilder       数据构建 (缓存) + 目标组装
@@ -35,7 +35,7 @@ s 重校准) × 外观候选渲染残差后验 → SceneEstimate (MAP cga.Scene 
   JointLayerOptimizer 模板×遮挡×视差的联合几何优化
   MixtureSPN        实例级浅混合 + 连续/离散条件推理
   SceneReconstructor 帧对/模型输出 → 候选渲染后验 → 完整 cga.Scene
-  SceneEstimate     StructuredHypothesis 视觉别名: MAP Scene + 候选后验
+  StructuredHypothesis 统一结构化假设: MAP Scene + 候选后验
   StructureGate     结构专家渲染残差门控 + 未知结构出生检测
   ExpertRegistry    单/双层结构专家注册、按需加载与统一调用
   StructureBirth    未知结构样本队列、出生请求与训练后注册

@@ -4,13 +4,13 @@ import mlx.core as mx
 
 from codebook import Codebook
 from inverse_config import InverseConfig
-from scene_estimate import SceneEstimate
 from scene_reconstructor import SceneReconstructor
 from structure_gate import StructureGate
+from structured_hypothesis import StructuredHypothesis
 
 
-def _estimate(params: tuple[float, ...], cb: Codebook) -> SceneEstimate:
-    return SceneEstimate(
+def _estimate(params: tuple[float, ...], cb: Codebook) -> StructuredHypothesis:
+    return StructuredHypothesis(
         scene=cb.to_scene(params),
         params=params,
         spn_posterior=mx.zeros(15),

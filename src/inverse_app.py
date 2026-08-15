@@ -178,7 +178,7 @@ class InverseApp:
         fl: mx.array,
         fr: mx.array,
     ):
-        """左/右二维图像 → SceneEstimate (MAP Scene + 结构化候选后验)。
+        """左/右二维图像 → StructuredHypothesis (MAP Scene + 结构化候选后验)。
 
         公开推理接口: 帧必须是 Codebook.make_renderer 训练 rig 的渲染
         输出; 返回值包含 SPN 后验、渲染候选后验和 top 场景假设。"""

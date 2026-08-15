@@ -6,17 +6,15 @@
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from dataclasses import replace
-from typing import Mapping
 
 import mlx.core as mx
 
 from generic_structure_gate import GenericStructureDecision, GenericStructureGate
-from scene_estimate import SceneEstimate
 from scene_reconstructor import SceneReconstructor
 from stereo import StereoDepth
-
-StructureDecision = GenericStructureDecision
+from structured_hypothesis import StructuredHypothesis
 
 
 class StructureGate(GenericStructureGate):
@@ -36,7 +34,7 @@ class StructureGate(GenericStructureGate):
 
     @staticmethod
     def residual(
-        estimate: SceneEstimate,
+        estimate: StructuredHypothesis,
         fl: mx.array,
         fr: mx.array,
     ) -> float:
@@ -53,11 +51,11 @@ class StructureGate(GenericStructureGate):
 
     def decide(
         self,
-        estimates: Mapping[str, SceneEstimate],
+        estimates: Mapping[str, StructuredHypothesis],
         fl: mx.array,
         fr: mx.array,
-    ) -> StructureDecision:
-        """多结构 SceneEstimate → 结构后验 + 最佳估计 + 出生信号。"""
+    ) -> GenericStructureDecision:
+        """多结构 StructuredHypothesis → 结构后验 + 最佳估计 + 出生信号。"""
         with_residual = {
             name: replace(est, residual=self.residual(est, fl, fr))
             for name, est in estimates.items()

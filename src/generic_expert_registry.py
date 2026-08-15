@@ -2,7 +2,8 @@
 
 from __future__ import annotations
 
-from typing import Callable, Mapping, Protocol
+from collections.abc import Callable, Mapping
+from typing import Protocol
 
 from generic_structure_gate import GenericStructureDecision, GenericStructureGate
 from structure_birth import StructureBirthController, StructureBirthRequest

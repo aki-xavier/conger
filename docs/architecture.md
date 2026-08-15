@@ -28,7 +28,7 @@ flowchart LR
     W --> ASM["实例级组装 (无 EM):<br/>逐 kind 分层, 分量=全部样本,<br/>类内 tied 方差, 均匀权重"]
     ASM --> PRED["predict: 责任度 (特征证据)<br/>E[u,v,s−ŝ,z−ẑ|x] ≡ 分层核回归<br/>P(kind,hue,lcol,ldir|x)=场景因子后验"]
     PRED --> REFINE["SceneReconstructor 渲染残差精炼:<br/>top-k kind × hue6×光色3×光向3<br/>左右图前景加权 RGB MSE"]
-    REFINE --> POST["SceneEstimate:<br/>MAP Scene + 候选分数 + 联合后验<br/>+ top 完整场景假设"]
+    REFINE --> POST["StructuredHypothesis:<br/>MAP Scene + 候选分数 + 联合后验<br/>+ top 完整场景假设"]
     POST --> EVAL["Evaluator: 物理单位 RMSE/R²<br/>+ kind/hue/lcol/ldir 分类准确率<br/>插值 vs 外推分裂"]
     POST --> RECON["完整预测参数 → to_scene → cga.Scene"]
 ```
@@ -105,7 +105,7 @@ p_{\mathrm{SPN}}(k\mid I)\exp(-\ell(k,h,c,d)/T),
 
 `m_v` 与立体前景掩码同定义 (色度能量 + 背景亮度对比)。几何误差
 对外观候选近似同置, 不改变排序; 结构候选则通过渲染残差与 SPN
-结构先验共同裁决。公开接口返回 `SceneEstimate`: MAP Scene、SPN 原始
+结构先验共同裁决。公开接口返回 `StructuredHypothesis`: MAP Scene、SPN 原始
 后验、候选残差/联合后验和 top 完整场景假设, 不再把歧义硬压成单点。
 
 ## 4. 遮挡/前后层实验族 (LayeredCodebook)
@@ -142,7 +142,7 @@ flowchart LR
         CBK & FEX & DCFG --> DB["data_builder.py"] & EV["evaluator.py"]
         DB & EV --> APP["inverse_app.py: InverseApp"]
         APP --> REC["scene_reconstructor.py<br/>帧对/参数 → 完整 cga.Scene"]
-        REC --> EST["scene_estimate.py<br/>MAP + 候选后验 + top 假设"]
+        REC --> EST["structured_hypothesis.py<br/>MAP + 候选后验 + top 假设"]
         APP --> ENTRY["inverse.py 薄入口"]
     end
     subgraph FRONT["前端"]
@@ -168,7 +168,7 @@ InverseConfig 防环。
 
 ## 7. 待办 (按价值排序; 已对照实例级架构审判, 过时项已删)
 
-1. **双层渲染残差**: 联合模板已稳定中心先验, 下一步在 SceneEstimate
+1. **双层渲染残差**: 联合模板已稳定中心先验, 下一步在 StructuredHypothesis
    候选中启用分层渲染残差, 重点验证后层 s/z 与遮挡边界
 2. **池外光照探针**: held-out 光向/光色, 验证完整 Scene 输出的光照
    泛化与反照率×光照联合可识别性
@@ -199,7 +199,7 @@ G_{t+1}=\arg\min_G\sum_j q_t(A_j)\ell(I,R(G,A_j))
 双层路径还需把层分配/遮挡边界作为条件变量, 每轮几何更新后重新计算。
 
 **预期实现边界** (若未来启用): 新增独立 `scene_em_refiner.py`, 不改
-Codebook/DataBuilder/MixtureSPN.fit/add; `SceneEstimate` 增加迭代轨迹
+Codebook/DataBuilder/MixtureSPN.fit/add; `StructuredHypothesis` 增加迭代轨迹
 (MAP、残差、外观后验熵、收敛状态); 配置加 `em_refine/max_iters/
 appearance_topk/tolerance`。默认应先关闭, 单物体验证稳定后再考虑双层。
 
@@ -216,7 +216,7 @@ appearance_topk/tolerance`。默认应先关闭, 单物体验证稳定后再考�
 
 目标是把增量学习从“同分布样本追加”扩展到“世界支持集增长”。分两层
 处理, 不把所有变化塞进一个固定结构模型。当前已实现机制层:
-类别契约序列化与 padding 扩展、SceneEstimate 新颖性证据、结构专家
+类别契约序列化与 padding 扩展、StructuredHypothesis 新颖性证据、结构专家
 注册/加载 (`ExpertRegistry`)、渲染残差门控、未知结构出生队列
 (`StructureBirthController`); 出生请求只聚合证据并要求可渲染结构族,
 不自动发明 renderer 不支持的新几何模板。
@@ -241,7 +241,7 @@ p(S,M\mid I)\propto p(I\mid S,M)p(S\mid M)p(M)
 
 **实施顺序**:
 1. 类别契约序列化 + padding 扩展;
-2. SceneEstimate 新颖性证据;
+2. StructuredHypothesis 新颖性证据;
 3. 结构专家渲染残差门控;
 4. 未知结构出生检测与候选训练注册 (`StructureBirthRequest` →
    `train_and_register`)。
@@ -252,8 +252,9 @@ p(S,M\mid I)\propto p(I\mid S,M)p(S\mid M)p(M)
 `GenericStructureGate` / `GenericExpertRegistry` 已把上述机制从视觉
 命名中剥离; `ToySeriesFamily`/`ToySeriesExpert` 提供线性/振荡两个
 非视觉结构专家, 测试验证正确机制门控和二次机制出生请求。视觉路径
-已迁回通用接口: `SceneEstimate` 是 `StructuredHypothesis` 兼容别名,
-视觉 `StructureGate` 继承 `GenericStructureGate`, 只保留图像残差适配。
+已迁回通用接口: 视觉路径直接返回 `StructuredHypothesis`, `scene` 字段
+承载 `cga.Scene`; 视觉 `StructureGate` 继承 `GenericStructureGate`,
+只保留图像残差适配。
 
 已删过时项 (2026-08-13 审判): DP-SVI 自动定 K (实例模型 K=N, 无
 分量数可定) / online EM (无 EM 可 online, 需求并入逃生通道) /

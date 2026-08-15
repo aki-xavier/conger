@@ -1,8 +1,8 @@
 """StructuredHypothesis: 领域无关的结构化假设/后验返回对象。
 
-视觉路径中的 `SceneEstimate` 是本类的兼容别名: `scene` 与
-`representation` 指向同一领域对象。候选参数/因子后验/新颖性证据均为
-通用字段, 玩具域可选择留空。
+视觉路径直接把 `scene` 字段用作 `cga.Scene` 表示; 非视觉域可改用
+`representation`。候选参数/因子后验/新颖性证据均为通用字段, 领域可以
+按需要留空。
 """
 
 from __future__ import annotations
@@ -26,7 +26,7 @@ class HypothesisCandidate:
 class StructuredHypothesis:
     """一个结构专家对一个观测的参数化解释与不确定性。"""
 
-    scene: Any = None  # 视觉兼容字段; 与 representation 互为镜像
+    scene: Any = None  # 视觉领域对象; 与 representation 互为镜像
     params: tuple[float, ...] = ()
     spn_posterior: mx.array | None = None
     structure_id: str = "unknown"
@@ -41,7 +41,6 @@ class StructuredHypothesis:
     responsibility_max: float | None = None
     posterior_entropy: float | None = None
     residual: float | None = None
-    render_residual: float | None = None  # 视觉兼容别名
     novelty_score: float | None = None
     structure_posterior: float | None = None
     structure_posteriors: dict[str, float] | None = None
@@ -51,10 +50,6 @@ class StructuredHypothesis:
             object.__setattr__(self, "representation", self.scene)
         if self.scene is None and self.representation is not None:
             object.__setattr__(self, "scene", self.representation)
-        if self.render_residual is None and self.residual is not None:
-            object.__setattr__(self, "render_residual", self.residual)
-        if self.residual is None and self.render_residual is not None:
-            object.__setattr__(self, "residual", self.render_residual)
 
     def factor_marginals(self) -> tuple[mx.array, ...]:
         """候选后验 → 离散因子边缘后验 (视觉单/双层及其他领域通用)。"""
