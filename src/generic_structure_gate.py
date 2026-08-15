@@ -23,8 +23,8 @@ class GenericStructureGate:
     """用正向残差 + 模板复杂度计算 p(structure|observation)。
 
     `residuals` 保持原始正向模型误差, 供未知结构出生判断; `scores`
-    是结构选择用的复杂度惩罚分数:
-    score = residual + complexity_weight × template_complexity。
+    是结构选择分数:
+    score = residual + complexity_weight × C + geometry_weight × G。
     """
 
     def __init__(
@@ -33,11 +33,13 @@ class GenericStructureGate:
         posterior_floor: float | None = None,
         priors: Mapping[str, float] | None = None,
         complexity_weight: float = 0.0,
+        geometry_weight: float = 0.0,
     ):
         self.birth_residual = birth_residual
         self.posterior_floor = posterior_floor
         self.priors = dict(priors or {})
         self.complexity_weight = complexity_weight
+        self.geometry_weight = geometry_weight
 
     def decide(
         self, estimates: Mapping[str, StructuredHypothesis]
@@ -49,7 +51,9 @@ class GenericStructureGate:
             assert est.residual is not None, f"专家 {name} 未提供正向残差"
             residuals[name] = est.residual
             scores[name] = (
-                est.residual + self.complexity_weight * (est.complexity or 0.0)
+                est.residual
+                + self.complexity_weight * (est.complexity or 0.0)
+                + self.geometry_weight * (est.geometry_cost or 0.0)
             )
         best_raw = min(residuals.values())
         best_score = min(scores.values())

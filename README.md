@@ -7,7 +7,7 @@ SPN 逆渲染研究: 左右两张二维立体图像 → Riesz 全分辨率特征
 ## 模块 (一文件一类)
 
 - 模型: `src/mixture_spn.py` (MixtureSPN)
-- demo 族: `src/inverse_config.py` (配置唯一家) / `codebook.py` (单物体组合采样+投影) / `layered_codebook.py` (双物体遮挡/前后层) / `composite_codebook.py` (双图元附着组合模板) / `composite_geometry.py` (base/part 部分感知几何锚点) / `feature_extractor.py` (11 通道) / `data_builder.py` / `scene_reconstructor.py` (帧对/参数 → 完整 Scene) / `layered_reconstructor.py` (双层 SPN 解码) / `composite_reconstructor.py` (组合模板 SPN 解码) / `expert_registry.py` (结构专家注册/加载) / `structure_gate.py` (结构专家门控) / `structure_birth.py` (未知结构出生队列) / `template_grammar.py` + `composite_template_proposer.py` (有界文法与残差驱动组合模板提案) / `structured_hypothesis.py` (统一结构化假设/后验对象) / `evaluator.py` / `inverse_app.py`, `src/inverse.py` 为薄 CLI 入口
+- demo 族: `src/inverse_config.py` (配置唯一家) / `codebook.py` (单物体组合采样+投影) / `layered_codebook.py` (双物体遮挡/前后层) / `composite_codebook.py` (双图元附着组合模板) / `composite_geometry.py` (base/part 部分感知几何锚点) / `structure_geometry.py` (观测级结构几何证据) / `feature_extractor.py` (11 通道) / `data_builder.py` / `scene_reconstructor.py` (帧对/参数 → 完整 Scene) / `layered_reconstructor.py` (双层 SPN 解码) / `composite_reconstructor.py` (组合模板 SPN 解码) / `expert_registry.py` (结构专家注册/加载) / `structure_gate.py` (结构专家门控) / `structure_benchmark.py` (跨结构门控基准) / `structure_birth.py` (未知结构出生队列) / `template_grammar.py` + `composite_template_proposer.py` (有界文法与残差驱动组合模板提案) / `structured_hypothesis.py` (统一结构化假设/后验对象) / `evaluator.py` / `inverse_app.py`, `src/inverse.py` 为薄 CLI 入口
 - 前端: `src/riesz.py` + `riesz_scale.py` + `feature_maps.py` (Riesz 小波), `src/color.py`, `src/utils.py`, `src/stereo.py` (单物体视差), `src/stereo_layers.py` + `src/contour_completion.py` + `src/joint_layer_optimizer.py` (逐层视差、轮廓补全与遮挡联合优化)
 - 测试: `tests/` (pytest; 单元黑盒 + slow 集成自检) / `src/riesz_selftest.py` (可视化脚本)
 - `docs/architecture.md` — 架构与机制决策录
@@ -69,16 +69,29 @@ SPN 初估的 4 因子后验; `candidate_posterior` 是渲染残差联合后验,
 ```python
 from expert_registry import ExpertRegistry
 
-registry = ExpertRegistry.default()  # 已训练的单物体 + 双层专家
+registry = ExpertRegistry.default()  # 已训练的 single + layered + composite
 decision = registry.decide(fl, fr)
 estimate = decision.estimate
 print(decision.posterior, decision.needs_new_structure)
 ```
 
 `ExpertRegistry.default()` 要求对应结构模型已存在; 缺模型时默认
-fail closed，可用 `missing_ok=True` 显式跳过。组合模板模型训练完成后
-可用 `include_composite=True` 加入默认门控。若要让未知结构请求自动
-携带组合候选:
+fail closed，可用 `missing_ok=True` 显式跳过。结构门控分数由渲染残差、
+模板复杂度和 `StructureGeometry` 的观测级几何证据组成: 单模板紧致性、
+前后层视差/空间分离、组合接触线分别约束 single/layered/composite。
+
+联合门控基准:
+
+```bash
+uv run python src/structure_benchmark.py \
+  --samples-per-family 3 --seed 1234 --no-single-refine
+```
+
+两个随机种子 (各 3×3=9 样本) 均为 9/9, 合计 18/18; 默认含单物体
+渲染精炼的注册表在每族 1 样本探针上也为 3/3。注意这是小样本
+结构门控验收, 不是场景内参数精度指标。
+
+若要让未知结构请求自动携带组合候选:
 
 ```python
 from composite_template_proposer import CompositeTemplateProposer

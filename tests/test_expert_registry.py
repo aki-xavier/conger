@@ -41,6 +41,21 @@ def test_registry_calls_all_experts_and_gates() -> None:
     assert experts["good"].calls == experts["bad"].calls == 1
 
 
+def test_default_registry_includes_three_structure_families(monkeypatch) -> None:
+    """默认注册表应包含 single/layered/composite 三个已训练结构专家。"""
+    cb = Codebook(InverseConfig())
+    prm = (0.0, 72.0, 72.0, 0.45, 3.2, 2.0, 0.0, 1.0)
+    monkeypatch.setattr(
+        SceneExpert,
+        "from_config",
+        classmethod(lambda cls, name, cfg, artifacts=None: _DummyExpert(
+            _estimate(prm, cb)
+        )),
+    )
+    registry = ExpertRegistry.default()
+    assert set(registry.experts) == {"single", "layered", "composite"}
+
+
 def test_missing_expert_model_fails_closed(tmp_path) -> None:
     """缺模型时默认 fail closed; missing_ok 时才跳过。"""
     cfg = InverseConfig(n_objects=1, model_path=tmp_path / "none.safetensors")

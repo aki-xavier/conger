@@ -40,8 +40,10 @@ s 重校准) × 外观候选渲染残差后验 → StructuredHypothesis (MAP cga
   MixtureSPN        实例级浅混合 + 连续/离散条件推理
   SceneReconstructor 帧对/模型输出 → 候选渲染后验 → 完整 cga.Scene
   StructuredHypothesis 统一结构化假设: MAP Scene + 候选后验
-  StructureGate     结构专家渲染残差门控 + 未知结构出生检测
-  ExpertRegistry    单/双层结构专家注册、按需加载与统一调用
+  StructureGate     结构专家渲染残差/几何证据门控 + 未知结构出生检测
+  StructureGeometry 观测级 single/layered/composite 结构兼容性
+  ExpertRegistry    单/双层/组合结构专家注册、按需加载与统一调用
+  StructureBenchmark 跨结构真实模型门控基准
   StructureBirth    未知结构样本队列、出生请求与训练后注册
   CompositeTemplateProposer 有界模板文法 + 残差驱动组合提案
   Evaluator         回归 + 完整场景因子分类指标

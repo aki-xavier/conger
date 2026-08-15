@@ -14,6 +14,7 @@ import mlx.core as mx
 from generic_structure_gate import GenericStructureDecision, GenericStructureGate
 from scene_reconstructor import SceneReconstructor
 from stereo import StereoDepth
+from structure_geometry import StructureGeometry
 from structured_hypothesis import StructuredHypothesis
 
 
@@ -26,12 +27,14 @@ class StructureGate(GenericStructureGate):
         posterior_floor: float | None = 0.6,
         priors: Mapping[str, float] | None = None,
         complexity_weight: float = 1.0,
+        geometry_weight: float = 5000.0,
     ):
         super().__init__(
             birth_residual=birth_residual,
             posterior_floor=posterior_floor,
             priors=priors,
             complexity_weight=complexity_weight,
+            geometry_weight=geometry_weight,
         )
 
     @staticmethod
@@ -58,8 +61,13 @@ class StructureGate(GenericStructureGate):
         fr: mx.array,
     ) -> GenericStructureDecision:
         """多结构 StructuredHypothesis → 结构后验 + 最佳估计 + 出生信号。"""
+        geometry_costs = StructureGeometry.costs(fl, fr)
         with_residual = {
-            name: replace(est, residual=self.residual(est, fl, fr))
+            name: replace(
+                est,
+                residual=self.residual(est, fl, fr),
+                geometry_cost=geometry_costs.get(name, 0.0),
+            )
             for name, est in estimates.items()
         }
         return super().decide(with_residual)

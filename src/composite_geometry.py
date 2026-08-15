@@ -52,10 +52,10 @@ class CompositeGeometry:
         return (4.0 if t.shape == 2 else math.pi) * (t.r * q) ** 2
 
     @classmethod
-    def _split_templates(
+    def split_score(
         cls, fg: mx.array
-    ) -> tuple[LayerTemplate, LayerTemplate] | None:
-        """前景掩码 → (base 模板, part 模板), 搜索 attached_on_top 接触线。"""
+    ) -> tuple[float, LayerTemplate, LayerTemplate] | None:
+        """前景掩码 → (组合得分, base 模板, part 模板)。"""
         fgd = cls._down(fg)
         h, w = fgd.shape
         idx = Utils.nonzero(fgd.reshape(-1))
@@ -100,7 +100,15 @@ class CompositeGeometry:
                 best = (score, base, part)
         if best is None:
             return None
-        return best[1], best[2]
+        return best
+
+    @classmethod
+    def _split_templates(
+        cls, fg: mx.array
+    ) -> tuple[LayerTemplate, LayerTemplate] | None:
+        """前景掩码 → (base 模板, part 模板), 丢弃组合得分。"""
+        out = cls.split_score(fg)
+        return None if out is None else (out[1], out[2])
 
     @staticmethod
     def _window_centroid(
