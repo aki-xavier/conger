@@ -329,6 +329,13 @@ mirror/repeat (R=8) held-out 均 3/3; layer 子模板使用受限全残差解码
 原 single/layered/composite 联合门控两个种子仍保持 18/18, 且 lateral
 样本不会被误判为 layered。
 
+多子模板混合门控 (`mixed_template_benchmark.py`): 从 4 个 manifest 恢复
+attach/layer/mirror/repeat 子模板并与 3 个父模板共同门控; 7 专家 × 2
+样本 (N=14) 总准确率 8/14。attach child 2/2, mirror/repeat 各 1/2,
+layer child 0/2; 正确 winner posterior 均值 0.767, 错误 0.432。主要
+混淆是 layer child→single 和 repeat child→mirror child, 表明平铺专家
+混合在父子模板并存时会过置信, 需要层级门控/操作判别校准。
+
 **实施顺序**:
 1. 类别契约序列化 + padding 扩展;
 2. StructuredHypothesis 新颖性证据;

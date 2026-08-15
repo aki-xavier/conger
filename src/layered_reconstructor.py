@@ -144,6 +144,7 @@ class LayeredReconstructor:
             params=prm,
             spn_posterior=cat_p[0],
             geometry_family=app.codebook.GEOMETRY_FAMILY,
+            template_delta=app.codebook.TEMPLATE_LINEAGE.delta,
             candidate_params=(prm,),
             hypotheses=(HypothesisCandidate(prm, 1.0, None),),
             factor_sizes=LayeredCodebook.CAT_SIZES,

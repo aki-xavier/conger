@@ -31,6 +31,7 @@ class StructuredHypothesis:
     spn_posterior: mx.array | None = None
     structure_id: str = "unknown"
     geometry_family: str | None = None  # 门控几何证据所属基础结构族
+    template_delta: dict[str, Any] | None = None  # 子模板约束 (门控证据)
     representation: Any = None
     candidate_params: tuple[tuple[float, ...], ...] = ()
     candidate_scores: mx.array | None = None

@@ -49,6 +49,7 @@ s 重校准) × 外观候选渲染残差后验 → StructuredHypothesis (MAP cga
   TemplateDeltaLearner 提案聚类与子模板约束学习
   ChildTemplateWorkflow 子模板物化、显式训练与注册编排
   StructureBenchmark 跨结构真实模型门控基准
+  MixedTemplateBenchmark 多子模板混合注册表门控基准
   StructureBirth    未知结构样本队列、出生请求与训练后注册
   CompositeTemplateProposer 有界模板文法 + 残差驱动组合提案
   Evaluator         回归 + 完整场景因子分类指标

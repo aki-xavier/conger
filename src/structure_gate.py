@@ -62,14 +62,22 @@ class StructureGate(GenericStructureGate):
     ) -> GenericStructureDecision:
         """多结构 StructuredHypothesis → 结构后验 + 最佳估计 + 出生信号。"""
         geometry_costs = StructureGeometry.costs(fl, fr)
-        with_residual = {
-            name: replace(
+        stats_cache = {}
+        with_residual = {}
+        for name, est in estimates.items():
+            family = est.geometry_family or name
+            geometry_cost = geometry_costs.get(family, 0.0)
+            if est.template_delta:
+                if family not in stats_cache:
+                    stats_cache[family] = StructureGeometry.geometry_stats(
+                        family, fl, fr
+                    )
+                geometry_cost += StructureGeometry.delta_cost(
+                    family, est.template_delta, stats_cache[family]
+                )
+            with_residual[name] = replace(
                 est,
                 residual=self.residual(est, fl, fr),
-                geometry_cost=geometry_costs.get(
-                    est.geometry_family or name, 0.0
-                ),
+                geometry_cost=geometry_cost,
             )
-            for name, est in estimates.items()
-        }
         return super().decide(with_residual)

@@ -12,6 +12,7 @@ import math
 
 import mlx.core as mx
 
+from codebook import Codebook
 from composite_geometry import CompositeGeometry
 from joint_layer_optimizer import JointLayerOptimizer
 from lateral_composite_geometry import LateralCompositeGeometry
@@ -96,6 +97,71 @@ class StructureGeometry:
         depth_gap = abs(st[2] - st[6])
         depth_cost = min(max((depth_gap - 0.15) / 0.5, 0.0), 1.0)
         return min(max(split_cost + 0.7 * depth_cost, 0.0), 1.0)
+
+    @staticmethod
+    def geometry_stats(
+        family: str, fl: mx.array, fr: mx.array
+    ) -> tuple[float, ...] | None:
+        """按基础结构族返回 [u,v,z,area]×2 统计 (single 无)。"""
+        if family == "layered":
+            return StereoLayers.estimate(fl, fr)
+        if family == "composite":
+            return CompositeGeometry.estimate(fl, fr)
+        if family == "lateral":
+            return LateralCompositeGeometry.estimate(fl, fr)
+        return None
+
+    @classmethod
+    def delta_cost(
+        cls,
+        family: str,
+        delta: dict[str, object] | None,
+        stats: tuple[float, ...] | None,
+    ) -> float:
+        """子模板 delta 与观测几何的匹配/特异性代价。"""
+        if not delta or stats is None:
+            return 0.0
+        u0, _, z0, a0, u1, _, z1, a1 = stats
+        q0 = math.sqrt(max(a0, 1e-8)) * (Codebook.CAM_Z - z0) / Codebook.FX
+        q1 = math.sqrt(max(a1, 1e-8)) * (Codebook.CAM_Z - z1) / Codebook.FX
+        observed_ratio = q1 / max(q0, 1e-8)
+        cost = 0.0
+
+        def range_term(
+            key: str, observed: float, default: tuple[float, float]
+        ) -> float:
+            if key not in delta:
+                return 0.0
+            lo, hi = (float(x) for x in delta[key])
+            outside = max(lo - observed, observed - hi, 0.0)
+            width = max(hi - lo, 1e-6)
+            default_width = default[1] - default[0]
+            # 窄支持集在匹配时获得负对数证据; 超出范围则强惩罚
+            return 0.25 * math.log(width / default_width) + 4.0 * outside
+
+        cost += range_term("scale_ratio", observed_ratio, (0.35, 0.75))
+        x_gap = abs(
+            (u1 - u0) * (Codebook.CAM_Z - (z0 + z1) / 2.0) / Codebook.FX
+        )
+        lateral = x_gap / max(q0 + q1, 1e-8)
+        relation = str(delta.get("relation", ""))
+        if relation in {"mirror", "repeat"}:
+            spacing = 5.0 if relation == "mirror" else 7.5
+            cost += range_term(
+                "period_ratio",
+                lateral / spacing,
+                (0.0, 0.30),
+            )
+        else:
+            lateral_default = (
+                (-0.25, 0.25)
+                if relation == "attach"
+                else (-0.75, 0.75)
+            )
+            cost += range_term(
+                "lateral_ratio", lateral, lateral_default
+            )
+        return cost
 
     @classmethod
     def costs(cls, fl: mx.array, fr: mx.array) -> dict[str, float]:

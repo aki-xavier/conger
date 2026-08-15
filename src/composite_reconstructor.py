@@ -160,6 +160,7 @@ class CompositeReconstructor(LayeredReconstructor):
             params=prm,
             spn_posterior=cat_p[0],
             geometry_family=app.codebook.GEOMETRY_FAMILY,
+            template_delta=app.codebook.TEMPLATE_LINEAGE.delta,
             candidate_params=candidates,
             candidate_scores=scores,
             candidate_posterior=posterior,
