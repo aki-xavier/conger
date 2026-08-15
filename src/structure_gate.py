@@ -32,8 +32,8 @@ class StructureGate:
 
     def __init__(
         self,
-        birth_residual: float = 25.0,
-        posterior_floor: float = 0.8,
+        birth_residual: float = 10000.0,
+        posterior_floor: float = 0.6,
         priors: Mapping[str, float] | None = None,
     ):
         self.birth_residual = birth_residual

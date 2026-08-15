@@ -41,6 +41,12 @@ class InverseApp:
         self.extractor = FeatureExtractor(cfg)
         self.data = DataBuilder(cfg, self.codebook, self.extractor)
 
+    def default_model_path(self, artifacts: Path | None = None) -> Path:
+        """当前结构专家配置的默认模型路径 (注册表/训练共用契约)。"""
+        root = artifacts or Path(__file__).resolve().parent.parent / "artifacts"
+        prefix = "spn_kindgeo" if self.cfg.n_objects == 1 else "spn_layered_anchor"
+        return root / f"{prefix}_{self.data.cache_tag()}.safetensors"
+
     def run(self) -> None:
         cfg = self.cfg
         artifacts = Path(__file__).resolve().parent.parent / "artifacts"
@@ -95,10 +101,7 @@ class InverseApp:
         # K < 当前数据量 → 增量追加新块
         # (白化基冻结, 见 MixtureSPN.add); K ≥ 数据量 → 直接用 (模型
         # 训练集是当前请求的超集)
-        prefix = "spn_kindgeo" if cfg.n_objects == 1 else "spn_layered_anchor"
-        model_path = cfg.model_path or artifacts / (
-            f"{prefix}_{self.data.cache_tag()}.safetensors"
-        )
+        model_path = cfg.model_path or self.default_model_path(artifacts)
         if model_path.exists():
             net = MixtureSPN.load(model_path)
             k_have = net.f_mu.shape[0]
