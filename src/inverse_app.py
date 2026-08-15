@@ -83,7 +83,7 @@ class InverseApp:
         elif cfg.family == "layered":
             print("  视差管线: 双层遮挡使用 StereoLayers 逐层统计")
         else:
-            print("  视差管线: 附着组合使用全局 StereoDepth [ẑ,area] 统计")
+            print("  视差管线: 附着组合使用 CompositeGeometry base/part 统计")
         t_tr = DataBuilder.targets(p_tr)
         c_tr = DataBuilder.scene_classes(p_tr)
 
@@ -104,7 +104,7 @@ class InverseApp:
             )
 
         elif cfg.family == "composite":
-            pass  # 组合模板先直读 8 个几何量, 验证组合关系可学习性
+            t_tr = CompositeReconstructor.residual_targets(t_tr, c_tr, s_tr)
         else:
             t_tr = LayeredReconstructor.residual_targets(t_tr, c_tr, s_tr)
 
@@ -166,11 +166,21 @@ class InverseApp:
                 ti_pred = SceneReconstructor.targets_from_params(ci_pred)
                 te_pred = SceneReconstructor.targets_from_params(ce_pred)
         elif cfg.family == "composite":
-            ci_pred = CompositeReconstructor.params(ti_raw, ci_p)
-            ce_pred = CompositeReconstructor.params(te_raw, ce_p)
+            ci_pred = CompositeReconstructor.params(ti_raw, ci_p, s_ti)
+            ce_pred = CompositeReconstructor.params(te_raw, ce_p, s_te)
             ti_pred = CompositeReconstructor.targets_from_params(ci_pred)
             te_pred = CompositeReconstructor.targets_from_params(ce_pred)
-            print("  附着组合: SPN 直读几何报告模式 (组合模板一阶段)")
+            if cfg.refine_composite:
+                print("  组合渲染残差精炼: top-k kind/hue/light 候选")
+                ci_pred = self.refine_composite_scenes(
+                    ci_pred, ci_p, p_ti, "插值"
+                )
+                ce_pred = self.refine_composite_scenes(
+                    ce_pred, ce_p, p_te, "外推"
+                )
+                ti_pred = CompositeReconstructor.targets_from_params(ci_pred)
+                te_pred = CompositeReconstructor.targets_from_params(ce_pred)
+            print("  附着组合: base/part 模板锚点 + SPN 有界残差")
         else:
             ci_pred = LayeredReconstructor.params(ti_raw, ci_p, s_ti)
             ce_pred = LayeredReconstructor.params(te_raw, ce_p, s_te)
@@ -203,7 +213,9 @@ class InverseApp:
         if self.cfg.family == "layered":
             return LayeredReconstructor.from_frames(self, net, fl, fr)
         if self.cfg.family == "composite":
-            return CompositeReconstructor.from_frames(self, net, fl, fr)
+            return CompositeReconstructor.from_frames(
+                self, net, fl, fr, refine=self.cfg.refine_composite
+            )
         return SceneReconstructor.from_frames(
             self,
             net,
@@ -242,6 +254,38 @@ class InverseApp:
                     fl,
                     fr,
                     kind_topk=self.cfg.kind_topk,
+                    renderer=renderer,
+                    cam_l=cam_l,
+                    cam_r=cam_r,
+                )[0]
+            )
+            if (i + 1) % 100 == 0:
+                print(f"    {name}: {i + 1}/{len(scene_pred)}")
+        return tuple(out)
+
+    def refine_composite_scenes(
+        self,
+        scene_pred: tuple[tuple[float, ...], ...],
+        cat_p: mx.array,
+        p_gt: mx.array,
+        name: str,
+    ) -> tuple[tuple[float, ...], ...]:
+        """对组合预测逐个做 top-k 结构/外观候选渲染残差精炼。"""
+        renderer, cam_l, cam_r = SceneReconstructor.rig()
+        out = []
+        for i, (prm, kp, gt) in enumerate(
+            zip(scene_pred, cat_p, p_gt.tolist(), strict=True)
+        ):
+            scene_gt = self.codebook.to_scene(tuple(float(x) for x in gt))
+            fl = renderer.render(scene_gt, cam_l)
+            fr = renderer.render(scene_gt, cam_r)
+            out.append(
+                CompositeReconstructor.refine_scene(
+                    self.codebook,
+                    prm,
+                    kp,
+                    fl,
+                    fr,
                     renderer=renderer,
                     cam_l=cam_l,
                     cam_r=cam_r,
@@ -396,6 +440,11 @@ class InverseApp:
             help="跳过 hue×lcol×ldir 候选渲染残差精炼 (快, 但光照输出退化)",
         )
         ap.add_argument(
+            "--refine-composite",
+            action="store_true",
+            help="组合模板启用 top-k kind/hue/light 渲染残差精炼 (默认关闭)",
+        )
+        ap.add_argument(
             "--kind-topk",
             type=int,
             default=3,
@@ -428,6 +477,7 @@ class InverseApp:
             sigma_rel_floor=a.sigma_rel_floor,
             replicates=a.replicates,
             refine_appearance=not a.no_refine_appearance,
+            refine_composite=a.refine_composite,
             kind_topk=a.kind_topk,
             n_objects=n_objects,
             scene_family=a.scene_family,

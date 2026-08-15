@@ -22,8 +22,9 @@ class CompositeCodebook(LayeredCodebook):
     """双图元附着组合场景族 (base + attached part) + 采样器。"""
 
     SAMPLE_V = 1  # 1 = attached_on_top 显式组合模板
-    USES_LAYER_STATS = False  # 组合物是单一对象, 用全局立体锚点
-    STEREO_V = "cp1"
+    USES_LAYER_STATS = False
+    USES_COMPOSITE_STATS = True  # base/part 模板拆分 + 部件视差
+    STEREO_V = "cp2"
     RELATION = "attached_on_top"
     TEMPLATE_COMPLEXITY = 1.5  # 两图元但附着关系降低描述长度
     SCALE_RATIO = (0.35, 0.75)  # part/base 尺度比

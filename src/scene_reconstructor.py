@@ -15,6 +15,7 @@ import mlx.core as mx
 from cga.engine import PerspectiveCamera, Renderer, Scene
 
 from codebook import Codebook
+from composite_geometry import CompositeGeometry
 from stereo import StereoDepth
 from stereo_layers import StereoLayers
 from structured_hypothesis import HypothesisCandidate, StructuredHypothesis
@@ -260,6 +261,12 @@ class SceneReconstructor:
     ) -> tuple[mx.array, mx.array, RieszWavelet | None]:
         """左/右帧 → (模型特征 (1,V), 立体统计 (1,3), Riesz 工作区)。"""
         vec, rw = app.extractor.of_frame(fl, rw)
+        if app.codebook.USES_COMPOSITE_STATS:
+            stat = CompositeGeometry.estimate(fl, fr)
+            vec = mx.concatenate(
+                [vec, StereoLayers.scaled(mx.array([stat]))[0]]
+            )
+            return vec[None, :], mx.array([stat], dtype=mx.float32), rw
         if app.codebook.USES_LAYER_STATS:
             stat = StereoLayers().estimate(fl, fr)
             vec = mx.concatenate(

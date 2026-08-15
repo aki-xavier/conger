@@ -27,6 +27,9 @@ class InverseConfig:
     # 渲染残差精炼: 结构候选使用逐 kind 尺寸代理, 外观枚举
     # hue×lcol×ldir, 并用左右图残差联合裁决 (完整 Scene 输出级)
     refine_appearance: bool = True
+    # composite 候选渲染残差精炼默认关闭: top-k kind/hue × 光照候选
+    # 成本高于单物体; 部分几何锚点应先承担主要结构约束
+    refine_composite: bool = False
     # 结构候选数: 3 = 覆盖全部 kind 支持集; 1/2 是低成本截断调试
     kind_topk: int = 3
     # 场景结构支持集: 1 = 单图元; 2 = 双图元遮挡/前后层 (实验路径)
@@ -57,8 +60,8 @@ class InverseConfig:
     @property
     def n_feat(self) -> int:
         n = len(self.feat_spec) * Codebook.H * Codebook.W
-        # single/composite 拼全局 [ẑ,area]; layered 拼逐层 [u,v,z,area]×2
-        return n + (8 if self.family == "layered" else 2)
+        # single 拼全局 [ẑ,area]; layered/composite 拼两部分 [u,v,z,area]×2
+        return n + (2 if self.family == "single" else 8)
 
     @property
     def bg_color(self) -> int:

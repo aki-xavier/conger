@@ -7,7 +7,7 @@ SPN 逆渲染研究: 左右两张二维立体图像 → Riesz 全分辨率特征
 ## 模块 (一文件一类)
 
 - 模型: `src/mixture_spn.py` (MixtureSPN)
-- demo 族: `src/inverse_config.py` (配置唯一家) / `codebook.py` (单物体组合采样+投影) / `layered_codebook.py` (双物体遮挡/前后层) / `composite_codebook.py` (双图元附着组合模板) / `feature_extractor.py` (11 通道) / `data_builder.py` / `scene_reconstructor.py` (帧对/参数 → 完整 Scene) / `layered_reconstructor.py` (双层 SPN 解码) / `composite_reconstructor.py` (组合模板 SPN 解码) / `expert_registry.py` (结构专家注册/加载) / `structure_gate.py` (结构专家门控) / `structure_birth.py` (未知结构出生队列) / `template_grammar.py` + `composite_template_proposer.py` (有界文法与残差驱动组合模板提案) / `structured_hypothesis.py` (统一结构化假设/后验对象) / `evaluator.py` / `inverse_app.py`, `src/inverse.py` 为薄 CLI 入口
+- demo 族: `src/inverse_config.py` (配置唯一家) / `codebook.py` (单物体组合采样+投影) / `layered_codebook.py` (双物体遮挡/前后层) / `composite_codebook.py` (双图元附着组合模板) / `composite_geometry.py` (base/part 部分感知几何锚点) / `feature_extractor.py` (11 通道) / `data_builder.py` / `scene_reconstructor.py` (帧对/参数 → 完整 Scene) / `layered_reconstructor.py` (双层 SPN 解码) / `composite_reconstructor.py` (组合模板 SPN 解码) / `expert_registry.py` (结构专家注册/加载) / `structure_gate.py` (结构专家门控) / `structure_birth.py` (未知结构出生队列) / `template_grammar.py` + `composite_template_proposer.py` (有界文法与残差驱动组合模板提案) / `structured_hypothesis.py` (统一结构化假设/后验对象) / `evaluator.py` / `inverse_app.py`, `src/inverse.py` 为薄 CLI 入口
 - 前端: `src/riesz.py` + `riesz_scale.py` + `feature_maps.py` (Riesz 小波), `src/color.py`, `src/utils.py`, `src/stereo.py` (单物体视差), `src/stereo_layers.py` + `src/contour_completion.py` + `src/joint_layer_optimizer.py` (逐层视差、轮廓补全与遮挡联合优化)
 - 测试: `tests/` (pytest; 单元黑盒 + slow 集成自检) / `src/riesz_selftest.py` (可视化脚本)
 - `docs/architecture.md` — 架构与机制决策录
@@ -22,7 +22,7 @@ python riesz_selftest.py     # Riesz 自检 + 自然图特征可视化
 python inverse.py            # 全量立体 (1296 帧对): 完整 Scene 重建
 ```
 
-选项: `--sigma-rel-floor` (核带宽下限)、`--replicates R` (训练集复制数, 调大触发增量训练)、`--no-cache` (跳过数据缓存)、`--no-refine-appearance` (跳过候选渲染残差精炼)、`--kind-topk {1,2,3}` (结构候选数, 默认 3 = 覆盖全部 kind)、`--scene-family {single,layered,composite}` (单图元 / 独立前后层 / 附着组合模板)、`--n-objects {1,2}` (旧配置兼容)、`--model-path` (模型 safetensors 存取, 默认 `artifacts/spn_kindgeo_<数据指纹>`、`spn_layered_anchor_<数据指纹>` 或 `spn_composite_<数据指纹>`; 存在即加载, K 不足则增量追加)。
+选项: `--sigma-rel-floor` (核带宽下限)、`--replicates R` (训练集复制数, 调大触发增量训练)、`--no-cache` (跳过数据缓存)、`--no-refine-appearance` (跳过单物体候选渲染残差精炼)、`--refine-composite` (组合模板启用 top-k kind/hue/light 渲染残差精炼, 默认关闭)、`--kind-topk {1,2,3}` (结构候选数, 默认 3 = 覆盖全部 kind)、`--scene-family {single,layered,composite}` (单图元 / 独立前后层 / 附着组合模板)、`--n-objects {1,2}` (旧配置兼容)、`--model-path` (模型 safetensors 存取, 默认 `artifacts/spn_kindgeo_<数据指纹>`、`spn_layered_anchor_<数据指纹>` 或 `spn_composite_<数据指纹>`; 存在即加载, K 不足则增量追加)。
 
 - 通用结构学习: `src/structured_hypothesis.py` / `forward_model.py` / `generic_structure_gate.py` / `generic_expert_registry.py`; 非视觉验证域为 `src/toy_series_family.py` + `src/toy_series_expert.py`
 
@@ -109,8 +109,8 @@ registry = ExpertRegistry(experts, birth_controller=birth)
 
 双层遮挡实验族 (`--n-objects 2 --replicates 1`, N=2916, sl8): StereoLayers 逐层视差 + JointLayerOptimizer 遮挡联合优化后, 插值 kind0/kind1 0.398/0.357、hue0/hue1 0.421/0.171、lcol/ldir 0.390/0.370; u0/v0/u1/v1 R² 0.537/0.711/0.466/0.432。联合模板负责中心/深度, 面积由可见区+轮廓补全 soft fusion 提供; 后层 s/z 仍为负 R², 遮挡几何仍未达到正式阈值。
 
-显式组合模板族 (`--scene-family composite`): `CompositeCodebook` 把两个已有图元组成 base + attached part; 附着件不再是独立前后层, 而是由底座按尺度比例、横向偏移、接触重叠和轻微深度差导出。首阶段使用全局立体锚点与 8 维几何直读目标, 用来验证“组合模板可训练、可渲染、可注册为结构专家”; 自动模板提案已由有界文法生成, 训练仍保持显式。
+显式组合模板族 (`--scene-family composite`): `CompositeCodebook` 把两个已有图元组成 base + attached part; 附着件不再是独立前后层, 而是由底座按尺度比例、横向偏移、接触重叠和轻微深度差导出。`CompositeGeometry` 在前景掩码上搜索接触线并分别拟合 base/part 圆/方模板, 再在右图模板窗口内估计部件视差; MixtureSPN 只学习 8 个几何量相对这些锚点的有界残差。自动模板提案由有界文法生成, 训练仍保持显式。
 
-首版全量实测 (R=1, N=2916, cp1, 无渲染残差精炼): 插值 kind0/kind1 0.513/0.360、hue0/hue1 0.498/0.364、lcol/ldir 0.405/0.372; u0/v0/u1/v1 R² 0.907/0.516/0.891/0.794。外推 u/v R² 0.929/0.733/0.915/0.833。s/z 仍为负或弱 R² (插值 s0/z0 -0.528/-0.692), 说明全局锚点不足以恢复组合内部尺寸/深度; 下一阶段应把组合模板的几何锚点升级为部分感知残差。
+全局锚点基线 (cp1) 的插值 s0/z0 R² 为 -0.528/-0.692; 部分感知锚点 (cp2, R=1, N=2916, 无精炼) 提升到 s0/z0 0.089/0.823, part s1/z1 -0.474/0.875; u0/v0/u1/v1 R² 0.982/0.972/0.990/0.970。外推 u/v R² 0.978/0.985/0.985/0.985, s/z R² 0.732/0.921/0.429/0.949。类别指标仍接近 cp1 (kind0/kind1 0.511/0.355, hue0/hue1 0.504/0.365), 说明下一步瓶颈主要是部分外观/结构辨识, 可再用 `--refine-composite` 做候选渲染裁决。
 
 依赖: mlx / matplotlib / numpy / pillow + 本地 path 依赖 [cga](../cga) (渲染引擎)。

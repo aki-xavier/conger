@@ -72,8 +72,8 @@ $$\hat{S} = argmax_S P(S|I) = argmax_S P(I|S) \cdot P(S)$$
 2. **经验统计先验**：162 组合全因子 × R 连续复制，MixtureSPN 的实例
    记忆、均匀权重和逐 kind tied variance；
 3. **算法结构先验**：Riesz 多尺度、带符号色度、前景权重、双目视差
-   公式、逐层 `(x,y,disparity)` 聚类、圆/方轮廓补全、遮挡联合优化与
-   残差参数化；
+   公式、逐层 `(x,y,disparity)` 聚类、圆/方轮廓补全、遮挡联合优化、
+   attached_on_top 接触线搜索与残差参数化；
 4. **推理似然先验**：SceneReconstructor 用同一 renderer 对候选场景
    计残差，把反照率×光照联合歧义交回正向模型; kind 结构评分沿用共享
    几何，候选返回前再按各自的面积→尺寸代理重校准 s，避免结构选择被

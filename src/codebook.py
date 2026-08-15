@@ -58,6 +58,7 @@ class Codebook:
     RENDER_V = 2
     # 几何统计契约: 单物体全局 [ẑ,area]; 由 DataBuilder/Reconstructor 共用
     USES_LAYER_STATS = False
+    USES_COMPOSITE_STATS = False
     STEREO_V = "st4"
     TEMPLATE_COMPLEXITY = 1.0  # 一个独立 primitive 的描述长度基准
     # 离散因子水平 (全笛卡尔积 = 3×6×3×3 = 162 组合)。水平数取最小

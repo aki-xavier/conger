@@ -8,6 +8,7 @@ from pathlib import Path
 import mlx.core as mx
 
 from codebook import Codebook
+from composite_geometry import CompositeGeometry
 from feature_extractor import FeatureExtractor
 from inverse_config import InverseConfig
 from stereo import StereoDepth
@@ -71,7 +72,7 @@ class DataBuilder:
 
     def feats_of(self, params: mx.array) -> tuple[mx.array, mx.array]:
         """参数行 → 渲染 → (特征 (n,n_feat), 立体统计)。
-        单物体拼接 [ẑ,area]; 双层拼接逐层 [u,v,z,area]×2。"""
+        单物体拼接 [ẑ,area]; 双层/组合拼接两部分 [u,v,z,area]×2。"""
         cb = self.codebook
         renderer, cam_l, cam_r = Codebook.make_renderer()
         sd = StereoDepth()
@@ -83,7 +84,13 @@ class DataBuilder:
             fl = renderer.render(scene, cam_l)
             fr = renderer.render(scene, cam_r)
             vec, rw = self.extractor.of_frame(fl, rw)
-            if cb.USES_LAYER_STATS:
+            if cb.USES_COMPOSITE_STATS:
+                stat = CompositeGeometry.estimate(fl, fr)
+                vec = mx.concatenate(
+                    [vec, StereoLayers.scaled(mx.array([stat]))[0]]
+                )
+                stats.append(stat)
+            elif cb.USES_LAYER_STATS:
                 stat = sl.estimate(fl, fr)
                 vec = mx.concatenate(
                     [vec, StereoLayers.scaled(mx.array([stat]))[0]]
