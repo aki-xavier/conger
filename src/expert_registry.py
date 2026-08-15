@@ -8,6 +8,7 @@ from pathlib import Path
 
 import mlx.core as mx
 
+from codebook import Codebook
 from generic_structure_gate import GenericStructureDecision
 from inverse_app import InverseApp
 from inverse_config import InverseConfig
@@ -144,10 +145,18 @@ class ExpertRegistry:
         name: str,
         cfg: InverseConfig,
         artifacts: Path | None = None,
+        codebook_cls: type[Codebook] | None = None,
     ) -> SceneExpert:
         """结构出生后的显式候选训练: InverseApp.run() → 加载 → 注册。"""
-        InverseApp(cfg).run()
-        return self.register(name, cfg=cfg, artifacts=artifacts)
+        if codebook_cls is None:
+            InverseApp(cfg).run(artifacts)
+            return self.register(name, cfg=cfg, artifacts=artifacts)
+        app = InverseApp(cfg, codebook=codebook_cls(cfg))
+        app.run(artifacts)
+        path = cfg.model_path or app.default_model_path(artifacts)
+        expert = SceneExpert(name=name, app=app, net=MixtureSPN.load(path))
+        self.experts[name] = expert
+        return expert
 
     def decide(self, fl: mx.array, fr: mx.array) -> GenericStructureDecision:
         """同一左右图交给全部专家, 再按重建残差门控结构。"""

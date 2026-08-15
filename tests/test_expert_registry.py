@@ -72,7 +72,7 @@ def test_train_and_register_workflow(monkeypatch, tmp_path) -> None:
     registry = ExpertRegistry({"old": _DummyExpert(_estimate(prm, cb))})
     calls = []
     monkeypatch.setattr(
-        InverseApp, "run", lambda app: calls.append(app.cfg.n_objects)
+        InverseApp, "run", lambda app, artifacts=None: calls.append(app.cfg.n_objects)
     )
     monkeypatch.setattr(
         SceneExpert,

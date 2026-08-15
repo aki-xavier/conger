@@ -36,7 +36,8 @@ class DataBuilder:
         )
         # 结构族自带统计契约版本: st4 单物体 / sl8 遮挡层 / cp1 组合物
         stereo_tag = cb.STEREO_V
-        return f"mix_{cb.H}x{cb.W}_{feat_tag}_{lvl_tag}_{stereo_tag}"
+        variant_tag = f"tv{cb.TEMPLATE_VARIANT}" if cb.TEMPLATE_VARIANT else ""
+        return f"mix_{cb.H}x{cb.W}_{feat_tag}_{lvl_tag}_{stereo_tag}{variant_tag}"
 
     def _block_feats(self, split: str, r: int) -> tuple[mx.array, ...]:
         """一个复制块的 (参数, 特征, 统计), 逐块缓存: 缺哪块渲哪块

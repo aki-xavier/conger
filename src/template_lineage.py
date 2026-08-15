@@ -30,3 +30,30 @@ class TemplateLineage:
         """稳定血缘签名 (日志/提案聚类键)。"""
         parent = self.parent_family or "root"
         return f"{parent}->{self.family}:{self.operation}"
+
+
+@dataclass(frozen=True)
+class ChildTemplateSpec:
+    """从多个模板提案估计得到的候选子模板约束。"""
+
+    name: str
+    family: str
+    parent_family: str
+    operation: str
+    constraints: dict[str, Any]
+    complexity: float
+    generation: int
+    evidence_count: int
+    residual_mean: float
+    score_mean: float
+
+    def lineage(self) -> TemplateLineage:
+        """子模板规格 → 可注册血缘对象。"""
+        return TemplateLineage(
+            family=self.name,
+            parent_family=self.parent_family,
+            operation=self.operation,
+            complexity=self.complexity,
+            generation=self.generation,
+            delta=dict(self.constraints),
+        )

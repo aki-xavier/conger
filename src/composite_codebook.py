@@ -30,8 +30,14 @@ class CompositeCodebook(LayeredCodebook):
     TEMPLATE_COMPLEXITY = 1.5  # 两图元但附着关系降低描述长度
     SCALE_RATIO = (0.35, 0.75)  # part/base 尺度比
     LATERAL_RATIO = 0.25  # 横向偏移占 s0+s1 的最大比例
+    LATERAL_RANGE = (-LATERAL_RATIO, LATERAL_RATIO)
     OVERLAP_RATIO = (0.03, 0.10)  # 接触处嵌入量占较小半径比例
     DEPTH_JITTER = (-0.06, 0.06)  # 附着件相对底座的轻微深度差
+    BASE_KINDS = tuple(range(Codebook.N_KIND))
+    PART_KINDS = tuple(range(Codebook.N_KIND))
+    BASE_HUES = tuple(range(Codebook.N_HUE))
+    PART_HUES = tuple(range(Codebook.N_HUE))
+    TEMPLATE_VARIANT = ""
     TEMPLATE_LINEAGE = TemplateLineage(
         family="composite",
         parent_family="layered",
@@ -41,7 +47,7 @@ class CompositeCodebook(LayeredCodebook):
         delta={
             "relation": RELATION,
             "scale_ratio": SCALE_RATIO,
-            "lateral_ratio": (-LATERAL_RATIO, LATERAL_RATIO),
+            "lateral_ratio": LATERAL_RANGE,
             "depth_jitter": DEPTH_JITTER,
         },
     )
@@ -89,7 +95,7 @@ class CompositeCodebook(LayeredCodebook):
             v0 = rng.uniform(m0, Codebook.H - m0)
             x0, y0 = Codebook.unproject(u0, v0, z0)
 
-            dx = rng.uniform(-cls.LATERAL_RATIO, cls.LATERAL_RATIO) * (s0 + s1)
+            dx = rng.uniform(*cls.LATERAL_RANGE) * (s0 + s1)
             overlap = rng.uniform(*cls.OVERLAP_RATIO) * min(s0, s1)
             x1 = x0 + dx
             y1 = y0 + s0 + s1 - overlap  # 世界 Y 向上 → 图像 v1 < v0
@@ -105,10 +111,10 @@ class CompositeCodebook(LayeredCodebook):
         """单复制块 → (2916,14), 离散因子全笛卡尔积。"""
         rng = random.Random(seed)
         rows = []
-        for k0 in range(cls.N_KIND):
-            for k1 in range(cls.N_KIND):
-                for h0 in range(cls.N_HUE):
-                    for h1 in range(cls.N_HUE):
+        for k0 in cls.BASE_KINDS:
+            for k1 in cls.PART_KINDS:
+                for h0 in cls.BASE_HUES:
+                    for h1 in cls.PART_HUES:
                         for lc in range(cls.N_LIGHT_COLORS):
                             for ld in range(cls.N_LIGHT_DIRS):
                                 geom = cls._sample_composite(rng, extrap)

@@ -102,10 +102,10 @@ p(S,M\mid I)\propto p(I\mid S,M)p(S\mid M)p(M)
 复杂度项是最小描述长度
 先验: 在残差相近时优先更少部件、更短关系的模板。`TemplateLineage`
 进一步记录父模板和 delta, 使子模板继承成为显式先验而不是平铺新增
-结构。出生请求可以进一步携带
-残差驱动提案: 以当前最佳解释为底座, 在 depth≤2 的
-attach/layer/mirror/repeat 文法中枚举少量组合, 并用正向渲染重新评分。
-该设计把“学习新样本”与“发现新世界结构”
+结构。出生请求携带的残差驱动提案来自 depth≤2 的
+attach/layer/mirror/repeat 文法; `TemplateDeltaLearner` 对相似提案的
+delta 分布估计约束, `ChildCodebookFactory` 再把约束物化为可训练子模板。
+当前 attach 子模板已支持这一路径。该设计把“学习新样本”与“发现新世界结构”
 分开, 防止旧模型被不可比较的新参数空间污染。`ToySeriesFamily` 的
 线性/振荡机制测试表明, MixtureSPN、结构门控和出生控制可脱离视觉输入
 独立运行; 视觉路径只是该通用结构学习框架的一个领域适配器。

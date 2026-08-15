@@ -62,6 +62,7 @@ class Codebook:
     USES_LAYER_STATS = False
     USES_COMPOSITE_STATS = False
     STEREO_V = "st4"
+    TEMPLATE_VARIANT = ""  # 动态子模板非空, 进入缓存指纹
     TEMPLATE_COMPLEXITY = 1.0  # 一个独立 primitive 的描述长度基准
     TEMPLATE_LINEAGE = TemplateLineage(
         family="single",

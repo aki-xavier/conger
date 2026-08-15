@@ -300,6 +300,14 @@ winning structure, `TemplateProposal` 携带 `parent_family` 与具体 delta。
 这使“子模板”成为可序列化、可聚类、可审计的对象, 为后续从多个相似
 提案自动估计约束范围提供契约。
 
+**数据驱动子模板** (第一阶段当前实现): `TemplateDeltaLearner` 聚合多个
+出生请求的 `TemplateProposal`, 按 `parent_family+operation` 分组并估计
+数值约束范围 (ratio/lateral/depth) 与离散支持集 (part kind/hue);
+`ChildCodebookFactory` 当前支持把 attach spec 物化为受限
+`CompositeCodebook` 子类, `TEMPLATE_VARIANT` 进入数据缓存指纹,
+`ExpertRegistry.train_and_register(..., codebook_cls=...)` 显式训练并
+注册。该阶段不会自动训练, 也不会把单次异常提案提升为模板。
+
 **实施顺序**:
 1. 类别契约序列化 + padding 扩展;
 2. StructuredHypothesis 新颖性证据;

@@ -32,9 +32,11 @@ from scene_reconstructor import SceneReconstructor
 class InverseApp:
     """主流程: 立体图像数据 → MixtureSPN → 完整场景参数 → 重建评估。"""
 
-    def __init__(self, cfg: InverseConfig):
+    def __init__(self, cfg: InverseConfig, codebook: Codebook | None = None):
         self.cfg = cfg
-        if cfg.family == "single":
+        if codebook is not None:
+            self.codebook = codebook
+        elif cfg.family == "single":
             self.codebook = Codebook(cfg)
         elif cfg.family == "layered":
             self.codebook = LayeredCodebook(cfg)
@@ -55,9 +57,9 @@ class InverseApp:
         }[self.cfg.family]
         return root / f"{prefix}_{self.data.cache_tag()}.safetensors"
 
-    def run(self) -> None:
+    def run(self, artifacts: Path | None = None) -> None:
         cfg = self.cfg
-        artifacts = Path(__file__).resolve().parent.parent / "artifacts"
+        artifacts = artifacts or Path(__file__).resolve().parent.parent / "artifacts"
         n_tr = self.codebook.N_COMBO * cfg.replicates
         n_test = self.codebook.N_COMBO * (1 if cfg.family != "single" else 2)
         print(
