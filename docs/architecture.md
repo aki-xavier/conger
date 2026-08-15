@@ -194,7 +194,11 @@ InverseConfig 防环。
 - 模型: MixtureSPN.save/load —— 参数张量 (含白化基 basis (V,D),
   全量约 1.5GB) + rel_floor/cat_sizes/n_stratum 入 JSON 明文头;
   Utils.st_metadata 可查;
-  默认路径 `spn_kindgeo_<数据指纹>`、`spn_layered_anchor_<数据指纹>`
+- 结构注册表: `artifacts/registry_manifest.json` 保存动态子模板
+  ChildTemplateSpec、parent/delta 约束、pending specs 和模型路径;
+  重启后由 `ChildCodebookFactory` 重新物化 Codebook, 再加载对应
+  safetensors;
+- 默认模型路径 `spn_kindgeo_<数据指纹>`、`spn_layered_anchor_<数据指纹>`
   或 `spn_composite_<数据指纹>`
   (`kindgeo` 标记 kind-conditioned s 残差, `anchor` 标记双层逐层锚点契约,
   `composite` 标记附着组合模板)。

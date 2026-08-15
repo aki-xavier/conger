@@ -70,7 +70,9 @@ def main() -> None:
     parent_cfg = InverseConfig(scene_family="composite", replicates=1)
     parent = SceneExpert.from_config("composite", parent_cfg)
     registry = ExpertRegistry({"composite": parent})
-    registry.enable_child_template_learning()
+    registry.enable_child_template_learning(
+        manifest_path=ExpertRegistry.default_manifest_path()
+    )
     pending = registry.observe_birth_request(request)
     assert pending, "出生请求未产生可学习子模板"
     child_cfg = InverseConfig(scene_family="composite", replicates=4)

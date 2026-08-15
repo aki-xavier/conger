@@ -9,11 +9,13 @@ from typing import TYPE_CHECKING
 
 import mlx.core as mx
 
+from child_codebook_factory import ChildCodebookFactory
 from codebook import Codebook
 from generic_structure_gate import GenericStructureDecision
 from inverse_app import InverseApp
 from inverse_config import InverseConfig
 from mixture_spn import MixtureSPN
+from registry_manifest import RegisteredChildTemplate, RegistryManifest
 from structure_birth import StructureBirthController, StructureBirthRequest
 from structure_gate import StructureGate
 from structured_hypothesis import StructuredHypothesis
@@ -66,15 +68,19 @@ class ExpertRegistry:
         gate: StructureGate | None = None,
         birth_controller: StructureBirthController | None = None,
         child_workflow: ChildTemplateWorkflow | None = None,
+        manifest_path: Path | None = None,
     ):
         assert experts, "至少注册一个结构专家"
         self.experts = dict(experts)
         self.gate = gate or StructureGate()
         self.birth_controller = birth_controller
         self.child_workflow = child_workflow
+        self.manifest_path = manifest_path
         self.last_birth_request: StructureBirthRequest | None = None
         self.birth_requests: list[StructureBirthRequest] = []
         self.pending_child_specs: dict[str, ChildTemplateSpec] = {}
+        self.child_specs: dict[str, ChildTemplateSpec] = {}
+        self.child_model_paths: dict[str, str | None] = {}
 
     def lineages(self) -> dict[str, TemplateLineage]:
         """当前专家树/森林的血缘表。"""
@@ -89,13 +95,78 @@ class ExpertRegistry:
         )
 
     def enable_child_template_learning(
-        self, workflow: ChildTemplateWorkflow | None = None
+        self,
+        workflow: ChildTemplateWorkflow | None = None,
+        manifest_path: Path | None = None,
     ) -> ChildTemplateWorkflow:
         """启用出生请求 → pending 子模板规格学习 (不自动训练)。"""
         from child_template_workflow import ChildTemplateWorkflow
 
         self.child_workflow = workflow or ChildTemplateWorkflow()
+        if manifest_path is not None:
+            self.manifest_path = manifest_path
         return self.child_workflow
+
+    @staticmethod
+    def default_manifest_path(artifacts: Path | None = None) -> Path:
+        """默认注册表 manifest 路径。"""
+        root = artifacts or Path(__file__).resolve().parent.parent / "artifacts"
+        return root / "registry_manifest.json"
+
+    def save_manifest(self, path: Path | None = None) -> Path:
+        """保存动态子模板、pending 规格和模型路径。"""
+        out = path or self.manifest_path or self.default_manifest_path()
+        manifest = RegistryManifest(
+            children=tuple(
+                RegisteredChildTemplate(
+                    spec=spec,
+                    model_path=self.child_model_paths.get(name),
+                )
+                for name, spec in self.child_specs.items()
+            ),
+            pending=tuple(self.pending_child_specs.values()),
+        )
+        manifest.save(out)
+        self.manifest_path = out
+        return out
+
+    def _autosave_manifest(self) -> None:
+        if self.manifest_path is not None:
+            self.save_manifest(self.manifest_path)
+
+    def load_manifest(
+        self,
+        path: Path,
+        artifacts: Path | None = None,
+        missing_ok: bool = True,
+    ) -> None:
+        """从 manifest 恢复 pending 规格与已训练动态子模板专家。"""
+        manifest = RegistryManifest.load(path)
+        self.manifest_path = path
+        for spec in manifest.pending:
+            if spec.name not in self.experts:
+                self.pending_child_specs[spec.name] = spec
+        for child in manifest.children:
+            spec = child.spec
+            codebook_cls = ChildCodebookFactory.build(spec)
+            cfg = InverseConfig(
+                scene_family=spec.family,
+                model_path=Path(child.model_path) if child.model_path else None,
+            )
+            app = InverseApp(cfg, codebook=codebook_cls(cfg))
+            model_path = cfg.model_path or app.default_model_path(artifacts)
+            if not model_path.exists():
+                if missing_ok:
+                    continue
+                raise FileNotFoundError(f"子模板 {spec.name} 缺模型: {model_path}")
+            expert = SceneExpert(
+                name=spec.name,
+                app=app,
+                net=MixtureSPN.load(model_path),
+            )
+            self.experts[spec.name] = expert
+            self.child_specs[spec.name] = spec
+            self.child_model_paths[spec.name] = str(model_path)
 
     def observe_birth_request(
         self, request: StructureBirthRequest
@@ -113,6 +184,8 @@ class ExpertRegistry:
             ):
                 self.pending_child_specs[spec.name] = spec
                 new.append(spec)
+        if new:
+            self._autosave_manifest()
         return tuple(new)
 
     def confirm_child_template(
@@ -131,6 +204,14 @@ class ExpertRegistry:
             self, spec, cfg=cfg, artifacts=artifacts
         )
         del self.pending_child_specs[name]
+        self.child_specs[name] = spec
+        model_path = (
+            cfg.model_path
+            if cfg is not None and cfg.model_path is not None
+            else registration.expert.app.default_model_path(artifacts)
+        )
+        self.child_model_paths[name] = str(model_path)
+        self._autosave_manifest()
         return registration
 
     @classmethod

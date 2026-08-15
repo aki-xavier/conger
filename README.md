@@ -7,7 +7,7 @@ SPN 逆渲染研究: 左右两张二维立体图像 → Riesz 全分辨率特征
 ## 模块 (一文件一类)
 
 - 模型: `src/mixture_spn.py` (MixtureSPN)
-- demo 族: `src/inverse_config.py` (配置唯一家) / `codebook.py` (单物体组合采样+投影) / `layered_codebook.py` (双物体遮挡/前后层) / `composite_codebook.py` (双图元附着组合模板) / `composite_geometry.py` (base/part 部分感知几何锚点) / `structure_geometry.py` (观测级结构几何证据) / `feature_extractor.py` (11 通道) / `data_builder.py` / `scene_reconstructor.py` (帧对/参数 → 完整 Scene) / `layered_reconstructor.py` (双层 SPN 解码) / `composite_reconstructor.py` (组合模板 SPN 解码) / `expert_registry.py` (结构专家注册/加载/血缘树) / `template_lineage.py` (parent/delta 模板继承契约) / `template_delta_learner.py` + `child_codebook_factory.py` + `child_template_workflow.py` (提案约束学习、子 Codebook 物化与注册编排) / `child_template_benchmark.py` (真实样本子模板闭环基准) / `structure_gate.py` (结构专家门控) / `structure_benchmark.py` (跨结构门控基准) / `structure_birth.py` (未知结构出生队列) / `template_grammar.py` + `composite_template_proposer.py` (有界文法与残差驱动组合模板提案) / `structured_hypothesis.py` (统一结构化假设/后验对象) / `evaluator.py` / `inverse_app.py`, `src/inverse.py` 为薄 CLI 入口
+- demo 族: `src/inverse_config.py` (配置唯一家) / `codebook.py` (单物体组合采样+投影) / `layered_codebook.py` (双物体遮挡/前后层) / `composite_codebook.py` (双图元附着组合模板) / `composite_geometry.py` (base/part 部分感知几何锚点) / `structure_geometry.py` (观测级结构几何证据) / `feature_extractor.py` (11 通道) / `data_builder.py` / `scene_reconstructor.py` (帧对/参数 → 完整 Scene) / `layered_reconstructor.py` (双层 SPN 解码) / `composite_reconstructor.py` (组合模板 SPN 解码) / `expert_registry.py` (结构专家注册/加载/血缘树) / `registry_manifest.py` (动态子模板与 pending spec 持久化) / `template_lineage.py` (parent/delta 模板继承契约) / `template_delta_learner.py` + `child_codebook_factory.py` + `child_template_workflow.py` (提案约束学习、子 Codebook 物化与注册编排) / `child_template_benchmark.py` (真实样本子模板闭环基准) / `structure_gate.py` (结构专家门控) / `structure_benchmark.py` (跨结构门控基准) / `structure_birth.py` (未知结构出生队列) / `template_grammar.py` + `composite_template_proposer.py` (有界文法与残差驱动组合模板提案) / `structured_hypothesis.py` (统一结构化假设/后验对象) / `evaluator.py` / `inverse_app.py`, `src/inverse.py` 为薄 CLI 入口
 - 前端: `src/riesz.py` + `riesz_scale.py` + `feature_maps.py` (Riesz 小波), `src/color.py`, `src/utils.py`, `src/stereo.py` (单物体视差), `src/stereo_layers.py` + `src/contour_completion.py` + `src/joint_layer_optimizer.py` (逐层视差、轮廓补全与遮挡联合优化)
 - 测试: `tests/` (pytest; 单元黑盒 + slow 集成自检) / `src/riesz_selftest.py` (可视化脚本)
 - `docs/architecture.md` — 架构与机制决策录
@@ -141,6 +141,20 @@ registry.enable_child_template_learning()
 pending = registry.observe_birth_request(request)  # 只学习规格
 registration = registry.confirm_child_template(pending[0].name)  # 显式训练
 ```
+
+若传入 manifest 路径, pending/registered 子模板会自动持久化:
+
+```python
+registry.enable_child_template_learning(
+    manifest_path=ExpertRegistry.default_manifest_path()
+)
+# 新进程中:
+registry.load_manifest(ExpertRegistry.default_manifest_path())
+```
+
+`registry_manifest.json` 保存 ChildTemplateSpec、parent/delta、约束、
+pending 列表和模型路径; 动态 Codebook 重启时由 `ChildCodebookFactory`
+重新物化, safetensors 仍只保存 MixtureSPN 参数。
 
 该基准用真实渲染样本产生 attach 提案, 学习得到
 `composite → composite_attach_5025cfd1` 子模板 (scale_ratio 0.43–0.62,

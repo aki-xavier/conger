@@ -43,6 +43,7 @@ s 重校准) × 外观候选渲染残差后验 → StructuredHypothesis (MAP cga
   StructureGate     结构专家渲染残差/几何证据门控 + 未知结构出生检测
   StructureGeometry 观测级 single/layered/composite 结构兼容性
   ExpertRegistry    单/双层/组合结构专家注册、按需加载与统一调用
+  RegistryManifest  动态子模板/pending spec/模型路径持久化
   TemplateLineage   模板 parent/delta 血缘契约
   TemplateDeltaLearner 提案聚类与子模板约束学习
   ChildTemplateWorkflow 子模板物化、显式训练与注册编排

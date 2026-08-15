@@ -31,6 +31,29 @@ class TemplateLineage:
         parent = self.parent_family or "root"
         return f"{parent}->{self.family}:{self.operation}"
 
+    def to_dict(self) -> dict[str, Any]:
+        """JSON 可序列化表示。"""
+        return {
+            "family": self.family,
+            "parent_family": self.parent_family,
+            "operation": self.operation,
+            "complexity": self.complexity,
+            "generation": self.generation,
+            "delta": self.delta,
+        }
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> TemplateLineage:
+        """JSON 表示 → TemplateLineage。"""
+        return cls(
+            family=str(data["family"]),
+            parent_family=data.get("parent_family"),
+            operation=str(data["operation"]),
+            complexity=float(data["complexity"]),
+            generation=int(data.get("generation", 0)),
+            delta=dict(data.get("delta", {})),
+        )
+
 
 @dataclass(frozen=True)
 class ChildTemplateSpec:
@@ -56,4 +79,35 @@ class ChildTemplateSpec:
             complexity=self.complexity,
             generation=self.generation,
             delta=dict(self.constraints),
+        )
+
+    def to_dict(self) -> dict[str, Any]:
+        """JSON 可序列化表示。"""
+        return {
+            "name": self.name,
+            "family": self.family,
+            "parent_family": self.parent_family,
+            "operation": self.operation,
+            "constraints": self.constraints,
+            "complexity": self.complexity,
+            "generation": self.generation,
+            "evidence_count": self.evidence_count,
+            "residual_mean": self.residual_mean,
+            "score_mean": self.score_mean,
+        }
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> ChildTemplateSpec:
+        """JSON 表示 → ChildTemplateSpec。"""
+        return cls(
+            name=str(data["name"]),
+            family=str(data["family"]),
+            parent_family=str(data["parent_family"]),
+            operation=str(data["operation"]),
+            constraints=dict(data.get("constraints", {})),
+            complexity=float(data["complexity"]),
+            generation=int(data["generation"]),
+            evidence_count=int(data["evidence_count"]),
+            residual_mean=float(data["residual_mean"]),
+            score_mean=float(data["score_mean"]),
         )
