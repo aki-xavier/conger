@@ -2,6 +2,11 @@
 
 与 CompositeGeometry 的上下接触线不同, 横向组合在低分辨率前景上搜索
 垂直分隔线; 0 号为左/base, 1 号为右/part, 两部件深度应接近。
+
+与父类 bbox 模板不同, 本类 override `estimate` 在模板足迹内做全分辨率
+圆拟合 (面积 + 质心), 得到更准的 part 中心/半径, 并提供 kind 感知的
+近端盖校正 `corrected_gap`, 供 mirror/repeat 判别消掉圆柱端盖投影的
+表观半径偏置。
 """
 
 from __future__ import annotations
@@ -10,13 +15,19 @@ import math
 
 import mlx.core as mx
 
+from codebook import Codebook
 from composite_geometry import CompositeGeometry
 from joint_layer_optimizer import JointLayerOptimizer, LayerTemplate
+from stereo import StereoDepth
 from utils import Utils
 
 
 class LateralCompositeGeometry(CompositeGeometry):
     """左右图 → 横向 base/part 的 [u,v,z,area]×2。"""
+
+    # kind → 近端面相对中心的深度偏移 (以 s 为单位): sphere 轮廓在中心
+    # 平面 (δ=0); cylinder 可见端盖在 z+1.1s; box 前面在 z+s。
+    NEAR_CAP_DELTA = (0.0, 1.1, 1.0)
 
     @classmethod
     def split_score(
@@ -71,3 +82,82 @@ class LateralCompositeGeometry(CompositeGeometry):
     ) -> tuple[LayerTemplate, LayerTemplate] | None:
         out = cls.split_score(fg)
         return None if out is None else (out[1], out[2])
+
+    @staticmethod
+    def _disk_fit(
+        fg: mx.array, tmpl: LayerTemplate, q: int
+    ) -> tuple[float, float, float] | None:
+        """模板足迹内全分辨率圆拟合 → (cx, cy, radius_px)。
+
+        足迹取模板中心 + 半径放大 1.15× (覆盖阈值晕圈与离轴侧表面),
+        面积开方得盘半径, 质心校正 bbox 中心偏置; 避免 max-pool 下采样
+        对小部件的额外膨胀。
+        """
+        h, w = fg.shape
+        cx = tmpl.cx * q
+        cy = tmpl.cy * q
+        rad = tmpl.r * q * 1.15
+        xs = mx.arange(w, dtype=mx.float32)[None, :]
+        ys = mx.arange(h, dtype=mx.float32)[:, None]
+        fp = (xs - cx) ** 2 + (ys - cy) ** 2 <= rad**2
+        m = fg & fp
+        tot = float(mx.sum(m.astype(mx.float32)))
+        if tot < 1e-6:
+            return None
+        cx2 = float(mx.sum(m.astype(mx.float32) * xs) / tot)
+        cy2 = float(mx.sum(m.astype(mx.float32) * ys) / tot)
+        return cx2, cy2, math.sqrt(tot / math.pi)
+
+    @classmethod
+    def estimate(cls, fl: mx.array, fr: mx.array) -> tuple[float, ...]:
+        """左右图 → 横向 base/part 的 [u,v,z,area]×2 (全分辨率圆拟合)。
+
+        area = π·r_disk² 为全分辨率盘面积 (消 max-pool 下采样膨胀), 供
+        lateral_gap_cost 做 kind 感知近端盖校正; z 保留逐 part 视差深度,
+        供 `_lateral_cost` 用两部件深度差拒绝非横向结构。
+        """
+        wl = StereoDepth.foreground_weights(fl)
+        wr = StereoDepth.foreground_weights(fr)
+        fg = wl > 0.01
+        split = cls.split_score(fg)
+        if split is None:
+            return super().estimate(fl, fr)
+        _, base, part = split
+        q = cls.DOWN
+        b = cls._disk_fit(fg, base, q)
+        p = cls._disk_fit(fg, part, q)
+        if b is None or p is None:
+            return super().estimate(fl, fr)
+        _, d_global, _ = StereoDepth().estimate(fl, fr)
+        z0 = cls._part_depth(wl, wr, base, d_global)
+        z1 = cls._part_depth(wl, wr, part, d_global)
+        u0, v0, r0 = b
+        u1, v1, r1 = p
+        return (
+            u0, v0, z0, math.pi * r0 * r0,
+            u1, v1, z1, math.pi * r1 * r1,
+        )
+
+    @classmethod
+    def corrected_gap(
+        cls, stats: tuple[float, ...], kind: int
+    ) -> float:
+        """近端盖校正后的世界归一化间隔 g = |x1-x0|/(s0+s1)。
+
+        盘半径 r_obs 与近端面深度 (zc−δ·s) 满足 r_obs = s·FX/(zc−δ·s),
+        反解真实世界半径 s 与中心 x, 消掉圆柱端盖投影的表观半径偏置。
+        """
+        u0, _, z0, a0, u1, _, z1, a1 = stats
+        if 0 <= kind < len(cls.NEAR_CAP_DELTA):
+            delta = cls.NEAR_CAP_DELTA[kind]
+        else:
+            delta = 1.1  # 默认 cylinder
+        zc = Codebook.CAM_Z - 0.5 * (z0 + z1)
+        r0 = math.sqrt(max(a0, 1e-8) / math.pi)
+        r1 = math.sqrt(max(a1, 1e-8) / math.pi)
+        s0 = r0 * zc / (Codebook.FX + delta * r0)
+        s1 = r1 * zc / (Codebook.FX + delta * r1)
+        c = (Codebook.W - 1) / 2.0
+        x0 = (u0 - c) * (zc - delta * s0) / Codebook.FX
+        x1 = (u1 - c) * (zc - delta * s1) / Codebook.FX
+        return abs(x1 - x0) / max(s0 + s1, 1e-8)

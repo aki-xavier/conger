@@ -28,6 +28,7 @@ class StructureGate(GenericStructureGate):
         priors: Mapping[str, float] | None = None,
         complexity_weight: float = 1.0,
         geometry_weight: float = 5000.0,
+        temperature_scale: float = 1.0,
     ):
         super().__init__(
             birth_residual=birth_residual,
@@ -35,6 +36,7 @@ class StructureGate(GenericStructureGate):
             priors=priors,
             complexity_weight=complexity_weight,
             geometry_weight=geometry_weight,
+            temperature_scale=temperature_scale,
         )
 
     @staticmethod
@@ -80,4 +82,4 @@ class StructureGate(GenericStructureGate):
                 residual=self.residual(est, fl, fr),
                 geometry_cost=geometry_cost,
             )
-        return super().decide(with_residual)
+        return self.decide_hierarchical(with_residual)

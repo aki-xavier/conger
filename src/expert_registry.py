@@ -222,6 +222,7 @@ class ExpertRegistry:
         priors: Mapping[str, float] | None = None,
         complexity_weight: float = 1.0,
         geometry_weight: float = 5000.0,
+        temperature_scale: float = 1.0,
         missing_ok: bool = False,
     ) -> ExpertRegistry:
         """按名称 → 配置注册专家; missing_ok=True 时跳过缺模型专家。"""
@@ -240,6 +241,7 @@ class ExpertRegistry:
                 priors=priors,
                 complexity_weight=complexity_weight,
                 geometry_weight=geometry_weight,
+                temperature_scale=temperature_scale,
             ),
         )
 

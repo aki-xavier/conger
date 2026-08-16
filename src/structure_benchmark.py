@@ -67,7 +67,7 @@ class StructureBenchmark:
     def summarize(
         results: tuple[StructureCaseResult, ...],
     ) -> dict[str, object]:
-        """门控记录 → accuracy/confusion/mean posterior。"""
+        """门控记录 → accuracy/confusion/mean posterior/ECE 校准。"""
         assert results, "至少需要一条门控结果"
         confusion: dict[str, dict[str, int]] = {}
         correct = 0
@@ -88,7 +88,30 @@ class StructureBenchmark:
             "posterior_mean": {
                 k: v / n for k, v in posterior_sum.items()
             },
+            "ece": StructureBenchmark._ece(results),
         }
+
+    @staticmethod
+    def _ece(results: tuple[StructureCaseResult, ...], bins: int = 10) -> float:
+        """winner 置信度的期望校准误差 (ECE, 值越小越校准)。"""
+        if not results:
+            return 0.0
+        acc = [0.0] * bins
+        conf = [0.0] * bins
+        cnt = [0] * bins
+        for r in results:
+            c = r.posterior[r.predicted]
+            idx = min(int(c * bins), bins - 1)
+            acc[idx] += 1.0 if r.predicted == r.true else 0.0
+            conf[idx] += c
+            cnt[idx] += 1
+        total = len(results)
+        ece = 0.0
+        for i in range(bins):
+            if cnt[i] == 0:
+                continue
+            ece += (cnt[i] / total) * abs(conf[i] / cnt[i] - acc[i] / cnt[i])
+        return ece
 
     def run(self) -> dict[str, object]:
         """执行评估并打印逐样本与汇总结果。"""
@@ -113,6 +136,7 @@ class StructureBenchmark:
         print(f"accuracy: {summary['accuracy']:.3f} ({summary['n']} cases)")
         print(f"confusion: {summary['confusion']}")
         print(f"posterior_mean: {summary['posterior_mean']}")
+        print(f"ece: {summary['ece']:.3f}")
         return {"results": tuple(results), **summary}
 
     @staticmethod
@@ -126,6 +150,7 @@ def main() -> None:
     ap.add_argument("--samples-per-family", type=int, default=3)
     ap.add_argument("--seed", type=int, default=777)
     ap.add_argument("--geometry-weight", type=float, default=5000.0)
+    ap.add_argument("--temperature-scale", type=float, default=1.0)
     ap.add_argument(
         "--no-single-refine",
         action="store_true",
@@ -141,7 +166,9 @@ def main() -> None:
         "composite": InverseConfig(scene_family="composite", replicates=1),
     }
     registry = ExpertRegistry.from_configs(
-        configs, geometry_weight=args.geometry_weight
+        configs,
+        geometry_weight=args.geometry_weight,
+        temperature_scale=args.temperature_scale,
     )
     StructureBenchmark(
         registry,

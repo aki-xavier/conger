@@ -82,7 +82,7 @@ class ChildCodebookFactory:
     def _lateral(cls, spec: ChildTemplateSpec) -> type[LateralCompositeCodebook]:
         c = spec.constraints
         part_kinds, part_hues = cls._discrete_sets(spec)
-        spacing = 5.0 if spec.operation == "mirror" else 7.5
+        spacing = LateralCompositeCodebook.spacing_factor(spec.operation)
         attrs = {
             "SCALE_RATIO": tuple(c.get("scale_ratio", (0.35, 0.75))),
             "PART_PERIOD_RANGE": tuple(c.get("period_ratio", (0.15, 0.25))),

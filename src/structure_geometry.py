@@ -15,6 +15,7 @@ import mlx.core as mx
 from codebook import Codebook
 from composite_geometry import CompositeGeometry
 from joint_layer_optimizer import JointLayerOptimizer
+from lateral_codebook import LateralCompositeCodebook
 from lateral_composite_geometry import LateralCompositeGeometry
 from stereo import StereoDepth
 from stereo_layers import StereoLayers
@@ -122,8 +123,18 @@ class StructureGeometry:
         if not delta or stats is None:
             return 0.0
         u0, _, z0, a0, u1, _, z1, a1 = stats
-        q0 = math.sqrt(max(a0, 1e-8)) * (Codebook.CAM_Z - z0) / Codebook.FX
-        q1 = math.sqrt(max(a1, 1e-8)) * (Codebook.CAM_Z - z1) / Codebook.FX
+        # area 是 π·r_px²; 除以 π 后开方 = 像素半径, 再换算世界半径 s
+        # (sum 分母不抵消 sqrt(π), 必须修掉, 否则横向归一化间隔偏小 1/√π)
+        q0 = (
+            math.sqrt(max(a0, 1e-8) / math.pi)
+            * (Codebook.CAM_Z - z0)
+            / Codebook.FX
+        )
+        q1 = (
+            math.sqrt(max(a1, 1e-8) / math.pi)
+            * (Codebook.CAM_Z - z1)
+            / Codebook.FX
+        )
         observed_ratio = q1 / max(q0, 1e-8)
         cost = 0.0
 
@@ -134,10 +145,14 @@ class StructureGeometry:
                 return 0.0
             lo, hi = (float(x) for x in delta[key])
             outside = max(lo - observed, observed - hi, 0.0)
+            if outside > 0.0:
+                # 带外: 只按距离惩罚, 不给窄带特异性奖励 (否则窄带会
+                # 在观测明显不匹配时仍吃到 log(width/default) 负证据)
+                return 4.0 * outside
             width = max(hi - lo, 1e-6)
             default_width = default[1] - default[0]
-            # 窄支持集在匹配时获得负对数证据; 超出范围则强惩罚
-            return 0.25 * math.log(width / default_width) + 4.0 * outside
+            # 带内: 窄支持集获得负对数证据
+            return 0.25 * math.log(width / default_width)
 
         cost += range_term("scale_ratio", observed_ratio, (0.35, 0.75))
         x_gap = abs(
@@ -146,12 +161,7 @@ class StructureGeometry:
         lateral = x_gap / max(q0 + q1, 1e-8)
         relation = str(delta.get("relation", ""))
         if relation in {"mirror", "repeat"}:
-            spacing = 5.0 if relation == "mirror" else 7.5
-            cost += range_term(
-                "period_ratio",
-                lateral / spacing,
-                (0.0, 0.30),
-            )
+            cost += cls.lateral_gap_cost(relation, delta, stats)
         else:
             lateral_default = (
                 (-0.25, 0.25)
@@ -162,6 +172,46 @@ class StructureGeometry:
                 "lateral_ratio", lateral, lateral_default
             )
         return cost
+
+    @classmethod
+    def lateral_gap_cost(
+        cls,
+        relation: str,
+        delta: dict[str, object] | None,
+        stats: tuple[float, ...] | None,
+    ) -> float:
+        """mirror/repeat 横向间隔判别证据 (越小越符合 relation)。
+
+        用 kind 感知近端盖校正后的世界归一化间隔
+        g = |x1-x0|/(s0+s1) (`LateralCompositeGeometry.corrected_gap`),
+        消掉圆柱端盖投影的表观半径偏置, 再按 relation 的 spacing_factor
+        还原 period; period 应落在学习到的 period_ratio 带内。带外按距离
+        惩罚, 且当同一间隔按另一操作还原反而落入可行 period 带时, 额外
+        加交叉判别惩罚。
+        """
+        if relation not in {"mirror", "repeat"} or stats is None:
+            return 0.0
+        kind = 1  # 默认 cylinder
+        if delta and delta.get("part_kinds"):
+            kind = int(tuple(delta["part_kinds"])[0])
+        g = LateralCompositeGeometry.corrected_gap(stats, kind)
+        spacing = LateralCompositeCodebook.spacing_factor(relation)
+        other_spacing = LateralCompositeCodebook.spacing_factor(
+            "repeat" if relation == "mirror" else "mirror"
+        )
+        learned = delta.get("period_ratio", ()) if delta else ()
+        if isinstance(learned, (list, tuple)) and len(learned) == 2:
+            lo, hi = float(learned[0]), float(learned[1])
+        else:
+            lo, hi = LateralCompositeCodebook.PART_PERIOD_RANGE
+        own_p = g / spacing
+        other_p = g / other_spacing
+        own_out = max(lo - own_p, own_p - hi, 0.0)
+        cost = 4.0 * own_out
+        lo_feas, hi_feas = LateralCompositeCodebook.PART_PERIOD_RANGE
+        if own_out > 0.0 and lo_feas <= other_p <= hi_feas:
+            cost += 1.0
+        return min(cost, 2.0)
 
     @classmethod
     def costs(cls, fl: mx.array, fr: mx.array) -> dict[str, float]:

@@ -168,11 +168,22 @@ lateral_ratio -0.02–0.02, part kind/hue 固定), 以 R=4/648 样本训练;
 held-out 均为 3/3; layer 使用受限全残差解码 (R=4) 为 2/3, 后层 s/z 仍受
 双层几何瓶颈限制。这些小样本结果验证操作闭环, 不作为大样本精度结论。
 
-多子模板混合门控 (`mixed_template_benchmark.py`, 7 专家 × 2 样本, N=14):
-attach 子模板 2/2, mirror/repeat 各 1/2, layer 子模板 0/2, 总准确率
-8/14; 正确预测平均 winner posterior 0.767, 错误预测 0.432。主要混淆是
-layer child→single、repeat child→mirror child, 说明混合门控需要更强的
-父子层级/操作证据, 当前结果应视为未校准的研究基线。
+多子模板混合门控 (`mixed_template_benchmark.py`): 结构门控已从平铺
+7 专家改为两级「父族 → 族内父子」后验 (`GenericStructureGate.
+decide_hierarchical`): 先按 `geometry_family` 做父族 softmax, 再在族内做
+父子 softmax, 联合后验 = p(family)×p(expert|family), 两级各自按本级最低
+分标定温度, 并附 `temperature_scale` 与 ECE 校准报告。mirror/repeat
+的横向间隔判别 (`StructureGeometry.lateral_gap_cost`) 修正了旧版面积→
+半径的 √π 归一化偏差, 并加「本操作带外 + 另一操作带内」的交叉惩罚。
+改后 (7 专家 × 2 样本, N=14) 为 10/14: mirror 2/2; repeat 1/2 的
+剩余错样本不再误判 mirror, 而是在父族级被 composite 抢走 (composite
+父模型残差 1523.7 远低于 repeat 子模型 3449.2, 属父子残差失衡 +
+composite 几何不拒绝左右并排样本); attach 1/2 (族内父子混淆), layer
+0/2 (家族级 layer child→single)。mirror/repeat 判别本身已由 kind 感知
+近端盖校正 (`LateralCompositeGeometry.corrected_gap`) 修正到 4/4 正确。
+附带修复 `LayeredReconstructor` 遮挡锚点残差到负下限时 s 塌成负值导致
+的 `cylinder radius <= 0` 崩溃 (物理下限钳制), 及 `StructureGeometry.
+delta_cost` 带外仍给窄带特异性奖励的 bug。
 
 ## 通用结构学习框架 (非视觉验证)
 

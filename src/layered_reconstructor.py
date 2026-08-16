@@ -6,6 +6,7 @@ from typing import TYPE_CHECKING
 
 import mlx.core as mx
 
+from codebook import Codebook
 from layered_codebook import LayeredCodebook
 from scene_reconstructor import SceneReconstructor
 from structured_hypothesis import HypothesisCandidate, StructuredHypothesis
@@ -27,6 +28,12 @@ class LayeredReconstructor:
     # 前层通常完整可见, 允许全部残差; 后层被遮挡, 低密度 SPN 的
     # s/z 残差会放大可见面积歧义, 先采用双目锚点 (实测优于校准)
     RESIDUAL_SCALE = (1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 0.0, 0.0)
+    # 遮挡锚点残差有界, 但可见面积代理在强遮挡下仍可能过小 → 残差到
+    # 负下限时 s 可塌成负值 (cga 几何拒绝 radius≤0)。这里只做物理下限
+    # 钳制防崩溃, 不改变正常样本估计。
+    S_FLOOR = 0.05
+    Z_MIN = 0.5
+    Z_MAX = Codebook.CAM_Z - 0.5
 
     @classmethod
     def split_cat(cls, cat_p: mx.array) -> tuple[mx.array, ...]:
@@ -105,12 +112,12 @@ class LayeredReconstructor:
                 geom = [
                     r[0] + float(st[0]),
                     r[1] + float(st[1]),
-                    r[2] + cls._proxy(int(probs[0][i]), st, 0),
-                    r[3] + float(st[2]),
+                    max(r[2] + cls._proxy(int(probs[0][i]), st, 0), cls.S_FLOOR),
+                    min(max(r[3] + float(st[2]), cls.Z_MIN), cls.Z_MAX),
                     r[4] + float(st[4]),
                     r[5] + float(st[5]),
-                    r[6] + cls._proxy(int(probs[1][i]), st, 4),
-                    r[7] + float(st[6]),
+                    max(r[6] + cls._proxy(int(probs[1][i]), st, 4), cls.S_FLOOR),
+                    min(max(r[7] + float(st[6]), cls.Z_MIN), cls.Z_MAX),
                 ]
             rows.append(
                 (

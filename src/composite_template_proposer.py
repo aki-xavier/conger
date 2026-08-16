@@ -15,6 +15,7 @@ import mlx.core as mx
 from codebook import Codebook
 from composite_codebook import CompositeCodebook
 from inverse_config import InverseConfig
+from lateral_codebook import LateralCompositeCodebook
 from scene_reconstructor import SceneReconstructor
 from stereo import StereoDepth
 from structure_birth import StructureCase
@@ -116,7 +117,7 @@ class CompositeTemplateProposer:
         z1 = z0
         x0, y0 = Codebook.unproject(u0, v0, z0)
         # lateral_ratio=±0.2 → 约一个组合直径; repeat 再放宽半档
-        scale = 5.0 if operation == "mirror" else 7.5
+        scale = LateralCompositeCodebook.spacing_factor(operation)
         x1 = x0 + lateral_ratio * scale * (s0 + s1)
         zc1 = Codebook.CAM_Z - z1
         u1 = (Codebook.W - 1) / 2.0 + x1 * Codebook.FX / zc1

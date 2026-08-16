@@ -25,6 +25,16 @@ class LateralCompositeCodebook(CompositeCodebook):
     GEOMETRY_FAMILY = "lateral"
     PART_PERIOD_RANGE = (0.15, 0.25)  # 原始 proposal lateral_ratio 范围
     SPACING_FACTOR = 5.0  # mirror: 0.2 约等于一个组合直径
+    REPEAT_SPACING_FACTOR = 7.5  # repeat: 0.2 约等于一个半组合直径
+
+    @classmethod
+    def spacing_factor(cls, operation: str) -> float:
+        """mirror/repeat 横向组合的周期缩放常数。"""
+        return (
+            cls.SPACING_FACTOR
+            if operation == "mirror"
+            else cls.REPEAT_SPACING_FACTOR
+        )
     TEMPLATE_LINEAGE = TemplateLineage(
         family="lateral",
         parent_family="composite",

@@ -19,11 +19,17 @@ from structure_benchmark import StructureBenchmark, StructureCaseResult
 class MixedTemplateBenchmark:
     """父模板 + 多动态子模板的混合场景门控基准。"""
 
-    def __init__(self, samples_per_family: int = 1, seed: int = 777):
+    def __init__(
+        self,
+        samples_per_family: int = 1,
+        seed: int = 777,
+        temperature_scale: float = 1.0,
+    ):
         if samples_per_family < 1:
             raise ValueError("samples_per_family 必须 >=1")
         self.samples_per_family = samples_per_family
         self.seed = seed
+        self.temperature_scale = temperature_scale
 
     @staticmethod
     def manifest_paths() -> tuple[Path, ...]:
@@ -40,7 +46,7 @@ class MixedTemplateBenchmark:
         )
 
     @classmethod
-    def load_registry(cls) -> ExpertRegistry:
+    def load_registry(cls, temperature_scale: float = 1.0) -> ExpertRegistry:
         """加载三个父模板 + 全部 manifest 中已训练的动态子模板。"""
         configs = {
             "single": InverseConfig(
@@ -49,13 +55,15 @@ class MixedTemplateBenchmark:
             "layered": InverseConfig(scene_family="layered", replicates=1),
             "composite": InverseConfig(scene_family="composite", replicates=1),
         }
-        registry = ExpertRegistry.from_configs(configs)
+        registry = ExpertRegistry.from_configs(
+            configs, temperature_scale=temperature_scale
+        )
         for path in cls.manifest_paths():
             registry.load_manifest(path, missing_ok=True)
         return registry
 
     def run(self) -> dict[str, object]:
-        registry = self.load_registry()
+        registry = self.load_registry(self.temperature_scale)
         renderer, cam_l, cam_r = Codebook.make_renderer()
         results = []
         for family_i, (name, expert) in enumerate(registry.experts.items()):
@@ -75,11 +83,13 @@ class MixedTemplateBenchmark:
                     needs_new_structure=decision.needs_new_structure,
                 )
                 results.append(result)
+                fam_p = decision.family_posterior
                 print(
                     f"true={name} pred={result.predicted} "
                     f"winner_p={result.posterior[result.predicted]:.3f} "
                     f"true_score={result.scores[name]:.1f} "
-                    f"pred_score={result.scores[result.predicted]:.1f}"
+                    f"pred_score={result.scores[result.predicted]:.1f} "
+                    f"family_p={StructureBenchmark._fmt(fam_p)}"
                 )
         summary = StructureBenchmark.summarize(tuple(results))
         correct_p = [
@@ -103,6 +113,7 @@ class MixedTemplateBenchmark:
         print(f"winner_posterior_mean: {summary['winner_posterior_mean']:.3f}")
         print(f"correct_posterior_mean: {summary['correct_posterior_mean']}")
         print(f"wrong_posterior_mean: {summary['wrong_posterior_mean']}")
+        print(f"ece: {summary['ece']:.3f}")
         return {"results": tuple(results), **summary}
 
 
@@ -110,10 +121,12 @@ def main() -> None:
     ap = argparse.ArgumentParser()
     ap.add_argument("--samples-per-family", type=int, default=1)
     ap.add_argument("--seed", type=int, default=777)
+    ap.add_argument("--temperature-scale", type=float, default=1.0)
     args = ap.parse_args()
     MixedTemplateBenchmark(
         samples_per_family=args.samples_per_family,
         seed=args.seed,
+        temperature_scale=args.temperature_scale,
     ).run()
 
 

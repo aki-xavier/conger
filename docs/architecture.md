@@ -330,11 +330,38 @@ mirror/repeat (R=8) held-out 均 3/3; layer 子模板使用受限全残差解码
 样本不会被误判为 layered。
 
 多子模板混合门控 (`mixed_template_benchmark.py`): 从 4 个 manifest 恢复
-attach/layer/mirror/repeat 子模板并与 3 个父模板共同门控; 7 专家 × 2
-样本 (N=14) 总准确率 8/14。attach child 2/2, mirror/repeat 各 1/2,
-layer child 0/2; 正确 winner posterior 均值 0.767, 错误 0.432。主要
-混淆是 layer child→single 和 repeat child→mirror child, 表明平铺专家
-混合在父子模板并存时会过置信, 需要层级门控/操作判别校准。
+attach/layer/mirror/repeat 子模板并与 3 个父模板共同门控。结构门控已
+从平铺 softmax 改为两级「父族 → 族内父子」后验
+(`GenericStructureGate.decide_hierarchical`): 先按 `geometry_family`
+(single/layered/composite/lateral) 做父族 softmax, 再在族内做父子
+softmax, 联合后验 = p(family)×p(expert|family), 两级各自按本级最低分
+标定温度, 避免平铺混合在父子模板并存时的过置信; `temperature_scale`
+与 ECE 提供校准旋钮/报告。mirror/repeat 的操作判别
+(`StructureGeometry.lateral_gap_cost`) 修正了旧版面积→半径的 √π
+归一化偏差 (sum 分母不抵消), 改取像素空间归一化间隔并加交叉判别
+惩罚。改后 (N=14) 为 10/14: mirror 1/2→2/2 (判别生效), repeat 仍 1/2,
+attach 1/2 (族内父子混淆), layer 0/2 (家族级 layer child→single); ECE
+0.314, 正确/错误 winner posterior 均值 0.638/0.593。附带修复
+`LayeredReconstructor` 遮挡锚点残差到负下限时 s 塌成负值导致的
+`cylinder radius <= 0` 崩溃 (物理下限钳制, 不改变正常样本估计)。
+
+repeat→mirror 的根因与修复 (kind 轮廓拟合子项目): 圆柱 `length=2.2s`
+沿视轴 (+Z), 可见端盖在 `z+1.1s` 处, 表观半径按 `zc/(zc−1.1s)` 放大;
+叠加离轴侧表面、max-pool 下采样对小部件额外膨胀、前景阈值偏移, 观测
+归一化间隔 `g_obs` 相对真值系统性偏小 1.09–1.52×。子项目落两处:
+① `LateralCompositeGeometry.estimate` 改为模板足迹内全分辨率圆拟合
+(`_disk_fit`, 消 max-pool 膨胀) + 逐 part 视差深度; ②
+`LateralCompositeGeometry.corrected_gap` 按 kind 近端盖偏移 (sphere
+0 / cylinder 1.1 / box 1.0) 反解真实世界 s/x, 重算 g。
+`StructureGeometry.lateral_gap_cost` 改用 `corrected_gap`, 并修复
+`range_term` 带外仍给窄带特异性奖励的 bug。判别现在对 4 个 lateral
+held-out 全部正确 (mirror/repeat 各自的 lateral_gap_cost 均为本操作
+更低)。但混合门控 N=14 仍 10/14: repeat #0 不再误判 mirror, 改为在
+父族级被 composite 抢走 —— composite 父模型 (2916 样本) 残差 1523.7
+远低于 repeat 子模型 (R=8) 3449.2, 且 `CompositeGeometry.estimate`
+对左右并排样本退化成 0.7/0.3 质心分割被 attach delta 误奖励。这是
+父子模型残差失衡 + composite 几何对 lateral 样本不拒绝, 属家族级
+证据问题 (下一方向), 非 mirror/repeat 判别问题。
 
 **实施顺序**:
 1. 类别契约序列化 + padding 扩展;
