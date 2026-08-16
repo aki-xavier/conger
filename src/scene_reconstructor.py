@@ -330,6 +330,29 @@ class SceneReconstructor:
             fr,
             kind_topk=kind_topk,
         )
+        # 推理期几何↔光照 ECM 精炼 (§7.1): 默认关闭。kind 固定, 只精炼
+        # 连续几何 (u,v,s,z); 外观 (hue/lcol/ldir) 沿用 refine_scene 的 MAP。
+        em_trajectory = None
+        if app.cfg.em_refine:
+            from generic_em import EMLoop
+            from scene_em_refiner import SceneEMRefiner
+
+            kind = int(prm[0])
+            refiner = SceneEMRefiner(
+                app.codebook,
+                kind,
+                fl,
+                fr,
+                appearance_topk=app.cfg.em_appearance_topk,
+            )
+            em = EMLoop(
+                refiner,
+                max_iters=app.cfg.em_max_iters,
+                tol=app.cfg.em_tolerance,
+            )
+            em_res = em.run((fl, fr), tuple(prm[1:5]))
+            prm = (float(kind), *em_res.params, prm[5], prm[6], prm[7])
+            em_trajectory = em_res.trajectory
         order = mx.argsort(posterior)[::-1][:5].tolist()
         hypotheses = tuple(
             HypothesisCandidate(candidates[i], float(posterior[i]), float(scores[i]))
@@ -355,6 +378,7 @@ class SceneReconstructor:
             residual=best_residual,
             complexity=app.codebook.TEMPLATE_COMPLEXITY,
             novelty_score=novelty,
+            em_trajectory=em_trajectory,
         )
 
     @staticmethod

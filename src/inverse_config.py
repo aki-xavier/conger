@@ -37,6 +37,12 @@ class InverseConfig:
     # 显式结构族: None 时由 n_objects 兼容推导; composite 是双图元
     # 附着组合模板 (区别于 layered 的独立前后层)
     scene_family: str | None = None
+    # 推理期几何↔光照 ECM 精炼 (§7.1): 默认关闭, 单物体验证稳定后再开。
+    # 每轮 E 步 54×2 渲染 + M 步坐标搜索 (约 150 渲染/轮)。
+    em_refine: bool = False
+    em_max_iters: int = 2
+    em_appearance_topk: int = 3
+    em_tolerance: float = 1.0
 
     def __post_init__(self) -> None:
         """显式结构族自动同步旧 n_objects 兼容字段。"""

@@ -48,6 +48,7 @@ class StructuredHypothesis:
     novelty_score: float | None = None
     structure_posterior: float | None = None
     structure_posteriors: dict[str, float] | None = None
+    em_trajectory: tuple[float, ...] | None = None  # 几何↔光照 ECM 每轮 log-likelihood
 
     def __post_init__(self) -> None:
         if self.representation is None and self.scene is not None:
