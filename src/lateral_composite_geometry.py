@@ -109,52 +109,35 @@ class LateralCompositeGeometry(CompositeGeometry):
         return cx2, cy2, math.sqrt(tot / math.pi)
 
     @classmethod
-    def estimate(cls, fl: mx.array, fr: mx.array) -> tuple[float, ...]:
-        """左右图 → 横向 base/part 的 [u,v,z,area]×2 (全分辨率圆拟合)。
+    def corrected_gap(
+        cls, fl: mx.array, fr: mx.array, kind: int
+    ) -> float | None:
+        """kind 感知近端盖校正后的世界归一化间隔 g = |x1-x0|/(s0+s1)。
 
-        area = π·r_disk² 为全分辨率盘面积 (消 max-pool 下采样膨胀), 供
-        lateral_gap_cost 做 kind 感知近端盖校正; z 保留逐 part 视差深度,
-        供 `_lateral_cost` 用两部件深度差拒绝非横向结构。
+        在模板足迹内做全分辨率圆拟合 (消 max-pool 下采样膨胀), 再按 kind
+        近端盖偏移反解真实世界半径 s 与中心 x。返回 None 表示无法可靠
+        分割 (判别器应放弃)。与 `estimate` (重建锚点) 解耦 —— 判别证据
+        直接取自原始帧, 不改动已训练模型的锚点契约。
         """
         wl = StereoDepth.foreground_weights(fl)
-        wr = StereoDepth.foreground_weights(fr)
         fg = wl > 0.01
         split = cls.split_score(fg)
         if split is None:
-            return super().estimate(fl, fr)
+            return None
         _, base, part = split
         q = cls.DOWN
         b = cls._disk_fit(fg, base, q)
         p = cls._disk_fit(fg, part, q)
         if b is None or p is None:
-            return super().estimate(fl, fr)
-        _, d_global, _ = StereoDepth().estimate(fl, fr)
-        z0 = cls._part_depth(wl, wr, base, d_global)
-        z1 = cls._part_depth(wl, wr, part, d_global)
-        u0, v0, r0 = b
-        u1, v1, r1 = p
-        return (
-            u0, v0, z0, math.pi * r0 * r0,
-            u1, v1, z1, math.pi * r1 * r1,
-        )
-
-    @classmethod
-    def corrected_gap(
-        cls, stats: tuple[float, ...], kind: int
-    ) -> float:
-        """近端盖校正后的世界归一化间隔 g = |x1-x0|/(s0+s1)。
-
-        盘半径 r_obs 与近端面深度 (zc−δ·s) 满足 r_obs = s·FX/(zc−δ·s),
-        反解真实世界半径 s 与中心 x, 消掉圆柱端盖投影的表观半径偏置。
-        """
-        u0, _, z0, a0, u1, _, z1, a1 = stats
+            return None
+        u0, _, r0 = b
+        u1, _, r1 = p
+        z_global, _, _ = StereoDepth().estimate(fl, fr)
+        zc = Codebook.CAM_Z - z_global
         if 0 <= kind < len(cls.NEAR_CAP_DELTA):
             delta = cls.NEAR_CAP_DELTA[kind]
         else:
             delta = 1.1  # 默认 cylinder
-        zc = Codebook.CAM_Z - 0.5 * (z0 + z1)
-        r0 = math.sqrt(max(a0, 1e-8) / math.pi)
-        r1 = math.sqrt(max(a1, 1e-8) / math.pi)
         s0 = r0 * zc / (Codebook.FX + delta * r0)
         s1 = r1 * zc / (Codebook.FX + delta * r1)
         c = (Codebook.W - 1) / 2.0

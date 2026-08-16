@@ -175,15 +175,14 @@ decide_hierarchical`): 先按 `geometry_family` 做父族 softmax, 再在族内�
 分标定温度, 并附 `temperature_scale` 与 ECE 校准报告。mirror/repeat
 的横向间隔判别 (`StructureGeometry.lateral_gap_cost`) 修正了旧版面积→
 半径的 √π 归一化偏差, 并加「本操作带外 + 另一操作带内」的交叉惩罚。
-改后 (7 专家 × 2 样本, N=14) 为 10/14: mirror 2/2; repeat 1/2 的
-剩余错样本不再误判 mirror, 而是在父族级被 composite 抢走 (composite
-父模型残差 1523.7 远低于 repeat 子模型 3449.2, 属父子残差失衡 +
-composite 几何不拒绝左右并排样本); attach 1/2 (族内父子混淆), layer
-0/2 (家族级 layer child→single)。mirror/repeat 判别本身已由 kind 感知
-近端盖校正 (`LateralCompositeGeometry.corrected_gap`) 修正到 4/4 正确。
-附带修复 `LayeredReconstructor` 遮挡锚点残差到负下限时 s 塌成负值导致
-的 `cylinder radius <= 0` 崩溃 (物理下限钳制), 及 `StructureGeometry.
-delta_cost` 带外仍给窄带特异性奖励的 bug。
+改后 (7 专家 × 2 样本, N=14) 为 11/14: mirror/repeat 4/4 (kind 感知
+近端盖校正 `LateralCompositeGeometry.corrected_gap` 从原始帧直接算判别
+间隔, 与重建锚点解耦), 且 `StructureGeometry.costs` 在横向证据明显强于
+attach 时拒绝 composite (左右并排样本不再被伪水平接触线误判为附着);
+剩余 3 错: attach 1/2 (族内父子混淆), layer 0/2 (家族级 layer
+child→single)。附带修复 `LayeredReconstructor` 遮挡锚点残差到负下限时
+s 塌成负值导致的 `cylinder radius <= 0` 崩溃 (物理下限钳制), 及
+`StructureGeometry.delta_cost` 带外仍给窄带特异性奖励的 bug。
 
 ## 通用结构学习框架 (非视觉验证)
 

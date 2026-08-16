@@ -118,6 +118,8 @@ class StructureGeometry:
         family: str,
         delta: dict[str, object] | None,
         stats: tuple[float, ...] | None,
+        fl: mx.array | None = None,
+        fr: mx.array | None = None,
     ) -> float:
         """子模板 delta 与观测几何的匹配/特异性代价。"""
         if not delta or stats is None:
@@ -161,7 +163,7 @@ class StructureGeometry:
         lateral = x_gap / max(q0 + q1, 1e-8)
         relation = str(delta.get("relation", ""))
         if relation in {"mirror", "repeat"}:
-            cost += cls.lateral_gap_cost(relation, delta, stats)
+            cost += cls.lateral_gap_cost(relation, delta, fl, fr)
         else:
             lateral_default = (
                 (-0.25, 0.25)
@@ -178,7 +180,8 @@ class StructureGeometry:
         cls,
         relation: str,
         delta: dict[str, object] | None,
-        stats: tuple[float, ...] | None,
+        fl: mx.array | None = None,
+        fr: mx.array | None = None,
     ) -> float:
         """mirror/repeat 横向间隔判别证据 (越小越符合 relation)。
 
@@ -189,12 +192,14 @@ class StructureGeometry:
         惩罚, 且当同一间隔按另一操作还原反而落入可行 period 带时, 额外
         加交叉判别惩罚。
         """
-        if relation not in {"mirror", "repeat"} or stats is None:
+        if relation not in {"mirror", "repeat"} or fl is None or fr is None:
             return 0.0
         kind = 1  # 默认 cylinder
         if delta and delta.get("part_kinds"):
             kind = int(tuple(delta["part_kinds"])[0])
-        g = LateralCompositeGeometry.corrected_gap(stats, kind)
+        g = LateralCompositeGeometry.corrected_gap(fl, fr, kind)
+        if g is None:
+            return 0.0  # 无法可靠分割 → 中性, 不误导门控
         spacing = LateralCompositeCodebook.spacing_factor(relation)
         other_spacing = LateralCompositeCodebook.spacing_factor(
             "repeat" if relation == "mirror" else "mirror"
@@ -224,6 +229,11 @@ class StructureGeometry:
         layered = cls._layered_cost(fl, fr, fg)
         composite = cls._composite_cost(fl, fr, split)
         lateral = cls._lateral_cost(fl, fr, fg)
+        # 横向组合证据明显强于 attach → 组合结构高代价: 左右并排样本会
+        # 让 CompositeGeometry 退化出伪水平接触线, 把横向间隔误判成
+        # attach 的零横向偏移, 必须在此拒绝。
+        if lateral < composite - 0.15 and lateral < 0.4:
+            composite = max(composite, 1.6)
         # 强结构证据作为负对数证据偏移: 只在没有前后层证据时奖励单模板,
         # 只有视差/空间双层都明确时奖励 layered, 只有接触模板很稳时奖励
         # composite。偏移用于打破渲染残差歧义, 阈值由三族基准样本标定。

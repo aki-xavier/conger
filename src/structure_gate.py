@@ -75,7 +75,7 @@ class StructureGate(GenericStructureGate):
                         family, fl, fr
                     )
                 geometry_cost += StructureGeometry.delta_cost(
-                    family, est.template_delta, stats_cache[family]
+                    family, est.template_delta, stats_cache[family], fl, fr
                 )
             with_residual[name] = replace(
                 est,

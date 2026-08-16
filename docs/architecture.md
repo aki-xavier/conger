@@ -353,15 +353,14 @@ repeat→mirror 的根因与修复 (kind 轮廓拟合子项目): 圆柱 `length=
 (`_disk_fit`, 消 max-pool 膨胀) + 逐 part 视差深度; ②
 `LateralCompositeGeometry.corrected_gap` 按 kind 近端盖偏移 (sphere
 0 / cylinder 1.1 / box 1.0) 反解真实世界 s/x, 重算 g。
-`StructureGeometry.lateral_gap_cost` 改用 `corrected_gap`, 并修复
-`range_term` 带外仍给窄带特异性奖励的 bug。判别现在对 4 个 lateral
-held-out 全部正确 (mirror/repeat 各自的 lateral_gap_cost 均为本操作
-更低)。但混合门控 N=14 仍 10/14: repeat #0 不再误判 mirror, 改为在
-父族级被 composite 抢走 —— composite 父模型 (2916 样本) 残差 1523.7
-远低于 repeat 子模型 (R=8) 3449.2, 且 `CompositeGeometry.estimate`
-对左右并排样本退化成 0.7/0.3 质心分割被 attach delta 误奖励。这是
-父子模型残差失衡 + composite 几何对 lateral 样本不拒绝, 属家族级
-证据问题 (下一方向), 非 mirror/repeat 判别问题。
+`StructureGeometry.lateral_gap_cost` 改用 `corrected_gap` (直接取自
+原始帧, 与重建锚点解耦, 不改已训练模型契约), 并修复 `range_term`
+带外仍给窄带特异性奖励的 bug。判别对 4 个 lateral held-out 全部正确。
+又发现 repeat→composite 的家族级混淆根因是 `CompositeGeometry` 对左右
+并排样本退化出伪水平接触线 (把横向间隔误判成 attach 的零横向偏移),
+在 `StructureGeometry.costs` 加横向证据强于 attach 时拒绝 composite。
+改后 N=14 为 11/14: mirror/repeat 4/4, 剩余 attach 1/2 (族内父子混淆)、
+layer 0/2 (家族级 layer child→single)。
 
 **实施顺序**:
 1. 类别契约序列化 + padding 扩展;
