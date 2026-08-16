@@ -30,6 +30,7 @@ from cga.engine import (
 )
 
 from template_lineage import TemplateLineage
+from textures import default_library
 
 if TYPE_CHECKING:
     from inverse_config import InverseConfig
@@ -48,6 +49,7 @@ class Codebook:
     N_COMBO = 162
     S_RANGE = (0.35, 0.6)  # 半径/半边长, 训练范围
     Z_RANGE = (2.5, 4.0)  # 图元中心世界 z, 训练范围
+    ROUGHNESS = (0.2, 0.9)  # 材质 roughness 采样范围 (纹理接线的连续目标)
     # 外推探针区间 (训练支撑集之外; 位置不外推 —— 受图像边界物理限制)
     S_EXTRA = ((0.25, 0.35), (0.6, 0.75))
     Z_EXTRA = ((2.0, 2.5), (4.0, 4.5))
@@ -87,6 +89,10 @@ class Codebook:
 
     def __init__(self, cfg: InverseConfig):
         self.cfg = cfg
+        # 纹理接线: N_COMBO 随 n_textures 扩展 (实例属性遮蔽类常量);
+        # 贴图库仅 textured 时生成, 默认空 = 现行行为逐字节一致
+        self.N_COMBO = 162 * max(cfg.n_textures, 1)
+        self.textures = default_library(cfg.n_textures) if cfg.textured else ()
 
     @staticmethod
     def obj_color(hue_idx: int) -> int:
@@ -105,6 +111,19 @@ class Codebook:
                 for r in range(replicates)
             ]
         )
+
+    def sample_textured(self, replicates: int, seed: int, extrap: bool = False) -> mx.array:
+        """→ (162·n_textures·R, 10) [kind,u,v,s,z,hue,lcol,ldir,tex_id,roughness]。
+
+        基于 8 列 sample 逐行 × n_textures 展开; roughness 固定 0.55
+        (实测在自由外观/纹理主线里不可鲁棒估计, §2.3)。"""
+        base = self.sample(replicates, seed, extrap).tolist()
+        n_tex = self.cfg.n_textures
+        rows = []
+        for row in base:
+            for tex in range(n_tex):
+                rows.append([*row, float(tex), 0.55])
+        return mx.array(rows, dtype=mx.float32)
 
     @staticmethod
     def _block(key: mx.array, extrap: bool = False) -> mx.array:
@@ -191,11 +210,16 @@ class Codebook:
         return BoxGeometry(2 * s, 2 * s, 2 * s)
 
     def to_scene(self, params: tuple[float, ...]) -> Scene:
-        """场景参数 (kind,u,v,s,z,hue,lcol,ldir) → cga Scene。"""
+        """场景参数 (kind,u,v,s,z,hue,lcol,ldir[,tex_id,roughness]) → cga Scene。
+
+        >8 列时带纹理接线: tex_id 选 albedo map, roughness 定高光瓣;
+        8 列时保持现行 roughness=0.55、无贴图 (不回归)。"""
         cfg = self.cfg
         kind = int(params[0])
         u, v, s, z = (float(p) for p in params[1:5])
         hue, lcol, ldir = (int(p) for p in params[5:8])
+        tex_id = int(params[8]) if len(params) > 8 else -1
+        rough = float(params[9]) if len(params) > 9 else 0.55
         x, y = self.unproject(u, v, z)
         geom = self.geometry(kind, s)
         scene = Scene(background=Color(cfg.bg_color))
@@ -206,8 +230,9 @@ class Codebook:
                 direction=self.LIGHT_DIRS[ldir],
             )
         )
+        map_ = None if tex_id < 0 else self.textures[tex_id]
         material = MeshStandardMaterial(
-            Color(self.obj_color(hue)), roughness=0.55
+            Color(self.obj_color(hue)), roughness=rough, map=map_
         )
         scene.add(Mesh(geom, material, position=(x, y, z)))
         return scene

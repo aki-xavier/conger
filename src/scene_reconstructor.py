@@ -36,6 +36,12 @@ class SceneReconstructor:
         len(Codebook.LIGHT_COLORS),
         len(Codebook.LIGHT_DIRS),
     )
+
+    @classmethod
+    def cat_sizes(cls, n_textures: int = 0) -> tuple[int, ...]:
+        """cat_sizes 随纹理自由度扩展: 默认 (3,6,3,3); textured → (3,6,3,3,n_tex)。"""
+        base = cls.CAT_SIZES
+        return base + (n_textures,) if n_textures > 0 else base
     # 物理下限钳制 (与 LayeredReconstructor 对称): 负残差 + 缩水面积代理
     # 会把 s 压成负值 → cga 几何拒绝 radius≤0; z 越界会经 unproject 产生
     # zc<0 的镜像翻转。只做崩溃/野值防护, 不改变正常样本估计。
@@ -86,10 +92,10 @@ class SceneReconstructor:
         return q * coef
 
     @classmethod
-    def split_cat(cls, cat_p: mx.array) -> tuple[mx.array, ...]:
-        """拼接场景后验 (N,15) → kind/hue/lcol/ldir 四个 (N,C_j)。"""
+    def split_cat(cls, cat_p: mx.array, cat_sizes: tuple[int, ...] | None = None) -> tuple[mx.array, ...]:
+        """拼接场景后验 (N,ΣC) → 各因子 (N,C_j)。"""
         out, lo = [], 0
-        for nc in cls.CAT_SIZES:
+        for nc in (cat_sizes or cls.CAT_SIZES):
             out.append(cat_p[:, lo : lo + nc])
             lo += nc
         return tuple(out)
@@ -97,28 +103,32 @@ class SceneReconstructor:
     @classmethod
     def params(
         cls,
-        t_pred: mx.array,  # (N,4) 残差参数化的 u,v,s−ŝ,z−ẑ
-        cat_p: mx.array,  # (N,15) 拼接场景因子后验
+        t_pred: mx.array,  # (N,4) 残差参数化 u,v,s−ŝ,z−ẑ
+        cat_p: mx.array,  # (N,ΣC) 拼接场景因子后验
         stats: mx.array,  # (N,3) [ẑ, 视差, 掩码面积]
+        cat_sizes: tuple[int, ...] | None = None,
     ) -> tuple[tuple[float, ...], ...]:
-        """模型输出 → Codebook.to_scene 参数 (kind,u,v,s,z,hue,lcol,ldir)。"""
-        probs = [mx.argmax(p, axis=1).astype(mx.int32) for p in cls.split_cat(cat_p)]
+        """模型输出 → Codebook.to_scene 参数 (kind,u,v,s,z,hue,lcol,ldir[,tex_id,roughness])。"""
+        sizes = cat_sizes or cls.CAT_SIZES
+        probs = [mx.argmax(p, axis=1).astype(mx.int32) for p in cls.split_cat(cat_p, sizes)]
         s = mx.maximum(t_pred[:, 2] + cls.s_proxy(probs[0], stats), cls.S_FLOOR)
         z = mx.clip(t_pred[:, 3] + stats[:, 0], cls.Z_MIN, cls.Z_MAX)
+        tex = len(sizes) >= 5
         rows = []
         for i in range(t_pred.shape[0]):
-            rows.append(
-                (
-                    float(probs[0][i]),
-                    float(t_pred[i, 0]),
-                    float(t_pred[i, 1]),
-                    float(s[i]),
-                    float(z[i]),
-                    float(probs[1][i]),
-                    float(probs[2][i]),
-                    float(probs[3][i]),
-                )
-            )
+            row = [
+                float(probs[0][i]),
+                float(t_pred[i, 0]),
+                float(t_pred[i, 1]),
+                float(s[i]),
+                float(z[i]),
+                float(probs[1][i]),
+                float(probs[2][i]),
+                float(probs[3][i]),
+            ]
+            if tex:
+                row += [float(probs[4][i]), 0.55]  # tex_id, roughness (固定 0.55)
+            rows.append(tuple(row))
         return tuple(rows)
 
     @classmethod
@@ -366,11 +376,12 @@ class SceneReconstructor:
         SPN 原始后验仍随返回值保留。"""
         f, stats, _ = cls.frame_features(app, fl, fr, rw)
         t, cat_p, r = net.predict(f)
-        prm = cls.params(t, cat_p, stats)[0]
+        sizes = cls.cat_sizes(app.cfg.n_textures)
+        prm = cls.params(t, cat_p, stats, sizes)[0]
         rn, ent, novelty = cls.novelty_metrics(
-            cat_p[0], r, cls.CAT_SIZES, None
+            cat_p[0], r, sizes, None
         )
-        if not refine:
+        if not refine or app.cfg.textured:
             return StructuredHypothesis(
                 scene=app.codebook.to_scene(prm),
                 params=prm,
@@ -404,7 +415,7 @@ class SceneReconstructor:
         )
         best_residual = float(mx.min(scores))
         rn, ent, novelty = cls.novelty_metrics(
-            cat_p[0], r, cls.CAT_SIZES, best_residual
+            cat_p[0], r, sizes, best_residual
         )
         return StructuredHypothesis(
             scene=app.codebook.to_scene(prm),

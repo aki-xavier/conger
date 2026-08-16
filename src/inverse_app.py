@@ -20,7 +20,7 @@ from codebook import Codebook
 from composite_codebook import CompositeCodebook
 from composite_reconstructor import CompositeReconstructor
 from data_builder import DataBuilder
-from evaluator import LAYERED_TARGET_COLS, Evaluator
+from evaluator import LAYERED_TARGET_COLS, TEXTURED_TARGET_COLS, Evaluator
 from feature_extractor import FeatureExtractor
 from inverse_config import InverseConfig
 from layered_child_reconstructor import ConstrainedLayeredReconstructor
@@ -149,7 +149,7 @@ class InverseApp:
                 rel_floor=cfg.sigma_rel_floor,
                 scene_classes=c_tr,
                 cat_sizes=(
-                    SceneReconstructor.CAT_SIZES
+                    SceneReconstructor.cat_sizes(cfg.n_textures)
                     if cfg.family == "single"
                     else LayeredReconstructor.CAT_SIZES
                 ),
@@ -166,9 +166,10 @@ class InverseApp:
             ke0 = mx.argmax(ce_p[:, : Codebook.N_KIND], axis=1)
             ti_pred = SceneReconstructor.physical_targets(ti_raw, s_ti, ki0)
             te_pred = SceneReconstructor.physical_targets(te_raw, s_te, ke0)
-            ci_pred = SceneReconstructor.params(ti_raw, ci_p, s_ti)
-            ce_pred = SceneReconstructor.params(te_raw, ce_p, s_te)
-            if cfg.refine_appearance:
+            sz = SceneReconstructor.cat_sizes(cfg.n_textures)
+            ci_pred = SceneReconstructor.params(ti_raw, ci_p, s_ti, sz)
+            ce_pred = SceneReconstructor.params(te_raw, ce_p, s_te, sz)
+            if cfg.refine_appearance and not cfg.textured:
                 print(
                     f"  渲染残差精炼: top{cfg.kind_topk} kind × "
                     "hue×lcol×ldir 候选 × 左右视图"
@@ -326,7 +327,7 @@ class InverseApp:
         """连续目标 GT vs Pred 散点 (插值蓝/外推红)。"""
         cb = Codebook
         names = Evaluator.target_names(p_ti)
-        cols = LAYERED_TARGET_COLS if p_ti.shape[1] == 14 else (1, 2, 3, 4)
+        cols = LAYERED_TARGET_COLS if p_ti.shape[1] == 14 else TEXTURED_TARGET_COLS if p_ti.shape[1] == 10 else (1, 2, 3, 4)
         n = len(names)
         fig, axes = plt.subplots(2, (n + 1) // 2, figsize=(4.5 * ((n + 1) // 2), 8))
         rng = {"s": cb.S_RANGE + cb.S_EXTRA, "z": cb.Z_RANGE + cb.Z_EXTRA}
@@ -388,10 +389,11 @@ class InverseApp:
     # ── 自检断言 (阈值依据见各注释; 2026-08-12 全量运行标定) ────────
 
     def self_check(self, mi: dict[str, float], me: dict[str, float]) -> None:
-        if self.cfg.family in {"layered", "composite"}:
+        if self.cfg.family in {"layered", "composite"} or self.cfg.textured:
             vals = list(mi.values()) + list(me.values())
-            assert all(math.isfinite(v) for v in vals), "多图元指标含 NaN/inf"
-            print(f"{self.cfg.family}: 报告模式 ✓ (结构族自检; 阈值待标定)")
+            assert all(math.isfinite(v) for v in vals), "多图元/纹理指标含 NaN/inf"
+            tag = "textured" if self.cfg.textured else self.cfg.family
+            print(f"{tag}: 报告模式 ✓ (结构/纹理族自检; 阈值待标定)")
             return
         # 全 kind 结构精炼实测 (kindgeo 契约, 2026-08-13): 插值 0.753;
         # 阈值防结构候选机制崩溃 (随机 0.33), 不把当前上限硬编码过紧
@@ -487,6 +489,13 @@ class InverseApp:
             action="store_true",
             help="推理期几何↔光照 ECM 精炼 (§7.1, 默认关闭, 仅单物体)",
         )
+        ap.add_argument(
+            "--n-textures",
+            type=int,
+            default=0,
+            help="纹理自由度: 0=关(默认); >0=单物体加 n 种 albedo map 纹理(离散) "
+            "+ roughness(连续), 组合数 162→162×n",
+        )
         a = ap.parse_args()
         n_objects = (
             (1 if a.scene_family == "single" else 2)
@@ -504,4 +513,5 @@ class InverseApp:
             n_objects=n_objects,
             scene_family=a.scene_family,
             em_refine=a.em_refine,
+            n_textures=a.n_textures,
         )

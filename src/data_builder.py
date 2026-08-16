@@ -31,9 +31,10 @@ class DataBuilder:
         cfg = self.cfg
         cb = self.codebook
         feat_tag = "".join(f"{s[:2]}{c[:2]}" for s, c in cfg.feat_spec)
+        tex_tag = f"t{cfg.n_textures}" if cfg.n_textures else ""
         lvl_tag = (
             f"k{cb.N_KIND}h{cb.N_HUE}c{len(cb.LIGHT_COLORS)}d{len(cb.LIGHT_DIRS)}"
-            f"o{cb.N_OBJECTS}sv{cb.SAMPLE_V}rp{cb.RENDER_V}"
+            f"o{cb.N_OBJECTS}sv{cb.SAMPLE_V}rp{cb.RENDER_V}{tex_tag}"
         )
         # 结构族自带统计契约版本: st4 单物体 / sl8 遮挡层 / cp1 组合物
         stereo_tag = cb.STEREO_V
@@ -50,7 +51,10 @@ class DataBuilder:
             d = mx.load(str(path))
             return d["P"], d["F"], d["S"]
         seed = {"tr": 42, "ti": 99, "te": 7}[split]
-        p = self.codebook.sample(1, seed + r, extrap=split == "te")
+        if self.cfg.textured:
+            p = self.codebook.sample_textured(1, seed + r, extrap=split == "te")
+        else:
+            p = self.codebook.sample(1, seed + r, extrap=split == "te")
         f, s = self.feats_of(p)
         mx.save_safetensors(str(path), {"P": p, "F": f, "S": s})
         print(f"  块缓存 → {path.name}")
@@ -118,14 +122,17 @@ class DataBuilder:
 
     @staticmethod
     def targets(p: mx.array) -> mx.array:
-        """参数 → 连续目标 (单物体 4 维 / 双层 8 维)。"""
+        """参数 → 连续目标 (单物体 4 维 / 双层 8 维)。roughness 走独立谱形
+        头 (RoughnessHead), 不进主模型连续目标。"""
         if p.shape[1] == 14:
             return p[:, [1, 2, 3, 4, 7, 8, 9, 10]]
         return p[:, 1:5]
 
     @staticmethod
     def scene_classes(p: mx.array) -> mx.array:
-        """参数 → 离散场景因子 (单物体 4 维 / 双层 6 维)。"""
+        """参数 → 离散场景因子 (单物体 4 维 / 纹理 5 维 / 双层 6 维)。"""
         if p.shape[1] == 14:
             return p[:, [0, 6, 5, 11, 12, 13]].astype(mx.int32)
+        if p.shape[1] == 10:  # 纹理接线: kind,hue,lcol,ldir + tex_id
+            return p[:, [0, 5, 6, 7, 8]].astype(mx.int32)
         return p[:, [0, 5, 6, 7]].astype(mx.int32)

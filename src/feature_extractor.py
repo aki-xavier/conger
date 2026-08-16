@@ -41,6 +41,11 @@ class FeatureExtractor:
         ("chr_re", "raw"), ("chr_im", "raw"),
     )  # 3 源 × 3 Riesz 通道 + 2 原始色度 = 11
 
+    # shape 轴 8 张谱形图 (roughness 专用头的区域描述子, 见 shape_descriptor)
+    SHAPE_MAPS: ClassVar[tuple] = (
+        "slope", "residual", "bump", "centroid", "spread", "skew", "kurt", "mean_ori",
+    )
+
     def __init__(self, cfg: InverseConfig):
         self.cfg = cfg
 
@@ -100,3 +105,26 @@ class FeatureExtractor:
             m = getattr(rw.features(gain_control=gc), ch)
             parts.append(m.reshape(-1))
         return mx.concatenate(parts), rw
+
+    @staticmethod
+    def shape_descriptor(frame: mx.array) -> list[float]:
+        """前景掩码内 8 张谱形图的 (mean, std) → 16 维 (roughness 谱形头)。
+
+        gc=False: Wiener 收缩的噪声 floor 按最细尺度 MAD 估, 随 roughness
+        变 (粗糙高光瓣 → 高 MAD → 高 floor), 会把 roughness 泄漏进结构图;
+        谱形判别须关 gc 或统一 floor (§2.3 实测)。
+        """
+        from stereo import StereoDepth  # 惰性导入防 stereo→feature_extractor 环
+
+        lum = FeatureExtractor.frame_lum(frame)
+        f = RieszWavelet(lum).features(gain_control=False)
+        m = StereoDepth.foreground_weights(frame) > 0.01
+        w = m.astype(mx.float32)
+        tot = float(mx.sum(w))
+        out: list[float] = []
+        for name in FeatureExtractor.SHAPE_MAPS:
+            a = getattr(f, name)
+            mean = float(mx.sum(a * w)) / tot
+            d = a - mean
+            out += [mean, float(mx.sqrt(mx.sum(d * d * w) / tot))]
+        return out

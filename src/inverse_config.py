@@ -37,6 +37,10 @@ class InverseConfig:
     # 显式结构族: None 时由 n_objects 兼容推导; composite 是双图元
     # 附着组合模板 (区别于 layered 的独立前后层)
     scene_family: str | None = None
+    # 纹理自由度: 0 = 关 (现行单物体管线, 不回归); >0 = 给单物体图元
+    # 加 albedo map 纹理类型 (离散, cat_logp) + roughness (连续, t_mu)。
+    # 组合数 162 → 162×n_textures, 数据/模型指纹随 n_textures 变化。
+    n_textures: int = 0
     # 推理期几何↔光照 ECM 精炼 (§7.1): 默认关闭, 单物体验证稳定后再开。
     # 每轮 E 步 54×2 渲染 + M 步坐标搜索 (约 150 渲染/轮)。
     em_refine: bool = False
@@ -62,6 +66,11 @@ class InverseConfig:
         if self.scene_family is not None:
             return self.scene_family
         return "layered" if self.n_objects == 2 else "single"
+
+    @property
+    def textured(self) -> bool:
+        """纹理自由度是否启用 (仅 single 族有意义)。"""
+        return self.n_textures > 0
 
     @property
     def n_feat(self) -> int:

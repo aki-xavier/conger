@@ -25,6 +25,11 @@ LAYERED_FACTORS = (
     ("ldir", 13),
 )
 LAYERED_TARGET_COLS = (1, 2, 3, 4, 7, 8, 9, 10)
+# 纹理接线 (10 列参数): 连续目标同单物体 u,v,s,z (roughness 走独立谱形
+# 头 RoughnessHead, 由 inverse_app 单独按球面报告); 离散因子 + tex_id
+TEXTURED_TARGETS = TARGETS
+TEXTURED_FACTORS = SCENE_FACTORS + (("tex", 8),)
+TEXTURED_TARGET_COLS = (1, 2, 3, 4)
 
 
 class Evaluator:
@@ -33,7 +38,9 @@ class Evaluator:
     @staticmethod
     def target_names(p: mx.array) -> tuple[str, ...]:
         """参数宽度 → 连续目标名。"""
-        return LAYERED_TARGETS if p.shape[1] == 14 else TARGETS
+        if p.shape[1] == 14:
+            return LAYERED_TARGETS
+        return TEXTURED_TARGETS if p.shape[1] == 10 else TARGETS
 
     @staticmethod
     def report(
@@ -45,9 +52,10 @@ class Evaluator:
     ) -> dict[str, float]:
         """打印并返回连续目标 RMSE/R² + 离散场景因子分类准确率。"""
         layered = p_gt.shape[1] == 14
-        cols = LAYERED_TARGET_COLS if layered else (1, 2, 3, 4)
-        targets = LAYERED_TARGETS if layered else TARGETS
-        factors = LAYERED_FACTORS if layered else SCENE_FACTORS
+        textured = p_gt.shape[1] == 10
+        cols = LAYERED_TARGET_COLS if layered else TEXTURED_TARGET_COLS if textured else (1, 2, 3, 4)
+        targets = LAYERED_TARGETS if layered else TEXTURED_TARGETS if textured else TARGETS
+        factors = LAYERED_FACTORS if layered else TEXTURED_FACTORS if textured else SCENE_FACTORS
         gt = p_gt[:, list(cols)]
         base = mx.mean(p_train[:, list(cols)], axis=0, keepdims=True)
         ss_base = mx.sum((gt - base) ** 2, axis=0)

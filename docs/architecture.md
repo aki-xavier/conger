@@ -79,33 +79,52 @@ flowchart TD
 平均到流形外。数据均匀采样 ⟹ 均匀权重是正确先验 (学权重反而
 引入 log_w≈−20 死亡螺旋)。
 
-### 2.3 特征图全集的结构/统计二分 (2026-08-16)
+### 2.3 特征图全集: 同一 p_s 的聚合, 分界线是能量 vs 形状 (2026-08-16, 修订)
 
-`RieszWavelet.features()` 算全 11 张跨尺度特征图, `FEAT` 只取 3 张
-(log_mag/phase_coh/ori_R) × 3 源 + 2 原始拮抗 = 11 通道。11 张图按
-单演信号的二分劈成两条轴:
+`RieszWavelet.features()` 算全 11 张跨尺度图, `FEAT` 只取 3 张
+(log_mag/phase_coh/ori_R) × 3 源 + 2 原始拮抗 = 11 通道。初版按
+"结构轴 / 统计轴"两条正交轴二分, `src/texture_probe.py` (E1–E7) 实测
+推翻: **11 张图全部是同一逐像素尺度能量分布 p_s=e_s/Σe 的聚合量 +
+相位/方向一致量, β (功率谱指数) 扰动会同时泄漏进全部 11 张** (E5:
+连 phase_coh/ori_R 也 1.00 分白/粉/蓝噪声), 两条轴并不正交。按对
+p_s 聚合的阶数重排, 真正的分界线是**能量 vs 形状**:
 
-- **结构轴** (已选 3 张): log_mag (能量对比) / phase_coh (相位一致
-  = 边缘) / ori_R (方向一致) —— 回答"在哪、是什么形状"。
-- **统计轴** (未选 8 张): slope/residual/bump/centroid/spread/skew/
-  kurt/mean_ori —— 都是逐像素尺度能量分布 p_s=e_s/Σe 的形状统计,
-  回答"是什么材质" (slope = 粗糙度 1/f 衰减率, residual = 周期性 vs
-  宽带, bump/centroid = 主导尺度, 四阶矩 = 谱形指纹, mean_ori = 纹理
-  主导方向)。
+- **能量 (0 阶矩)**: log_mag = log Σe_s, 随全局对比度 c² 平移
+  (E7 对比度纯判别 1.00), 光照/曝光敏感。
+- **形状 (高阶矩)**: slope/residual/bump/centroid/spread/skew/kurt 是
+  p_s 的形状统计 (slope=1/f 衰减率, bump/centroid=主导尺度, 四阶矩=
+  谱形指纹), 对 c 不变 (E7: 全部 0.00 对比度盲)。slope 是 β 的连续
+  单调读数 (E5: 粉 0.73 < 白 1.25 < 蓝 1.28), 但带 +2/octave 量级
+  滤波器组固有偏差 (等倍频程带通核能量随 f0 增长, 白噪声"平谱"被映成
+  slope≈+1.25 而非 0)。
+- **相位/方向一致量**: phase_coh / ori_R / mean_ori 是跨尺度比值, 对
+  c 不变 (E7: 0.00)。
 
-这 8 张对当前 u/v/s/z/kind/hue/lcol/ldir 是弱信息维, 根因不是它们
-无用, 而是**当前场景支持集没有纹理自由度**: Codebook 材质固定
-`MeshStandardMaterial(uniform hue, roughness=0.55)`, 无贴图/无材质变量。
-渲染帧尺度谱退化为"物体轮廓边缘 + 平滑明暗渐变 + 恒定暗背景",
-8 张图的可变方差几乎全由几何驱动 (bump/centroid 随角尺寸 s·FX/zc
-移动, residual/矩随 kind 轮廓谱形微调), 与结构轴 + 立体锚点高度冗余。
+这 8 张对当前 u/v/s/z/kind/hue/lcol/ldir 是弱信息维, 根因仍是**场景
+支持集无纹理自由度**: Codebook 材质固定 `MeshStandardMaterial(uniform
+hue, roughness=0.55)`, 无 map/无材质变量 —— 渲染帧尺度谱退化为"轮廓
+边缘 + 平滑明暗 + 恒暗背景", 8 张图方差几乎全由几何驱动, 与结构特征
++ 立体锚点冗余。cga 侧已加 `Texture`/`map`/`roughness` 标量 (cga
+engine/texture.py, unlit/UV 已就绪), conger Codebook 尚未接线。
 
-推论: 要让统计轴从"冗余维"升格为"头部特征", 必须先给 codebook 加
-材质/纹理自由度 (roughness 变连续监督目标, 或 procedural 纹理类型做
-离散目标), 让渲染器真产生纹理方差 —— 特征不产生信息, 只暴露数据里
-的方差, 顺序不可倒。纹理是区域统计量, 全分辨率逐像素 + 全局白化会把
-纹理指纹打散成逐像素噪声; 真做纹理估计应在前景掩码内取 8 张图的
-区域分布 (均值/方差/直方图), 而非整图逐像素拼接。
+推论 (修正): 8 张统计图的判别价值**不是**对纹理的分类 —— 结构轴 3 张
+在该类任务已 1.00 触顶 (E1/E2/E4/E5), 8 张不增可分性; 它们的价值是
+① **slope 给 β 的连续可解释读数, 且对对比度/光照不变** (log_mag 既跟
+β 又跟对比度, 二者混淆, E7), 材质/粗糙度回归应走 shape 轴而非能量轴;
+② 全分辨率逐像素 + 全局白化**不会**打散结构化纹理 —— 纹理是低维全局
+模式, PCA 白化把它收敛成主方向, 无需区域统计头 (`texture_pipeline.py`
+实测: box 平面 3 类纹理 tex_id 准确率 1.00, sphere 粗糙度 R² 0.997,
+全分辨率特征直接可估)。要让 8 张从"冗余维"变"头部特征", 仍须先给
+Codebook 接线 map/roughness 并立监督目标 (roughness→t_mu, 纹理类型→
+cat_logp), 特征只暴露数据里的方差, 顺序不可倒。
+
+两个物理限制 (texture_probe.py E5 实测): ① 有限 Riesz 带
+[1/lam_max, 1/lam_min] 截掉粉噪声低频 (被 DC 剥除) 与蓝噪声高频
+(超出最细尺度), 蓝噪声 +β 几乎测不出 (实测 slope +1.28 vs 白 +1.25,
+理论差 +0.69); 谱斜率判别需足够大图或更宽尺度带。② Wiener 收缩
+(gain_control) 的噪声 floor 按每图最细尺度 MAD 估, 随 β 变 (蓝噪声
+高 MAD→高 floor), 会把 β 泄漏进 log_mag/phase_coh 造成结构轴假可分;
+做谱形判别须 gc=False 或统一 floor。
 
 配套工程结论 (若全开 11 张图 → 33 Riesz + 2 原始 = 35 通道, V 3.18×):
 ① of_frame 现按 (src,ch) 逐条调 features() (每源重算 3 次、每次算全
@@ -115,6 +134,38 @@ flowchart TD
 sigma_rel_floor 重标定; ④ mean_ori 是环量 (−π/2, π/2] 有 0/π 跳变,
 要加应加 resultant 笛卡尔分量 (m_re, m_im)/safe_total, 与 ori_R 构成
 完整方向向量 (polar 拆开只给模长是信息浪费)。
+
+探针复现: `python src/texture_probe.py` (E1 色度纹理 / E2 灰度纹理 /
+E3 roughness / E4 棋盘尺度 / E5 谱斜率 / E6 对比度抖动 / E7 对比度纯判别);
+`python src/texture_pipeline.py` (P1 纹理类型 / P2 粗糙度, 全分辨率端到端)。
+
+主线接线 (已落地, `--n-textures N` 开关, 默认 0 不回归): Codebook 加
+albedo map 纹理类型(离散, cat_logp)与 roughness(连续, t_mu), DataBuilder
+targets/scene_classes 按 10 列解析, SceneReconstructor cat_sizes→
+(3,6,3,3,N)。`python inverse.py --n-textures 3 --replicates 1` 实测:
+几何/外观全变 + R=1 下 **tex 0.50/0.46 (chance 0.33) 仍可辨, 但
+roughness R² −0.74/−0.71 (负, 劣于基线)** —— 修正 texture_pipeline.py
+固定几何探针 (tex 1.00 / roughness 0.997) 的过度乐观: roughness 是弱
+specular 瓣信号, 被几何/外观/纹理共同变化淹没, 且 R=1 无复制密度
+(每组合单样本, 核回归退化为随机)。路径2/3 实测 (`texture_roughness_paths.py`,
+held-out 几何): 全分辨率特征 sphere/box 均负 R² (−0.57/−0.28); **shape 轴
+区域描述子 (8 谱形图前景 mean/std, 16d, gc=False) 在 sphere 达 R²
++0.916、box 仍 −0.08** —— 结论: roughness 须 (a) 限定空间 specular 瓣
+可见的球面 kind + (b) 走 shape 轴专用头, 而非全分辨率逐像素; box 正面
+均匀着色本无 roughness 信号。
+
+**shape 头主线接线后仍负** (谱形头已落地 `RoughnessHead`, 球面限定):
+`inverse.py --n-textures 3 --replicates 1` 球面 roughness R² 插值
+−0.631 / 外推 −0.935。根因: `texture_roughness_paths.py` 的 +0.916 是在
+纹理/外观 (hue/lcol/ldir/tex) **全固定**、只有几何+roughness 变时才成立;
+主线里纹理(棋盘/条纹/噪声)、色相、光色、光向自由变化, 谱形描述子被这些
+1 阶变化主导, roughness (specular 瓣) 是 2 阶弱信号被淹没, 且 R=1 无复制
+密度。结论修正: **roughness 作为连续监督目标在自由外观/纹理的主线里不可
+鲁棒估计** —— 它只对 specular 瓣有弱作用, 属 2 阶信号; 纹理类型(离散)可辨
+(0.50>0.33), roughness 宜保持 0.55 常量或仅在外观/纹理受控的专用探针里
+估计, 不作主线回归目标。已落地: `sample_textured` 固定 roughness=0.55,
+`RoughnessHead`/`FeatureExtractor.shape_descriptor` 留作专用探针代码
+(不接主线), 主线只监督纹理类型 (cat_logp)。
 
 ## 3. 渲染残差光照/结构精炼 (SceneReconstructor)
 
