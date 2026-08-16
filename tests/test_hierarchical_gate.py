@@ -69,3 +69,15 @@ def test_temperature_scale_sharpens_posterior() -> None:
     )
     assert sharp.posterior["a"] > flat.posterior["a"]
     assert sharp.posterior["b"] < flat.posterior["b"]
+
+
+def test_negative_score_does_not_collapse_to_one_hot() -> None:
+    """负几何奖励使胜者 score 为负时, 后验不应退化成 one-hot。"""
+    estimates = {
+        "a": _est("a", 100.0, geometry_cost=-1.0),
+        "b": _est("b", 200.0, geometry_cost=0.0),
+    }
+    out = GenericStructureGate(geometry_weight=5000.0).decide_hierarchical(estimates)
+    # a 胜出 (score = 100 − 5000 = −4900), 但后验应软 (0.5~0.99) 而非 1.0
+    assert out.estimate.structure_id == "a"
+    assert 0.5 < out.posterior["a"] < 0.99

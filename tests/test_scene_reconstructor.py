@@ -38,6 +38,24 @@ def test_scene_param_decoding() -> None:
     assert abs(prm[3] - float(expected_s)) < 1e-6
 
 
+def test_single_object_s_z_floor_clamp() -> None:
+    """单物体 s/z 解码应有物理下限钳制 (防负半径崩溃 + z 越界镜像翻转)。"""
+    cat_p = mx.concatenate(
+        [
+            mx.array([[0.0, 3.0, 1.0]]),  # kind 0 (sphere)
+            mx.array([[1.0, 0.0, 0.0, 0.0, 0.0, 0.0]]),  # hue 0
+            mx.array([[1.0, 0.0, 0.0]]),  # lcol 0
+            mx.array([[1.0, 0.0, 0.0]]),  # ldir 0
+        ],
+        axis=1,
+    )
+    t = mx.array([[72.0, 70.0, -1.0, 99.0]])  # 负 s 残差 + 越界 z 残差
+    stats = mx.array([[3.25, 5.0, 0.1]])  # 极小面积 → s_proxy ≈ 0
+    prm = SceneReconstructor.params(t, cat_p, stats)[0]
+    assert prm[3] >= SceneReconstructor.S_FLOOR
+    assert SceneReconstructor.Z_MIN <= prm[4] <= SceneReconstructor.Z_MAX
+
+
 def test_kind_conditioned_size_proxy() -> None:
     """面积→尺寸代理按结构因子变化: box 正面与圆盘几何不同。"""
     stats = mx.array([[3.0, 6.0, 1600.0]])

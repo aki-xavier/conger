@@ -54,6 +54,8 @@ def test_layer_child_codebook_constraints() -> None:
     assert app.layered_reconstructor() is ConstrainedLayeredReconstructor
     # 近对齐 (-0.1, 0.1) 会被强制加宽到 (0.35, 0.7) 保证后层可见
     assert cls.PART_LATERAL_RANGE == (0.35, 0.7)
+    # 加宽后的横向范围须写回血缘 delta, 使门控 delta_cost 与采样一致
+    assert cls.TEMPLATE_LINEAGE.delta["lateral_ratio"] == (0.35, 0.7)
     vals = cls._sample_pair(random.Random(1), False)
     assert 0.4 <= vals[6] / vals[2] <= 0.6
     assert 0.7 <= vals[3] - vals[7] <= 0.9

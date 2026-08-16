@@ -90,7 +90,10 @@ class GenericStructureGate:
         residuals, scores = self._scores(estimates)
         best_raw = min(residuals.values())
         best_score = min(scores.values())
-        temperature = max(2.0 * best_score, 1e-8) * self.temperature_scale
+        # 温度用胜者 score 的幅度 (abs): score 含负几何奖励 (geometry_weight
+        # ×geometry_cost 可为负), 直接 max(2·best_score, 1e-8) 会在负分时
+        # 钳到 1e-8 → 后验退化成近 one-hot, 破坏 posterior_floor 出生判据。
+        temperature = max(2.0 * abs(best_score), 1e-8) * self.temperature_scale
         posterior = self._softmax(scores, temperature, self.priors)
         best_name = min(scores, key=scores.get)
         best = replace(
@@ -133,8 +136,9 @@ class GenericStructureGate:
         family_scores = {
             fam: min(scores[n] for n in names) for fam, names in groups.items()
         }
+        # 温度用本级胜者 score 的幅度 (abs), 见 decide 的注释
         fam_temp = (
-            max(2.0 * min(family_scores.values()), 1e-8) * self.temperature_scale
+            max(2.0 * abs(min(family_scores.values())), 1e-8) * self.temperature_scale
         )
         family_posterior = self._softmax(family_scores, fam_temp, self.priors)
         family_conditional: dict[str, dict[str, float]] = {}
@@ -142,7 +146,7 @@ class GenericStructureGate:
         for fam, names in groups.items():
             member_scores = {n: scores[n] for n in names}
             mem_temp = (
-                max(2.0 * min(member_scores.values()), 1e-8)
+                max(2.0 * abs(min(member_scores.values())), 1e-8)
                 * self.temperature_scale
             )
             cond = self._softmax(member_scores, mem_temp, self.priors)

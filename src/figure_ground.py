@@ -3,9 +3,9 @@
 前景是一个区间 [c−r, c+r] (位姿 = 中心 c + 半宽 r), 强度 f; 背景强度 b。
 隐变量 = 每像素前景归属; 参数 θ = (c, r, f, b)。
 
-  E 步 (responsibilities): 软前景归属 q(x) (位姿先验 × 强度似然)
-  M 步 (maximize): 强度用当前掩码均值重估; 位姿 (c,r) 坐标搜索最小化
-     分段拟合残差
+  E 步 (responsibilities): 软前景归属 q(x) = 软位姿先验 sigmoid × 强度似然
+  M 步 (maximize): 强度用软归属 q 加权; 位姿 (c,r) 坐标搜索最小化
+     负混合对数似然 (与软先验模型同一目标)
 
 「分割 ↔ 位姿」: 分割 (哪像素是前景) 与位姿 (物体在哪、多大) 互相
 约束 —— 位姿给分割先验, 分割给位姿/强度统计。M 步的坐标搜索让掩码能
@@ -26,15 +26,31 @@ class FigureGroundModel:
         sigma: float = 0.05,
         delta_c: float = 0.02,
         delta_r: float = 0.02,
+        boundary: float = 0.05,
     ):
         self.n = n
         self.sigma = sigma
         self.delta_c = delta_c
         self.delta_r = delta_r
+        self.boundary = boundary
         self.x = np.linspace(0.0, 1.0, n)
 
     def _fg_mask(self, c: float, r: float) -> np.ndarray:
         return np.abs(self.x - c) <= r
+
+    def _fg_prior(self, c: float, r: float) -> np.ndarray:
+        """软空间先验 P(fg|x) = sigmoid((r−|x−c|)/w), 允许掩码随迭代移动。"""
+        return 1.0 / (1.0 + np.exp((np.abs(self.x - c) - r) / self.boundary))
+
+    def _mixture_ll(
+        self, c: float, r: float, f: float, b: float, observation: np.ndarray
+    ) -> float:
+        """软先验混合对数似然 Σ_x log[P(fg|x)·N(I|f,σ) + P(bg|x)·N(I|b,σ)]。"""
+        prior_fg = self._fg_prior(c, r)
+        p = prior_fg * np.exp(-0.5 * ((observation - f) / self.sigma) ** 2) + (
+            1.0 - prior_fg
+        ) * np.exp(-0.5 * ((observation - b) / self.sigma) ** 2)
+        return float(np.sum(np.log(p + 1e-12)))
 
     def sample(
         self, params: tuple[float, float, float, float], rng: np.random.Generator | None = None
@@ -51,12 +67,12 @@ class FigureGroundModel:
     def responsibilities(
         self, params: tuple[float, float, float, float], observation: np.ndarray, temperature: float = 1.0
     ) -> np.ndarray:
-        """软前景归属 q(x) (位姿先验 × 强度似然)。"""
+        """软前景归属 q(x) = 软位姿先验 sigmoid × 强度似然。"""
         c, r, f, b = params
-        fg = self._fg_mask(c, r)
+        prior_fg = self._fg_prior(c, r)
         inv = 1.0 / max(temperature, 1e-8)
-        w_fg = np.where(fg, -0.5 * ((observation - f) / self.sigma) ** 2 * inv, -1e9)
-        w_bg = np.where(~fg, -0.5 * ((observation - b) / self.sigma) ** 2 * inv, -1e9)
+        w_fg = np.log(prior_fg + 1e-12) - 0.5 * ((observation - f) / self.sigma) ** 2 * inv
+        w_bg = np.log(1.0 - prior_fg + 1e-12) - 0.5 * ((observation - b) / self.sigma) ** 2 * inv
         m = np.maximum(w_fg, w_bg)
         e_fg = np.exp(w_fg - m)
         e_bg = np.exp(w_bg - m)
@@ -72,15 +88,16 @@ class FigureGroundModel:
         damping: float = 0.0,
     ) -> tuple[float, float, float, float]:
         c, r, _, _ = params
-        mask = self._fg_mask(c, r)
-        f = float(observation[mask].mean()) if mask.sum() else 0.0
-        b = float(observation[~mask].mean()) if (~mask).sum() else 0.0
+        # 强度用软归属 q 加权 (替代硬掩码均值, 与软先验 E 步自洽)
+        sq = float(np.sum(q))
+        f = float(np.sum(q * observation) / max(sq, 1e-12))
+        b = float(np.sum((1.0 - q) * observation) / max(self.n - sq, 1e-12))
 
+        # 位姿坐标搜索最小化负混合对数似然 (与软先验模型一致)
         def cost(cc: float, rr: float) -> float:
-            m = self._fg_mask(cc, rr)
-            if m.sum() == 0 or (~m).sum() == 0:
+            if rr <= 0.0:
                 return 1e9
-            return float(np.sum((observation[m] - f) ** 2) + np.sum((observation[~m] - b) ** 2))
+            return -self._mixture_ll(cc, rr, f, b, observation)
 
         best = (c, r, cost(c, r))
         for dc in (-self.delta_c, 0.0, self.delta_c):
@@ -101,8 +118,6 @@ class FigureGroundModel:
     # ── 收敛监控 ──────────────────────────────────────────────────
 
     def log_likelihood(self, params: tuple[float, float, float, float], observation: np.ndarray) -> float:
-        """负分段拟合残差。"""
+        """软先验混合对数似然 (与 E/M 步同一目标)。"""
         c, r, f, b = params
-        mask = self._fg_mask(c, r)
-        resid = np.where(mask, observation - f, observation - b)
-        return -float(np.sum(resid**2) / (2.0 * self.sigma**2))
+        return self._mixture_ll(c, r, f, b, observation)

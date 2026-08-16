@@ -9,7 +9,7 @@ from __future__ import annotations
 from composite_codebook import CompositeCodebook
 from lateral_codebook import LateralCompositeCodebook
 from layered_codebook import LayeredCodebook
-from template_lineage import ChildTemplateSpec
+from template_lineage import ChildTemplateSpec, TemplateLineage
 
 
 class ChildCodebookFactory:
@@ -63,6 +63,20 @@ class ChildCodebookFactory:
         lateral = tuple(c.get("lateral_ratio", (-0.75, 0.75)))
         if max(abs(lateral[0]), abs(lateral[1])) < 0.35:
             lateral = (0.35, 0.7)
+        lineage = spec.lineage()
+        if lateral != tuple(c.get("lateral_ratio", (-0.75, 0.75))):
+            # 加宽后的横向范围写回血缘 delta, 使门控 delta_cost 与采样一致
+            # (否则 delta_cost 仍用旧 ~0 lateral 约束惩罚子模板自己采出的样本)
+            delta = dict(spec.constraints)
+            delta["lateral_ratio"] = lateral
+            lineage = TemplateLineage(
+                family=spec.name,
+                parent_family=spec.parent_family,
+                operation=spec.operation,
+                complexity=spec.complexity,
+                generation=spec.generation,
+                delta=delta,
+            )
         attrs = {
             "PART_SCALE_RANGE": tuple(c.get("scale_ratio", (0.35, 0.75))),
             "PART_LATERAL_RANGE": lateral,
@@ -79,7 +93,7 @@ class ChildCodebookFactory:
             ),
             "TEMPLATE_VARIANT": spec.name,
             "STEREO_V": "sl8c1",  # 受限 layer 的全残差目标契约
-            "TEMPLATE_LINEAGE": spec.lineage(),
+            "TEMPLATE_LINEAGE": lineage,
             "__module__": "child_codebook_factory",
         }
         return type(spec.name, (LayeredCodebook,), attrs)

@@ -36,6 +36,12 @@ class SceneReconstructor:
         len(Codebook.LIGHT_COLORS),
         len(Codebook.LIGHT_DIRS),
     )
+    # 物理下限钳制 (与 LayeredReconstructor 对称): 负残差 + 缩水面积代理
+    # 会把 s 压成负值 → cga 几何拒绝 radius≤0; z 越界会经 unproject 产生
+    # zc<0 的镜像翻转。只做崩溃/野值防护, 不改变正常样本估计。
+    S_FLOOR = 0.05
+    Z_MIN = 0.5
+    Z_MAX = Codebook.CAM_Z - 0.5
 
     @staticmethod
     def novelty_metrics(
@@ -97,8 +103,8 @@ class SceneReconstructor:
     ) -> tuple[tuple[float, ...], ...]:
         """模型输出 → Codebook.to_scene 参数 (kind,u,v,s,z,hue,lcol,ldir)。"""
         probs = [mx.argmax(p, axis=1).astype(mx.int32) for p in cls.split_cat(cat_p)]
-        s = t_pred[:, 2] + cls.s_proxy(probs[0], stats)
-        z = t_pred[:, 3] + stats[:, 0]
+        s = mx.maximum(t_pred[:, 2] + cls.s_proxy(probs[0], stats), cls.S_FLOOR)
+        z = mx.clip(t_pred[:, 3] + stats[:, 0], cls.Z_MIN, cls.Z_MAX)
         rows = []
         for i in range(t_pred.shape[0]):
             rows.append(
