@@ -52,13 +52,16 @@ def test_layer_child_codebook_constraints() -> None:
     cfg = InverseConfig(scene_family="layered")
     app = InverseApp(cfg, codebook=cls(cfg))
     assert app.layered_reconstructor() is ConstrainedLayeredReconstructor
+    # 近对齐 (-0.1, 0.1) 会被强制加宽到 (0.35, 0.7) 保证后层可见
+    assert cls.PART_LATERAL_RANGE == (0.35, 0.7)
     vals = cls._sample_pair(random.Random(1), False)
     assert 0.4 <= vals[6] / vals[2] <= 0.6
     assert 0.7 <= vals[3] - vals[7] <= 0.9
-    assert abs(vals[4] - vals[0]) <= 0.1 * (
+    extent = (
         Codebook.EXTENT * vals[2] * Codebook.FX / (Codebook.CAM_Z - vals[3])
         + Codebook.EXTENT * vals[6] * Codebook.FX / (Codebook.CAM_Z - vals[7])
-    ) + 1e-6
+    )
+    assert 0.35 * extent <= vals[4] - vals[0] <= 0.7 * extent + 1e-6
 
 
 def test_lateral_child_codebooks_constraints() -> None:

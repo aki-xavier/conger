@@ -57,9 +57,15 @@ class ChildCodebookFactory:
     def _layer(cls, spec: ChildTemplateSpec) -> type[LayeredCodebook]:
         c = spec.constraints
         part_kinds, part_hues = cls._discrete_sets(spec)
+        # 后层必须至少部分可见: 近对齐 (lateral≈0) 会让后层投影完全落在
+        # 前层投影内被遮挡, 退化成单物体 (layer child → single 混淆根因)。
+        # 强制横向偏移幅度 ≥0.35 (后层投影越出前层), 保证层结构可观测。
+        lateral = tuple(c.get("lateral_ratio", (-0.75, 0.75)))
+        if max(abs(lateral[0]), abs(lateral[1])) < 0.35:
+            lateral = (0.35, 0.7)
         attrs = {
             "PART_SCALE_RANGE": tuple(c.get("scale_ratio", (0.35, 0.75))),
-            "PART_LATERAL_RANGE": tuple(c.get("lateral_ratio", (-0.75, 0.75))),
+            "PART_LATERAL_RANGE": lateral,
             "DEPTH_GAP_RANGE": tuple(c.get("depth_gap", (0.7, 1.4))),
             "PART_KINDS": part_kinds,
             "PART_HUES": part_hues,

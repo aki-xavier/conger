@@ -1,6 +1,7 @@
 """TemplateDeltaLearner 与动态子 Codebook 工厂测试。"""
 
 from child_codebook_factory import ChildCodebookFactory
+from codebook import Codebook
 from composite_codebook import CompositeCodebook
 from expert_registry import ExpertRegistry
 from inverse_app import InverseApp
@@ -9,6 +10,7 @@ from layered_codebook import LayeredCodebook
 from mixture_spn import MixtureSPN
 from structure_birth import StructureBirthRequest
 from template_delta_learner import TemplateDeltaLearner
+from template_lineage import ChildTemplateSpec
 from template_proposal import TemplateProposal
 
 
@@ -104,3 +106,37 @@ def test_child_template_train_and_register(monkeypatch, tmp_path) -> None:
     )
     assert expert.lineage().family == spec.name
     assert registry.children_of("layered") == (spec.name,)
+
+
+def test_layer_child_lateral_guarantees_back_visibility() -> None:
+    """layer 子模板近对齐会被强制加宽, 保证后层投影越出前层。"""
+    spec = ChildTemplateSpec(
+        name="layered_layer_test",
+        family="layered",
+        parent_family="layered",
+        operation="layer",
+        constraints={
+            "relation": "layer",
+            "scale_ratio": (0.43, 0.62),
+            "lateral_ratio": (-0.02, 0.02),  # 近对齐 → 后层被完全遮挡
+            "depth_gap": (0.78, 0.82),
+            "part_kinds": (1,),
+            "part_hues": (2,),
+        },
+        complexity=2.0,
+        generation=2,
+        evidence_count=2,
+        residual_mean=0.0,
+        score_mean=0.0,
+    )
+    child_cls = ChildCodebookFactory.build(spec)
+    assert child_cls.PART_LATERAL_RANGE == (0.35, 0.7)
+    cb = child_cls(InverseConfig(scene_family="layered"))
+    for seed in (1, 2, 3, 4, 5):
+        row = tuple(float(x) for x in cb.sample(1, seed)[0].tolist())
+        u0, s0, z0 = row[1], row[3], row[4]
+        u1, s1, z1 = row[7], row[9], row[10]
+        r0 = s0 * Codebook.FX / (Codebook.CAM_Z - z0)
+        r1 = s1 * Codebook.FX / (Codebook.CAM_Z - z1)
+        # 后层投影至少越出前层 0.5px (可见, 不退化成单物体)
+        assert abs(u1 - u0) + r1 > r0 + 0.5

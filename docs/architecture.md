@@ -362,6 +362,15 @@ repeat→mirror 的根因与修复 (kind 轮廓拟合子项目): 圆柱 `length=
 改后 N=14 为 11/14: mirror/repeat 4/4, 剩余 attach 1/2 (族内父子混淆)、
 layer 0/2 (家族级 layer child→single)。
 
+layer child→single 根因 (数据 bug, 非门控): 学习到的 layer 子模板
+`lateral_ratio [-0.02, 0.02]` + `scale_ratio [0.43, 0.62]` 使后层投影
+半径/横向偏移都远小于前层 (a1/a0≈0.26–0.47, |offset|≤0.02·(a0+a1)),
+后层投影完全落在前层投影内被完全遮挡 → 每个 layer child 样本渲染出来
+就是单物体, `StereoLayers` 分不出不可见后层 (退化 fallback)。修复在
+`ChildCodebookFactory._layer`: 近对齐横向偏移被强制加宽到 (0.35, 0.7),
+保证后层投影越出前层。注意现有 layer child 模型 (R=4) 是用旧窄范围
+训练的, 需重训才生效; 彻底解决还需重训 layer child。
+
 **实施顺序**:
 1. 类别契约序列化 + padding 扩展;
 2. StructuredHypothesis 新颖性证据;
