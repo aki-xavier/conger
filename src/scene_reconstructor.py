@@ -254,6 +254,39 @@ class SceneReconstructor:
         return calibrated[best_i], calibrated, score_arr, posterior, temperature
 
     @staticmethod
+    def em_refine(
+        app: InverseApp,
+        prm: tuple[float, ...],
+        fl: mx.array,
+        fr: mx.array,
+    ) -> tuple[tuple[float, ...], tuple[float, ...] | None]:
+        """几何↔光照 ECM 精炼 (u,v,s,z), kind 固定。
+
+        返回 (refined_prm, trajectory)。app.cfg.em_refine 为 False 时
+        直接返回原 prm + None 轨迹。外观 (hue/lcol/ldir) 沿用 prm。
+        """
+        if not app.cfg.em_refine:
+            return prm, None
+        from generic_em import EMLoop
+        from scene_em_refiner import SceneEMRefiner
+
+        kind = int(prm[0])
+        refiner = SceneEMRefiner(
+            app.codebook,
+            kind,
+            fl,
+            fr,
+            appearance_topk=app.cfg.em_appearance_topk,
+        )
+        em = EMLoop(
+            refiner,
+            max_iters=app.cfg.em_max_iters,
+            tol=app.cfg.em_tolerance,
+        )
+        res = em.run((fl, fr), tuple(prm[1:5]))
+        return (float(kind), *res.params, prm[5], prm[6], prm[7]), res.trajectory
+
+    @staticmethod
     def frame_features(
         app: InverseApp,
         fl: mx.array,
@@ -332,27 +365,7 @@ class SceneReconstructor:
         )
         # 推理期几何↔光照 ECM 精炼 (§7.1): 默认关闭。kind 固定, 只精炼
         # 连续几何 (u,v,s,z); 外观 (hue/lcol/ldir) 沿用 refine_scene 的 MAP。
-        em_trajectory = None
-        if app.cfg.em_refine:
-            from generic_em import EMLoop
-            from scene_em_refiner import SceneEMRefiner
-
-            kind = int(prm[0])
-            refiner = SceneEMRefiner(
-                app.codebook,
-                kind,
-                fl,
-                fr,
-                appearance_topk=app.cfg.em_appearance_topk,
-            )
-            em = EMLoop(
-                refiner,
-                max_iters=app.cfg.em_max_iters,
-                tol=app.cfg.em_tolerance,
-            )
-            em_res = em.run((fl, fr), tuple(prm[1:5]))
-            prm = (float(kind), *em_res.params, prm[5], prm[6], prm[7])
-            em_trajectory = em_res.trajectory
+        prm, em_trajectory = cls.em_refine(app, prm, fl, fr)
         order = mx.argsort(posterior)[::-1][:5].tolist()
         hypotheses = tuple(
             HypothesisCandidate(candidates[i], float(posterior[i]), float(scores[i]))

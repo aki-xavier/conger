@@ -261,20 +261,21 @@ class InverseApp:
             scene_gt = self.codebook.to_scene(tuple(float(x) for x in gt))
             fl = renderer.render(scene_gt, cam_l)
             fr = renderer.render(scene_gt, cam_r)
-            out.append(
-                SceneReconstructor.refine_scene(
-                    self.codebook,
-                    prm,
-                    kp[: Codebook.N_KIND],
-                    st,
-                    fl,
-                    fr,
-                    kind_topk=self.cfg.kind_topk,
-                    renderer=renderer,
-                    cam_l=cam_l,
-                    cam_r=cam_r,
-                )[0]
-            )
+            refined = SceneReconstructor.refine_scene(
+                self.codebook,
+                prm,
+                kp[: Codebook.N_KIND],
+                st,
+                fl,
+                fr,
+                kind_topk=self.cfg.kind_topk,
+                renderer=renderer,
+                cam_l=cam_l,
+                cam_r=cam_r,
+            )[0]
+            # 几何↔光照 ECM 精炼 (§7.1), 与推理链路共用同一 helper
+            refined, _ = SceneReconstructor.em_refine(self, refined, fl, fr)
+            out.append(refined)
             if (i + 1) % 100 == 0:
                 print(f"    {name}: {i + 1}/{len(scene_pred)}")
         return tuple(out)
@@ -481,6 +482,11 @@ class InverseApp:
             choices=("single", "layered", "composite"),
             help="结构族: single 单图元 / layered 独立前后层 / composite 附着组合模板",
         )
+        ap.add_argument(
+            "--em-refine",
+            action="store_true",
+            help="推理期几何↔光照 ECM 精炼 (§7.1, 默认关闭, 仅单物体)",
+        )
         a = ap.parse_args()
         n_objects = (
             (1 if a.scene_family == "single" else 2)
@@ -497,4 +503,5 @@ class InverseApp:
             kind_topk=a.kind_topk,
             n_objects=n_objects,
             scene_family=a.scene_family,
+            em_refine=a.em_refine,
         )
