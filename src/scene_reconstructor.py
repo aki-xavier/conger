@@ -160,6 +160,31 @@ class SceneReconstructor:
         return float(num / den)
 
     @staticmethod
+    def marginal_appearance(
+        posterior: mx.array,
+        factor: str,
+        n_hue: int = Codebook.N_HUE,
+        n_lcol: int | None = None,
+        n_ldir: int | None = None,
+    ) -> mx.array:
+        """联合外观后验 (hue×lcol×ldir 行主序) → 单因子边缘。
+
+        对 nuisance 因子求和得到不变估计: 反照率 (hue) 对光照 (lcol/ldir)
+        边缘化, 光照对反照率边缘化 —— 分析-合成的因果不变估计器
+        (见 docs/architecture.md §9.3 路线 ①)。
+        """
+        n_lcol = len(Codebook.LIGHT_COLORS) if n_lcol is None else n_lcol
+        n_ldir = len(Codebook.LIGHT_DIRS) if n_ldir is None else n_ldir
+        p = mx.reshape(posterior, (n_hue, n_lcol, n_ldir))
+        if factor == "hue":
+            return mx.sum(p, axis=(1, 2))
+        if factor == "lcol":
+            return mx.sum(p, axis=(0, 2))
+        if factor == "ldir":
+            return mx.sum(p, axis=(0, 1))
+        raise ValueError(f"未知外观因子: {factor} (期望 hue/lcol/ldir)")
+
+    @staticmethod
     def appearance_candidates(
         base_params: tuple[float, ...],
     ) -> tuple[tuple[float, ...], ...]:
