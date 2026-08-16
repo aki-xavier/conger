@@ -44,6 +44,7 @@ def _case(
 def main() -> None:
     ap = argparse.ArgumentParser()
     ap.add_argument("--seed", type=int, default=991)
+    ap.add_argument("--replicates", type=int, default=4)
     args = ap.parse_args()
     renderer, cam_l, cam_r = Codebook.make_renderer()
     proposer = CompositeTemplateProposer(
@@ -75,7 +76,7 @@ def main() -> None:
     )
     pending = registry.observe_birth_request(request)
     assert pending, "出生请求未产生可学习子模板"
-    child_cfg = InverseConfig(scene_family="composite", replicates=4)
+    child_cfg = InverseConfig(scene_family="composite", replicates=args.replicates)
     reg = registry.confirm_child_template(
         pending[0].name, cfg=child_cfg
     )
