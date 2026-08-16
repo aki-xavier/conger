@@ -51,6 +51,54 @@ class CompositeGeometry:
         q = CompositeGeometry.DOWN
         return (4.0 if t.shape == 2 else math.pi) * (t.r * q) ** 2
 
+    @staticmethod
+    def _disk_fit(
+        fg: mx.array, tmpl: LayerTemplate, q: int
+    ) -> tuple[float, float, float] | None:
+        """模板足迹内全分辨率圆拟合 → (cx, cy, radius_px)。
+
+        足迹取模板中心 + 半径放大 1.15× (覆盖阈值晕圈), 面积开方得盘
+        半径, 质心校正 bbox 中心偏置; 避免 max-pool 下采样对小部件的
+        额外膨胀。
+        """
+        h, w = fg.shape
+        cx = tmpl.cx * q
+        cy = tmpl.cy * q
+        rad = tmpl.r * q * 1.15
+        xs = mx.arange(w, dtype=mx.float32)[None, :]
+        ys = mx.arange(h, dtype=mx.float32)[:, None]
+        fp = (xs - cx) ** 2 + (ys - cy) ** 2 <= rad**2
+        m = fg & fp
+        tot = float(mx.sum(m.astype(mx.float32)))
+        if tot < 1e-6:
+            return None
+        cx2 = float(mx.sum(m.astype(mx.float32) * xs) / tot)
+        cy2 = float(mx.sum(m.astype(mx.float32) * ys) / tot)
+        return cx2, cy2, math.sqrt(tot / math.pi)
+
+    @classmethod
+    def disk_evidence(cls, fl: mx.array, fr: mx.array) -> tuple[float, float] | None:
+        """全分辨率圆拟合的 (scale_ratio, lateral_ratio), 消 max-pool 膨胀。
+
+        与 bbox 模板不同, 在模板足迹内做全分辨率圆拟合, 对小部件的
+        max-pool 额外膨胀鲁棒; 返回 None 表示无法可靠分割。横向组合
+        两部件同深度, 像素空间 lateral ≈ 世界横向偏移归一化。
+        """
+        wl = StereoDepth.foreground_weights(fl)
+        fg = wl > 0.01
+        split = cls.split_score(fg)
+        if split is None:
+            return None
+        _, base, part = split
+        q = cls.DOWN
+        b = cls._disk_fit(fg, base, q)
+        p = cls._disk_fit(fg, part, q)
+        if b is None or p is None:
+            return None
+        u0, _, r0 = b
+        u1, _, r1 = p
+        return r1 / max(r0, 1e-8), (u1 - u0) / max(r0 + r1, 1e-8)
+
     @classmethod
     def split_score(
         cls, fg: mx.array

@@ -339,11 +339,8 @@ softmax, 联合后验 = p(family)×p(expert|family), 两级各自按本级最低
 与 ECE 提供校准旋钮/报告。mirror/repeat 的操作判别
 (`StructureGeometry.lateral_gap_cost`) 修正了旧版面积→半径的 √π
 归一化偏差 (sum 分母不抵消), 改取像素空间归一化间隔并加交叉判别
-惩罚。改后 (N=14) 为 10/14: mirror 1/2→2/2 (判别生效), repeat 仍 1/2,
-attach 1/2 (族内父子混淆), layer 0/2 (家族级 layer child→single); ECE
-0.314, 正确/错误 winner posterior 均值 0.638/0.593。附带修复
-`LayeredReconstructor` 遮挡锚点残差到负下限时 s 塌成负值导致的
-`cylinder radius <= 0` 崩溃 (物理下限钳制, 不改变正常样本估计)。
+惩罚。附带修复 `LayeredReconstructor` 遮挡锚点残差到负下限时 s 塌成
+负值导致的 `cylinder radius <= 0` 崩溃 (物理下限钳制)。
 
 repeat→mirror 的根因与修复 (kind 轮廓拟合子项目): 圆柱 `length=2.2s`
 沿视轴 (+Z), 可见端盖在 `z+1.1s` 处, 表观半径按 `zc/(zc−1.1s)` 放大;
@@ -359,8 +356,12 @@ repeat→mirror 的根因与修复 (kind 轮廓拟合子项目): 圆柱 `length=
 又发现 repeat→composite 的家族级混淆根因是 `CompositeGeometry` 对左右
 并排样本退化出伪水平接触线 (把横向间隔误判成 attach 的零横向偏移),
 在 `StructureGeometry.costs` 加横向证据强于 attach 时拒绝 composite。
-改后 N=14 为 11/14: mirror/repeat 4/4, 剩余 attach 1/2 (族内父子混淆)、
-layer 0/2 (家族级 layer child→single)。
+attach 子模板的族内父子判别改由 `CompositeGeometry.disk_evidence` 提供
+全分辨率圆拟合的 ratio/lateral (覆盖 bbox 的 max-pool 膨胀), 使窄带
+attach 子模板在匹配时吃到正确负证据。最终 N=14 为 12/14: mirror/repeat
+4/4, 剩余 attach 1/2 (小模型残差 2073 主导)、layer 1/2 (横向偏移强制
+加宽后后层可见, 旧模型未重训仍 1 例误判)。剩余错误均为 R=4 小模型
+残差问题, 需重训 attach/layer 子模板。
 
 layer child→single 根因 (数据 bug, 非门控): 学习到的 layer 子模板
 `lateral_ratio [-0.02, 0.02]` + `scale_ratio [0.43, 0.62]` 使后层投影

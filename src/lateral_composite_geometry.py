@@ -83,31 +83,6 @@ class LateralCompositeGeometry(CompositeGeometry):
         out = cls.split_score(fg)
         return None if out is None else (out[1], out[2])
 
-    @staticmethod
-    def _disk_fit(
-        fg: mx.array, tmpl: LayerTemplate, q: int
-    ) -> tuple[float, float, float] | None:
-        """模板足迹内全分辨率圆拟合 → (cx, cy, radius_px)。
-
-        足迹取模板中心 + 半径放大 1.15× (覆盖阈值晕圈与离轴侧表面),
-        面积开方得盘半径, 质心校正 bbox 中心偏置; 避免 max-pool 下采样
-        对小部件的额外膨胀。
-        """
-        h, w = fg.shape
-        cx = tmpl.cx * q
-        cy = tmpl.cy * q
-        rad = tmpl.r * q * 1.15
-        xs = mx.arange(w, dtype=mx.float32)[None, :]
-        ys = mx.arange(h, dtype=mx.float32)[:, None]
-        fp = (xs - cx) ** 2 + (ys - cy) ** 2 <= rad**2
-        m = fg & fp
-        tot = float(mx.sum(m.astype(mx.float32)))
-        if tot < 1e-6:
-            return None
-        cx2 = float(mx.sum(m.astype(mx.float32) * xs) / tot)
-        cy2 = float(mx.sum(m.astype(mx.float32) * ys) / tot)
-        return cx2, cy2, math.sqrt(tot / math.pi)
-
     @classmethod
     def corrected_gap(
         cls, fl: mx.array, fr: mx.array, kind: int

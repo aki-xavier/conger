@@ -138,6 +138,16 @@ class StructureGeometry:
             / Codebook.FX
         )
         observed_ratio = q1 / max(q0, 1e-8)
+        x_gap = abs(
+            (u1 - u0) * (Codebook.CAM_Z - (z0 + z1) / 2.0) / Codebook.FX
+        )
+        lateral = x_gap / max(q0 + q1, 1e-8)
+        # 全分辨率圆拟合覆盖 bbox 的 ratio/lateral (消 max-pool 对小部件
+        # 膨胀), 使窄带子模板 (attach child) 在匹配时吃到正确负证据。
+        if family == "composite" and fl is not None and fr is not None:
+            ev = CompositeGeometry.disk_evidence(fl, fr)
+            if ev is not None:
+                observed_ratio, lateral = ev
         cost = 0.0
 
         def range_term(
@@ -157,10 +167,6 @@ class StructureGeometry:
             return 0.25 * math.log(width / default_width)
 
         cost += range_term("scale_ratio", observed_ratio, (0.35, 0.75))
-        x_gap = abs(
-            (u1 - u0) * (Codebook.CAM_Z - (z0 + z1) / 2.0) / Codebook.FX
-        )
-        lateral = x_gap / max(q0 + q1, 1e-8)
         relation = str(delta.get("relation", ""))
         if relation in {"mirror", "repeat"}:
             cost += cls.lateral_gap_cost(relation, delta, fl, fr)
