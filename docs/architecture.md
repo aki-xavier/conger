@@ -695,6 +695,21 @@ mlx `mx.load` 的 safetensors 是 mmap 惰性 (加载 459MB 仅 ~60ms, 真正
 实测验证。D 再降到 16 时 u RMSE 回升 (4.09px), 说明截太狠开始丢几何
 信号 —— 甜点约 D∈[32,64]。
 
+**全链路验收 (N=1296, `--basis-dim 48`, 含渲染精炼, 自检通过)**: 截断
+不仅在 SPN-only 成立, 全链路同样**全面优于基线 D=497**:
+
+| 指标 | 基线 D=497 | D=48 | 变化 |
+|---|---|---|---|
+| 插值 kind | 0.753 | **0.769** | ↑ |
+| 插值 hue / lcol / ldir | 1.000/0.994/0.895 | **1.000/0.994/0.914** | =/=/↑ |
+| 插值 u / v RMSE | 4.945/4.425px | **3.539/3.719px** | ↓28%/16% |
+| 插值 s / z R² | 0.508/0.831 | **0.516/0.864** | ↑ |
+| 外推 kind | 0.617 | **0.691** | ↑ |
+| 外推 lcol / s / z | 0.880/0.922/0.956 | **0.907/0.933/0.962** | ↑ |
+
+模型 459.6MB → ~45MB (10×), SPN 推理 10.9→0.7ms/f (15×)。这是 §10.5
+「先 D 截断」的收官: D 截断 = 唯一确定性收益, 且精度不降反升。
+
 ### 10.4 分量驱逐 (coreset) 在当前规模有害 (印证 §2.2)
 
 | K | kind | hue | u RMSE |
@@ -714,10 +729,12 @@ N=1296 时驱逐分量 (即使 greedy 最远点 coreset) 立刻掉精度 —— 
 
 `model_memory.py` 提供 `split_save/load_transform/load_components/assemble`
 + `truncate_basis` + `forget_components(policy=coreset|random)` +
-`model_size_mb`; `model_memory_benchmark.py` 扫描量化。**未接入主链路**
-(默认仍全量加载、D=497 全维): 因为 D 截断改变了推理度量, 全量验收
-(精炼后 kind/hue/lcol/ldir) 需重标定自检阈值后才能默认开启 —— 下一步
-把 `truncate_basis(D≈48)` 作为默认并跑全量 N=1296 验收。
+`model_size_mb`; `model_memory_benchmark.py` 扫描量化。**已接入主链路**:
+`MixtureSPN.fit(basis_dim)` 拟合期截断 (磁盘模型即缩小), 经
+`InverseConfig.basis_dim` + `--basis-dim` 开关 (默认 None=全维), 模型路径
+带 `_d{basis_dim}` 后缀与全维模型并存。全量验收 (D=48) 自检通过且全面
+优于基线 (§10.3 表)。**未设默认**: 默认改 D=48 会切换默认模型路径 (需
+重训/已有 d48 模型), 属下一步的默认值决策 —— 数据支持强烈建议设为 48。
 
 ## 11. 四机制同源: 白化基是枢纽 (2026-08-17)
 
