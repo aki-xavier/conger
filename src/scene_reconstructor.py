@@ -207,71 +207,6 @@ class SceneReconstructor:
         raise ValueError(f"未知外观因子: {factor} (期望 hue/lcol/ldir)")
 
     @staticmethod
-    def marginal_joint(
-        posterior: mx.array,
-        factor: str,
-        n_kind: int,
-        n_hue: int = Codebook.N_HUE,
-        n_lcol: int | None = None,
-        n_ldir: int | None = None,
-    ) -> mx.array:
-        """top-k kind × 外观候选联合后验 → 单因子边缘。
-
-        后验行主序 (kind, hue, lcol, ldir); 对 nuisance 因子求和得到不变
-        估计。factor ∈ {kind, hue, lighting}: `lighting` 返回 (lcol,ldir)
-        的**联合**边缘 (展平), 因为光照两因子有投影歧义, 不拆开。
-        """
-        n_lcol = len(Codebook.LIGHT_COLORS) if n_lcol is None else n_lcol
-        n_ldir = len(Codebook.LIGHT_DIRS) if n_ldir is None else n_ldir
-        p = mx.reshape(posterior, (n_kind, n_hue, n_lcol, n_ldir))
-        if factor == "kind":
-            return mx.sum(p, axis=(1, 2, 3))
-        if factor == "hue":
-            return mx.sum(p, axis=(0, 2, 3))
-        if factor == "lighting":
-            return mx.reshape(mx.sum(p, axis=(0, 1)), (-1,))
-        raise ValueError(f"未知场景因子: {factor} (期望 kind/hue/lighting)")
-
-    @staticmethod
-    def decoupled_map(
-        posterior: mx.array,
-        n_kind: int,
-        n_hue: int = Codebook.N_HUE,
-        n_lcol: int | None = None,
-        n_ldir: int | None = None,
-    ) -> tuple[int, int, int, int]:
-        """联合后验 → 解耦 MAP: kind/hue 各自边缘 argmax, 光照保持联合。
-
-        返回 (kind_idx, hue, lcol, ldir); kind_idx 是后验 kind 维下标
-        (调用方映射回实际 kind)。反照率 (hue) 对光照**联合**边缘化 =
-        因果不变估计 (反照率↔光照是干净的可分离机制); 但光照内部 (lcol,
-        ldir) 是同一机制的联合变量, 两者有投影歧义, 拆开边缘化会破坏其
-        联合可识别性 (全量实测 lcol 0.994→0.870), 故 (lcol,ldir) 取联合
-        argmax。
-        """
-        n_lcol = len(Codebook.LIGHT_COLORS) if n_lcol is None else n_lcol
-        n_ldir = len(Codebook.LIGHT_DIRS) if n_ldir is None else n_ldir
-        kind_idx = int(
-            mx.argmax(
-                SceneReconstructor.marginal_joint(
-                    posterior, "kind", n_kind, n_hue, n_lcol, n_ldir
-                )
-            )
-        )
-        hue = int(
-            mx.argmax(
-                SceneReconstructor.marginal_joint(
-                    posterior, "hue", n_kind, n_hue, n_lcol, n_ldir
-                )
-            )
-        )
-        lighting = SceneReconstructor.marginal_joint(
-            posterior, "lighting", n_kind, n_hue, n_lcol, n_ldir
-        )
-        li = int(mx.argmax(lighting))
-        return kind_idx, hue, li // n_ldir, li % n_ldir
-
-    @staticmethod
     def appearance_candidates(
         base_params: tuple[float, ...],
     ) -> tuple[tuple[float, ...], ...]:
@@ -329,7 +264,6 @@ class SceneReconstructor:
         renderer: Renderer | None = None,
         cam_l: PerspectiveCamera | None = None,
         cam_r: PerspectiveCamera | None = None,
-        marginalize: bool = False,
     ) -> tuple[
         tuple[float, ...], tuple[tuple[float, ...], ...], mx.array, mx.array, float
     ]:
@@ -340,8 +274,7 @@ class SceneReconstructor:
         log 形式 = −残差/T + log P(kind|SPN)。温度
         T=max(2·best_residual,1) 用最佳残差估计观测噪声尺度并随
         StructuredHypothesis 返回; 该后验表达候选间相对置信度, 不声称绝对
-        校准。marginalize=True 时 MAP 改为各因子边缘 argmax 的解耦估计
-        (因果不变估计, 见 marginal_joint), 否则沿用联合 argmax。"""
+        校准。MAP 取联合后验 argmax。"""
         if renderer is None or cam_l is None or cam_r is None:
             renderer, cam_l, cam_r = Codebook.make_renderer()
         kind_topk = max(1, min(kind_topk, Codebook.N_KIND))
@@ -370,23 +303,8 @@ class SceneReconstructor:
             + p[4:]
             for p in params
         )
-        if marginalize:
-            # 解耦边缘 MAP: 反照率对光照、光照对反照率/几何分别边缘化
-            ki, hi, ci, di = cls.decoupled_map(posterior, len(order))
-            kind = int(order[ki])
-            best = (
-                float(kind),
-                base_params[1],
-                base_params[2],
-                float(cls.s_proxy(kind, stats)[0]) + s_resid,
-                base_params[4],
-                float(hi),
-                float(ci),
-                float(di),
-            )
-        else:
-            best_i = int(mx.argmax(posterior))
-            best = calibrated[best_i]
+        best_i = int(mx.argmax(posterior))
+        best = calibrated[best_i]
         return best, calibrated, score_arr, posterior, temperature
 
     @staticmethod
@@ -421,7 +339,6 @@ class SceneReconstructor:
         em = EMLoop(
             refiner,
             max_iters=app.cfg.em_max_iters,
-            tol=app.cfg.em_tolerance,
         )
         res = em.run((fl, fr), tuple(prm[1:5]))
         return (float(kind), *res.params, prm[5], prm[6], prm[7]), res.trajectory
@@ -503,7 +420,6 @@ class SceneReconstructor:
             fl,
             fr,
             kind_topk=kind_topk,
-            marginalize=app.cfg.appearance_marginalize,
         )
         # 推理期几何↔光照 ECM 精炼 (§7.1): 默认关闭。kind 固定, 只精炼
         # 连续几何 (u,v,s,z); 外观 (hue/lcol/ldir) 沿用 refine_scene 的 MAP。

@@ -326,7 +326,7 @@ kind 固定 (来自 SPN MAP), 只精炼连续几何, 不参与极大化。
 
 **实现边界** (已落地): 不改 Codebook/DataBuilder/MixtureSPN.fit/add;
 `StructuredHypothesis` 加 `em_trajectory`; `InverseConfig` 加 `em_refine/
-em_max_iters/em_appearance_topk/em_tolerance`; 推理 (`from_frames`) 与评估
+em_max_iters/em_appearance_topk/em_freeze_sz`; 推理 (`from_frames`) 与评估
 (`refine_scenes`) 共用 `SceneReconstructor.em_refine` helper。
 
 **全量验收 (四维全搜, N=1296, 单物体, kind_topk=3, em_max_iters=2)**:
@@ -609,10 +609,11 @@ pipeline 关系: ② (机制代理) → ① (不变性判据) → ③ (结构边
 估计**按构造**对 held-out 光照不变 (do-搜索, 非学习密度); SPN 相关
 密度则退化 —— 探针测量这个差距。
 
-**路线 ① 接入主链路 (不变估计器, 结论: 保持默认关)**: `SceneReconstructor.
-marginal_joint` + `decoupled_map` (解耦 MAP), 经 `InverseConfig.
-appearance_marginalize` + `--appearance-marginalize` 开关控制 (默认关, 走
-联合 argmax)。全量 N=1296 验收的**关键教训**:
+**路线 ① 接入主链路 (已删除, 2026-08-17)**: 曾经的 `SceneReconstructor.
+marginal_joint` + `decoupled_map` (解耦 MAP) 经 `InverseConfig.
+appearance_marginalize` + `--appearance-marginalize` 开关接入主链路, 但
+全量 N=1296 验收否定后保持默认关, 现已连同开关与 decoupled_map 分支一起
+删除。保留的**关键教训**:
 
 - 四因子全拆边缘化 (kind/hue/lcol/ldir 各自 argmax) → lcol 0.994→0.870 /
   ldir 0.895→0.731 (幽灵光照组合); 修正为光照联合 argmax 后 ldir 恢复到
@@ -622,10 +623,8 @@ appearance_marginalize` + `--appearance-marginalize` 开关控制 (默认关, �
   **联合**消歧, 任何边缘化 (即使因果正确的 hue↔光照分离) 都丢弃这份消歧
   信息。因果不变性是**不对称**的: 「反照率对光照不变」成立, 但不意味着
   「光照对反照率边缘化也免费」。
-- 因此 `appearance_marginalize` **保持默认关**: 支持集内它不带来收益且
-  掉 lcol/ldir; 其唯一潜在价值在 held-out 光照 (SPN 先验退化) 的鲁棒性,
-  端到端尚未验证。路线 ① 的「不变性正则」作为探针 (§9.3 首段) 已达标,
-  作为估计器接入主链路则被这条不对称性否定。
+- 路线 ① 的「不变性正则」作为探针 (§9.3 首段) 已达标; 作为估计器接入
+  主链路则被这条不对称性否定, 故删除该接入, 探针保留。
 
 **路线 ② `src/scm_proxy.py`**: `AppearanceMechanism` 把黑盒 renderer
 的外观子图分解为乘法机制 `P(I_color|hue,lcol,ldir) ≈ albedo[hue] ⊙
@@ -659,9 +658,6 @@ mirror/repeat 用 `corrected_gap` 反解 period), 挂到提案
 - 路线 ③: `CausalDeltaLearner` 黑盒测试验证「跨 3 环境稳定的 scale_ratio
   → agreement 1.0 (因果)」vs「跨环境漂移的 lateral_ratio → agreement 0.0
   (伪相关)」; 单环境 (n_envs=1) 不可判因果。
-- 路线 ① 接入: `decoupled_map` 黑盒测试验证尖锐后验下解耦 MAP ≡ 联合
-  argmax (单元级成立), 及光照联合 argmax 不选幽灵组合; 但**全量验收显示
-  真实后验对光照不尖锐, 边缘化仍掉 lcol/ldir** (见上), 故保持默认关。
 - 路线 ③ 接入 (`causal_edge_benchmark.py`, 环境=光照, 每环境多样本):
   attach→scale_ratio 机制真实时 agreement 0.90 (因果), `--drift` 让 ratio
   逐环境漂移时 agreement 0.27 (伪相关) —— 实测 delta 成功区分稳定机制

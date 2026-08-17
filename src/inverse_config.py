@@ -32,10 +32,6 @@ class InverseConfig:
     refine_composite: bool = False
     # 结构候选数: 3 = 覆盖全部 kind 支持集; 1/2 是低成本截断调试
     kind_topk: int = 3
-    # 解耦边缘 MAP (因果不变估计): True 时 refine_scene 用各因子边缘
-    # argmax (反照率对光照、光照对反照率/几何分别边缘化) 替代联合
-    # argmax。见 docs §9.3 路线 ①。
-    appearance_marginalize: bool = False
     # 白化基内在维截断 (docs §10.3): 默认 48 (全量验收全面优于基线);
     # None 或 <=0 = 全维。设 N 只保留最高方差的 N 维, 模型 ~459MB→(N/497)
     # ·459MB, 且精度实测反升 (截掉白化放大的低方差尾维噪声)。仅影响模型
@@ -53,7 +49,6 @@ class InverseConfig:
     em_refine: bool = False
     em_max_iters: int = 2
     em_appearance_topk: int = 3
-    em_tolerance: float = 1.0
     # §7.1 下一步 ①: s/z 不参与 ECM 坐标搜索 (只精炼 u/v)。s/z 有
     # 投影歧义 (大而远 ≡ 小而近), 贪心搜索把 s 拖坏 (全量验收 s R²
     # 0.508→-0.376)。True = 冻结 s/z (默认); False = 四维全搜 (旧行为)。
