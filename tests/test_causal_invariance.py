@@ -57,6 +57,39 @@ def test_marginal_appearance_rejects_unknown_factor() -> None:
         SceneReconstructor.marginal_appearance(mx.zeros((54,)), "kind")
 
 
+def test_marginal_joint_sums_to_one() -> None:
+    """kind×hue×lcol×ldir 联合后验的各因子边缘和应为 1。"""
+    rng = mx.random.key(1)
+    logp = mx.random.normal(shape=(2 * 6 * 3 * 3,), key=rng)
+    posterior = mx.exp(logp - mx.logsumexp(logp))
+    for factor in ("kind", "hue", "lcol", "ldir"):
+        m = SceneReconstructor.marginal_joint(posterior, factor, n_kind=2)
+        assert float(mx.sum(m)) == pytest.approx(1.0, abs=1e-5)
+
+
+def test_decoupled_map_matches_joint_on_sharp_posterior() -> None:
+    """单峰尖锐后验 → 解耦 MAP 与联合 argmax 一致 (支持集内无回归)。"""
+    posterior = mx.zeros((2 * 6 * 3 * 3,))
+    posterior[1 * 54 + 2 * 9 + 1 * 3 + 2] = 1.0  # kind=1,hue=2,lcol=1,ldir=2
+    assert int(mx.argmax(posterior)) == 1 * 54 + 2 * 9 + 1 * 3 + 2
+    assert SceneReconstructor.decoupled_map(posterior, n_kind=2) == (1, 2, 1, 2)
+
+
+def test_decoupled_map_prefers_hue_consistent_across_lighting() -> None:
+    """反照率×光照歧义: 单一 (hue0,lcol0,ldir0) 联合略胜, 但 hue1 与
+    更多光照组合一致 → 边缘化后 hue1 胜出 (因果不变估计的鲁棒性)。"""
+    posterior = mx.zeros((1, 6, 3, 3))
+    posterior[0, 0, 0, 0] = 0.30  # 联合 argmax → hue 0
+    posterior[0, 1, 0, 1] = 0.25
+    posterior[0, 1, 1, 0] = 0.25
+    posterior[0, 1, 1, 1] = 0.20
+    flat = mx.reshape(posterior, (-1,))
+    assert int(mx.argmax(flat)) == 0  # 联合 argmax 落在 hue0 组合
+    ki, hi, ci, di = SceneReconstructor.decoupled_map(flat, n_kind=1)
+    assert ki == 0
+    assert hi == 1  # 边缘化后 hue1 总证据 0.70 > hue0 的 0.30
+
+
 def test_invariance_score_is_worst_group() -> None:
     assert invariance_score([1.0, 1.0, 0.7]) == pytest.approx(0.7)
     assert invariance_score([]) == 0.0

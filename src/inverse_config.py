@@ -32,6 +32,10 @@ class InverseConfig:
     refine_composite: bool = False
     # 结构候选数: 3 = 覆盖全部 kind 支持集; 1/2 是低成本截断调试
     kind_topk: int = 3
+    # 解耦边缘 MAP (因果不变估计): True 时 refine_scene 用各因子边缘
+    # argmax (反照率对光照、光照对反照率/几何分别边缘化) 替代联合
+    # argmax。见 docs §9.3 路线 ①。
+    appearance_marginalize: bool = False
     # 场景结构支持集: 1 = 单图元; 2 = 双图元遮挡/前后层 (实验路径)
     n_objects: int = 1
     # 显式结构族: None 时由 n_objects 兼容推导; composite 是双图元

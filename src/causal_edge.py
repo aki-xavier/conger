@@ -49,28 +49,45 @@ class CausalDeltaLearner:
         self.agreement_threshold = agreement_threshold
 
     @staticmethod
-    def _targets(
-        delta: dict, operation: str
-    ) -> dict[str, float]:
-        """delta → 标量目标 (对齐 TemplateDeltaLearner 的约束命名)。"""
+    def _targets(p: TemplateProposal) -> dict[str, float]:
+        """提案 → 标量目标 (对齐 TemplateDeltaLearner 的约束命名)。
+
+        优先 metadata["observed"] 的实测 delta (来自观测帧几何证据, 是
+        因果边验证的观测), 缺失时回退网格 delta (搜索点)。
+        """
+        meta = p.metadata or {}
+        observed = meta.get("observed", {}) or {}
         out: dict[str, float] = {}
-        if "ratio" in delta:
-            out["scale_ratio"] = float(delta["ratio"])
-        if "lateral_ratio" in delta:
-            key = "period_ratio" if operation in {"mirror", "repeat"} else "lateral_ratio"
-            out[key] = float(delta["lateral_ratio"])
-        if "depth_gap" in delta:
-            out["depth_gap"] = float(delta["depth_gap"])
-        if "depth_jitter" in delta:
-            lo, hi = (float(x) for x in delta["depth_jitter"])
+        if "scale_ratio" in observed:
+            out["scale_ratio"] = float(observed["scale_ratio"])
+        elif "ratio" in p.delta:
+            out["scale_ratio"] = float(p.delta["ratio"])
+        if "period_ratio" in observed:
+            out["period_ratio"] = float(observed["period_ratio"])
+        elif "lateral_ratio" in observed:
+            key = "period_ratio" if p.operation in {"mirror", "repeat"} else "lateral_ratio"
+            out[key] = float(observed["lateral_ratio"])
+        elif "lateral_ratio" in p.delta:
+            key = "period_ratio" if p.operation in {"mirror", "repeat"} else "lateral_ratio"
+            out[key] = float(p.delta["lateral_ratio"])
+        if "depth_gap" in observed:
+            out["depth_gap"] = float(observed["depth_gap"])
+        elif "depth_gap" in p.delta:
+            out["depth_gap"] = float(p.delta["depth_gap"])
+        if "depth_jitter" in p.delta:
+            lo, hi = (float(x) for x in p.delta["depth_jitter"])
             out["depth_jitter"] = 0.5 * (lo + hi)
         return out
 
     @staticmethod
     def default_env_key(p: TemplateProposal) -> Hashable:
-        """默认按提案 metadata 的 env (缺省回退 seed, 再回退 0)。"""
+        """默认环境键: metadata 的 env → seed → case_index → 0。
+
+        真实出生提案没有显式 env/seed, 用 case_index (同一 propose() 调用
+        内的样本序号) 区分不同数据生成条件。
+        """
         meta = p.metadata or {}
-        return meta.get("env", meta.get("seed", 0))
+        return meta.get("env", meta.get("seed", meta.get("case_index", 0)))
 
     def _agreement(self, mids: list[float], ranges: list[tuple[float, float]]) -> float:
         """跨环境一致度 = 1 − 中点漂移 / 总展宽 (∈[0,1])。
@@ -101,7 +118,7 @@ class CausalDeltaLearner:
             if p.parent_family is None:
                 continue
             env = key_fn(p)
-            for target, val in self._targets(p.delta, p.operation).items():
+            for target, val in self._targets(p).items():
                 groups[(p.parent_family, p.operation, target)][env].append(val)
 
         edges: list[CausalEdge] = []

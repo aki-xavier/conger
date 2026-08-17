@@ -63,6 +63,35 @@ def test_single_env_is_not_causal_despite_trivial_agreement() -> None:
     assert not scale.is_causal  # n_envs == 1
 
 
+def test_observed_delta_overrides_grid_and_env_is_case_index() -> None:
+    """实测 delta (metadata["observed"]) 优先于网格 delta, 环境默认用 case_index。"""
+    def make(env: int, observed_ratio: float) -> TemplateProposal:
+        return TemplateProposal(
+            family="composite_attach_x",
+            operation="attach",
+            params=(0.0, 70.0, 70.0, 0.4, 3.0, 1.0, 0.0, 1.0),
+            residual=100.0,
+            complexity=1.5,
+            score=100.0,
+            parent_family="composite",
+            delta={"ratio": 0.45, "lateral_ratio": 0.0},  # 网格恒定 0.45
+            metadata={
+                "case_index": env,
+                "observed": {"scale_ratio": observed_ratio, "lateral_ratio": 0.0},
+            },
+        )
+
+    # 网格全 0.45 但实测漂移 0.4/0.5/0.6 → 用实测值, 边应判伪相关
+    proposals = [make(0, 0.4), make(1, 0.5), make(2, 0.6)]
+    edges = {
+        e.target: e
+        for e in CausalDeltaLearner().learn(proposals)
+    }
+    assert edges["scale_ratio"].agreement < 0.5
+    assert edges["scale_ratio"].n_envs == 3
+    assert not edges["scale_ratio"].is_causal
+
+
 def test_mirror_maps_lateral_to_period_ratio() -> None:
     """mirror/repeat 的 lateral_ratio 映射为 period_ratio 目标。"""
     p = _proposal(0, 0.45, 0.6)

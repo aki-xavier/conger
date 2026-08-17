@@ -195,6 +195,59 @@ class SceneReconstructor:
         raise ValueError(f"未知外观因子: {factor} (期望 hue/lcol/ldir)")
 
     @staticmethod
+    def marginal_joint(
+        posterior: mx.array,
+        factor: str,
+        n_kind: int,
+        n_hue: int = Codebook.N_HUE,
+        n_lcol: int | None = None,
+        n_ldir: int | None = None,
+    ) -> mx.array:
+        """top-k kind × 外观候选联合后验 → 单因子边缘。
+
+        后验行主序 (kind, hue, lcol, ldir); 对 nuisance 因子求和得到不变
+        估计: hue 对 kind/光照边缘化, lcol/ldir 对 kind/反照率边缘化。
+        factor ∈ {kind, hue, lcol, ldir}。
+        """
+        n_lcol = len(Codebook.LIGHT_COLORS) if n_lcol is None else n_lcol
+        n_ldir = len(Codebook.LIGHT_DIRS) if n_ldir is None else n_ldir
+        p = mx.reshape(posterior, (n_kind, n_hue, n_lcol, n_ldir))
+        if factor == "kind":
+            return mx.sum(p, axis=(1, 2, 3))
+        if factor == "hue":
+            return mx.sum(p, axis=(0, 2, 3))
+        if factor == "lcol":
+            return mx.sum(p, axis=(0, 1, 3))
+        if factor == "ldir":
+            return mx.sum(p, axis=(0, 1, 2))
+        raise ValueError(f"未知场景因子: {factor} (期望 kind/hue/lcol/ldir)")
+
+    @staticmethod
+    def decoupled_map(
+        posterior: mx.array,
+        n_kind: int,
+        n_hue: int = Codebook.N_HUE,
+        n_lcol: int | None = None,
+        n_ldir: int | None = None,
+    ) -> tuple[int, int, int, int]:
+        """联合后验 → 各因子边缘 argmax 的解耦 MAP (不变估计)。
+
+        返回 (kind_idx, hue, lcol, ldir); kind_idx 是后验 kind 维下标
+        (调用方映射回实际 kind)。相比联合 argmax, 反照率与光照各自对
+        nuisance 边缘化, 反照率估计不再被单一光照组合的歧义绑架。
+        """
+        return tuple(
+            int(
+                mx.argmax(
+                    SceneReconstructor.marginal_joint(
+                        posterior, f, n_kind, n_hue, n_lcol, n_ldir
+                    )
+                )
+            )
+            for f in ("kind", "hue", "lcol", "ldir")
+        )
+
+    @staticmethod
     def appearance_candidates(
         base_params: tuple[float, ...],
     ) -> tuple[tuple[float, ...], ...]:
@@ -252,6 +305,7 @@ class SceneReconstructor:
         renderer: Renderer | None = None,
         cam_l: PerspectiveCamera | None = None,
         cam_r: PerspectiveCamera | None = None,
+        marginalize: bool = False,
     ) -> tuple[
         tuple[float, ...], tuple[tuple[float, ...], ...], mx.array, mx.array, float
     ]:
@@ -262,7 +316,8 @@ class SceneReconstructor:
         log 形式 = −残差/T + log P(kind|SPN)。温度
         T=max(2·best_residual,1) 用最佳残差估计观测噪声尺度并随
         StructuredHypothesis 返回; 该后验表达候选间相对置信度, 不声称绝对
-        校准。"""
+        校准。marginalize=True 时 MAP 改为各因子边缘 argmax 的解耦估计
+        (因果不变估计, 见 marginal_joint), 否则沿用联合 argmax。"""
         if renderer is None or cam_l is None or cam_r is None:
             renderer, cam_l, cam_r = Codebook.make_renderer()
         kind_topk = max(1, min(kind_topk, Codebook.N_KIND))
@@ -291,8 +346,24 @@ class SceneReconstructor:
             + p[4:]
             for p in params
         )
-        best_i = int(mx.argmax(posterior))
-        return calibrated[best_i], calibrated, score_arr, posterior, temperature
+        if marginalize:
+            # 解耦边缘 MAP: 反照率对光照、光照对反照率/几何分别边缘化
+            ki, hi, ci, di = cls.decoupled_map(posterior, len(order))
+            kind = int(order[ki])
+            best = (
+                float(kind),
+                base_params[1],
+                base_params[2],
+                float(cls.s_proxy(kind, stats)[0]) + s_resid,
+                base_params[4],
+                float(hi),
+                float(ci),
+                float(di),
+            )
+        else:
+            best_i = int(mx.argmax(posterior))
+            best = calibrated[best_i]
+        return best, calibrated, score_arr, posterior, temperature
 
     @staticmethod
     def em_refine(
@@ -404,6 +475,7 @@ class SceneReconstructor:
             fl,
             fr,
             kind_topk=kind_topk,
+            marginalize=app.cfg.appearance_marginalize,
         )
         # 推理期几何↔光照 ECM 精炼 (§7.1): 默认关闭。kind 固定, 只精炼
         # 连续几何 (u,v,s,z); 外观 (hue/lcol/ldir) 沿用 refine_scene 的 MAP。

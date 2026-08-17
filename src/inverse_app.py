@@ -273,6 +273,7 @@ class InverseApp:
                 renderer=renderer,
                 cam_l=cam_l,
                 cam_r=cam_r,
+                marginalize=self.cfg.appearance_marginalize,
             )[0]
             # 几何↔光照 ECM 精炼 (§7.1), 与推理链路共用同一 helper
             refined, _ = SceneReconstructor.em_refine(self, refined, fl, fr)
@@ -490,6 +491,12 @@ class InverseApp:
             help="推理期几何↔光照 ECM 精炼 (§7.1, 默认关闭, 仅单物体)",
         )
         ap.add_argument(
+            "--appearance-marginalize",
+            action="store_true",
+            help="解耦边缘 MAP (因果不变估计): 反照率对光照、光照对反照率/几何"
+            "分别边缘化后 argmax (默认关闭, 走联合 argmax)",
+        )
+        ap.add_argument(
             "--n-textures",
             type=int,
             default=0,
@@ -514,4 +521,5 @@ class InverseApp:
             scene_family=a.scene_family,
             em_refine=a.em_refine,
             n_textures=a.n_textures,
+            appearance_marginalize=a.appearance_marginalize,
         )

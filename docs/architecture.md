@@ -596,6 +596,15 @@ pipeline 关系: ② (机制代理) → ① (不变性判据) → ③ (结构边
 估计**按构造**对 held-out 光照不变 (do-搜索, 非学习密度); SPN 相关
 密度则退化 —— 探针测量这个差距。
 
+**路线 ① 接入主链路 (不变估计器)**: `SceneReconstructor.marginal_joint`
+(把 top-k kind×hue×lcol×ldir 联合后验按因子边缘化) + `decoupled_map`
+(各因子边缘 argmax 的解耦 MAP)。`refine_scene(marginalize=True)` 用它
+替代联合 argmax, 经 `InverseConfig.appearance_marginalize` +
+`--appearance-marginalize` 开关控制 (默认关, 走联合 argmax)。这是把
+「不变性正则」变成实际估计器: 反照率对光照边缘化后 argmax, 不再被单一
+(hue,光照) 组合的歧义绑架; 支持集内联合后验尖锐 → 与联合 argmax 一致
+(无回归), 歧义/池外时才显示鲁棒性。
+
 **路线 ② `src/scm_proxy.py`**: `AppearanceMechanism` 把黑盒 renderer
 的外观子图分解为乘法机制 `P(I_color|hue,lcol,ldir) ≈ albedo[hue] ⊙
 lighting[lcol,ldir]` (MeshStandardMaterial 反照率×光照物理), 从干预数据
@@ -607,6 +616,13 @@ invariance` (秩一重构误差 = 模块性/不变性分数)。只作快速 do �
 的 delta 边升级为候选因果边 `CausalEdge`: 提案按环境 (seed/父几何配置)
 分组, 每组估约束范围, 跨组一致度 = 因果证据 (不变性因果发现/ICP 精神)。
 `agreement` 高 → 边是稳定机制; 低 → 伪相关。
+
+**路线 ③ 接入真实提案闭环**: `CompositeTemplateProposer._observed_delta`
+从观测帧提取实测 delta (attach/layer 用全分辨率圆拟合 `disk_evidence`,
+mirror/repeat 用 `corrected_gap` 反解 period), 挂到提案
+`metadata["observed"]`; `CausalDeltaLearner` 优先读实测 delta (而非网格
+搜索点), 默认环境键回退 `case_index`。这使因果边验证吃的是**数据实测**
+而非语法网格 —— 网格值恒定会让一致度虚高, 实测才有判别力。
 
 **实测 (合成/单场景校准, 非全量验收)**:
 
@@ -621,3 +637,10 @@ invariance` (秩一重构误差 = 模块性/不变性分数)。只作快速 do �
 - 路线 ③: `CausalDeltaLearner` 黑盒测试验证「跨 3 环境稳定的 scale_ratio
   → agreement 1.0 (因果)」vs「跨环境漂移的 lateral_ratio → agreement 0.0
   (伪相关)」; 单环境 (n_envs=1) 不可判因果。
+- 路线 ① 接入: `decoupled_map` 黑盒测试验证尖锐后验下解耦 MAP ≡ 联合
+  argmax (支持集内无回归), 及「单一 (hue0,光照) 联合略胜但 hue1 与更多
+  光照组合一致 → 边缘化后 hue1 胜出」的反照率×光照歧义鲁棒性。
+- 路线 ③ 接入 (`causal_edge_benchmark.py`, 环境=光照, 每环境多样本):
+  attach→scale_ratio 机制真实时 agreement 0.90 (因果), `--drift` 让 ratio
+  逐环境漂移时 agreement 0.27 (伪相关) —— 实测 delta 成功区分稳定机制
+  与漂移相关。lateral_ratio 在两种设置都稳定 (drift 只动 ratio)。

@@ -14,10 +14,13 @@ import mlx.core as mx
 
 from codebook import Codebook
 from composite_codebook import CompositeCodebook
+from composite_geometry import CompositeGeometry
 from inverse_config import InverseConfig
 from lateral_codebook import LateralCompositeCodebook
+from lateral_composite_geometry import LateralCompositeGeometry
 from scene_reconstructor import SceneReconstructor
 from stereo import StereoDepth
+from stereo_layers import StereoLayers
 from structure_birth import StructureCase
 from template_grammar import TemplateGrammar, TemplateRule
 from template_proposal import TemplateProposal
@@ -47,6 +50,38 @@ class CompositeTemplateProposer:
         self.max_cases = max_cases
         self.max_proposals = max_proposals
         self.codebook = CompositeCodebook(InverseConfig(scene_family="composite"))
+
+    @staticmethod
+    def _observed_delta(
+        fl: mx.array, fr: mx.array, operation: str, part_kind: int = 1
+    ) -> dict:
+        """观测帧 → 实测 delta (target 命名, 供 CausalDeltaLearner 验证因果边)。
+
+        attach/layer 用全分辨率圆拟合 `CompositeGeometry.disk_evidence`
+        得 (scale_ratio, lateral_ratio), layer 再取 `StereoLayers` 深度差;
+        mirror/repeat 用 `LateralCompositeGeometry.corrected_gap` 反解 world
+        归一化间隔得 period_ratio。返回 {} 表示该观测无法可靠估计。
+        """
+        if operation in {"attach", "layer"}:
+            ev = CompositeGeometry.disk_evidence(fl, fr)
+            if ev is None:
+                return {}
+            ratio, lateral = ev
+            out = {"scale_ratio": float(ratio), "lateral_ratio": float(lateral)}
+            if operation == "layer":
+                st = StereoLayers.estimate(fl, fr)
+                if st is not None and len(st) >= 8:
+                    out["depth_gap"] = abs(float(st[2]) - float(st[6]))
+            return out
+        if operation in {"mirror", "repeat"}:
+            g = LateralCompositeGeometry.corrected_gap(fl, fr, int(part_kind))
+            if g is None:
+                return {}
+            return {
+                "period_ratio": float(g)
+                / LateralCompositeCodebook.spacing_factor(operation)
+            }
+        return {}
 
     @staticmethod
     def _base_from_params(params: tuple[float, ...]) -> tuple[float, ...] | None:
@@ -174,6 +209,14 @@ class CompositeTemplateProposer:
         fr = case.fr
         baseline = min(case.residuals.values()) if case.residuals else math.inf
         renderer, cam_l, cam_r = Codebook.make_renderer()
+        observed_cache: dict[tuple[str, int], dict] = {}
+
+        def observed_for(op: str, pk: int) -> dict:
+            key = (op, pk)
+            if key not in observed_cache:
+                observed_cache[key] = self._observed_delta(fl, fr, op, pk)
+            return observed_cache[key]
+
         out = []
         for rule in self.grammar.composites():
             assert rule.part_kind is not None
@@ -249,6 +292,9 @@ class CompositeTemplateProposer:
                                     "lateral_ratio": lateral,
                                     "case_index": case_index,
                                     "residual_gain": baseline - residual,
+                                    "observed": observed_for(
+                                        rule.operation, rule.part_kind
+                                    ),
                                 },
                             )
                         )
