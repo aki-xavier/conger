@@ -7,7 +7,7 @@ requires-python = ">=3.14"
 dependencies = [
     "matplotlib>=3.11.1",
     "mlx>=0.32.0",
-    "cga",  # 独立项目 ~/code/cga (path source, 见 [tool.uv.sources])
+    "cga",                # 独立项目 ~/code/cga (path source, 见 [tool.uv.sources])
     "numpy>=2.4.6",
     "pillow>=12.3.0",
 ]
@@ -34,7 +34,7 @@ typeCheckingMode = "strict"
 pythonVersion = "3.14"
 venvPath = "."
 venv = ".venv"
-exclude = ["tools", ".venv"]
+exclude = ["tools", ".venv", "**/node_modules", "**/__pycache__", "**/.*"]
 reportMissingTypeStubs = false
 reportPrivateUsage = false
 reportUnknownMemberType = false
@@ -50,9 +50,7 @@ reportArgumentType = false
 reportMissingTypeArgument = false
 
 [dependency-groups]
-dev = [
-    "pytest>=9.1.1",
-]
+dev = ["pytest>=9.1.1"]
 
 # ═══════════════════════════════════════════════════════════════════════
 # pytest — 测试 (tests/, src 经 pythonpath 入径)
