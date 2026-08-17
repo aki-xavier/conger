@@ -9,10 +9,14 @@ MAP 点, 而是 StructuredHypothesis: MAP Scene + 候选渲染残差 + 联合后
 from __future__ import annotations
 
 import math
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, cast
 
 import mlx.core as mx
-from cga.engine import PerspectiveCamera, Renderer, Scene
+from cga.engine import (  # pyright: ignore[reportMissingImports]
+    PerspectiveCamera,
+    Renderer,
+    Scene,
+)
 
 from codebook import Codebook
 from composite_geometry import CompositeGeometry
@@ -92,7 +96,9 @@ class SceneReconstructor:
         return q * coef
 
     @classmethod
-    def split_cat(cls, cat_p: mx.array, cat_sizes: tuple[int, ...] | None = None) -> tuple[mx.array, ...]:
+    def split_cat(
+        cls, cat_p: mx.array, cat_sizes: tuple[int, ...] | None = None
+    ) -> tuple[mx.array, ...]:
         """拼接场景后验 (N,ΣC) → 各因子 (N,C_j)。"""
         out, lo = [], 0
         for nc in (cat_sizes or cls.CAT_SIZES):
@@ -108,9 +114,15 @@ class SceneReconstructor:
         stats: mx.array,  # (N,3) [ẑ, 视差, 掩码面积]
         cat_sizes: tuple[int, ...] | None = None,
     ) -> tuple[tuple[float, ...], ...]:
-        """模型输出 → Codebook.to_scene 参数 (kind,u,v,s,z,hue,lcol,ldir[,tex_id,roughness])。"""
+        """模型输出 → Codebook.to_scene 参数元组。
+
+        参数顺序: kind,u,v,s,z,hue,lcol,ldir[,tex_id,roughness];
+        返回每行一个场景的参数元组。
+        """
         sizes = cat_sizes or cls.CAT_SIZES
-        probs = [mx.argmax(p, axis=1).astype(mx.int32) for p in cls.split_cat(cat_p, sizes)]
+        probs = [
+            mx.argmax(p, axis=1).astype(mx.int32) for p in cls.split_cat(cat_p, sizes)
+        ]
         s = mx.maximum(t_pred[:, 2] + cls.s_proxy(probs[0], stats), cls.S_FLOOR)
         z = mx.clip(t_pred[:, 3] + stats[:, 0], cls.Z_MIN, cls.Z_MAX)
         tex = len(sizes) >= 5
@@ -333,7 +345,7 @@ class SceneReconstructor:
         if renderer is None or cam_l is None or cam_r is None:
             renderer, cam_l, cam_r = Codebook.make_renderer()
         kind_topk = max(1, min(kind_topk, Codebook.N_KIND))
-        order = mx.argsort(kind_p)[::-1][:kind_topk].tolist()
+        order = cast(list, mx.argsort(kind_p)[::-1][:kind_topk].tolist())
         stats = stats[None, :] if stats.ndim == 1 else stats
         s_resid = base_params[3] - float(
             cls.s_proxy(int(base_params[0]), stats)[0]
@@ -419,7 +431,7 @@ class SceneReconstructor:
     ) -> tuple[mx.array, mx.array, RieszWavelet | None]:
         """左/右帧 → (模型特征 (1,V), 立体统计 (1,3), Riesz 工作区)。"""
         vec, rw = app.extractor.of_frame(fl, rw)
-        if app.codebook.GEOMETRY_FAMILY == "lateral":
+        if str(app.codebook.GEOMETRY_FAMILY) == "lateral":
             stat = LateralCompositeGeometry.estimate(fl, fr)
             vec = mx.concatenate(
                 [vec, StereoLayers.scaled(mx.array([stat]))[0]]
@@ -492,7 +504,7 @@ class SceneReconstructor:
         # 推理期几何↔光照 ECM 精炼 (§7.1): 默认关闭。kind 固定, 只精炼
         # 连续几何 (u,v,s,z); 外观 (hue/lcol/ldir) 沿用 refine_scene 的 MAP。
         prm, em_trajectory = cls.em_refine(app, prm, fl, fr)
-        order = mx.argsort(posterior)[::-1][:5].tolist()
+        order = cast(list, mx.argsort(posterior)[::-1][:5].tolist())
         hypotheses = tuple(
             HypothesisCandidate(candidates[i], float(posterior[i]), float(scores[i]))
             for i in order

@@ -70,7 +70,7 @@ class CompositeTemplateProposer:
             out = {"scale_ratio": float(ratio), "lateral_ratio": float(lateral)}
             if operation == "layer":
                 st = StereoLayers.estimate(fl, fr)
-                if st is not None and len(st) >= 8:
+                if len(st) >= 8:
                     out["depth_gap"] = abs(float(st[2]) - float(st[6]))
             return out
         if operation in {"mirror", "repeat"}:

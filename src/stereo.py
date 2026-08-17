@@ -13,6 +13,8 @@ z = CAM_Z − FX·B/d。
 
 from __future__ import annotations
 
+from typing import Any, cast
+
 import mlx.core as mx
 
 from codebook import Codebook
@@ -38,7 +40,7 @@ class StereoDepth:
             [lum[:8, :8].reshape(-1), lum[:8, -8:].reshape(-1),
              lum[-8:, :8].reshape(-1), lum[-8:, -8:].reshape(-1)]
         )
-        bg = mx.median(corners)
+        bg = cast(Any, mx).median(corners)
         dl = lum - bg
         return re * re + im * im + dl * dl
 

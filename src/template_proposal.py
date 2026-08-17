@@ -30,3 +30,4 @@ class TemplateProposer(Protocol):
 
     def propose(self, cases: tuple[object, ...]) -> tuple[TemplateProposal, ...]:
         """聚合一个或多个未知结构样本, 返回按 score 升序的候选。"""
+        ...

@@ -1,5 +1,7 @@
 """StructureGeometry 测试: 三类结构族的观测级几何证据。"""
 
+from typing import cast
+
 import mlx.core as mx
 import pytest
 
@@ -23,7 +25,9 @@ def frames() -> dict[str, tuple[mx.array, mx.array]]:
     }
     out = {}
     for i, (name, cb) in enumerate(families.items()):
-        prm = tuple(float(x) for x in cb.sample(1, 777 + i)[0].tolist())
+        prm = tuple(
+            float(x) for x in cast(list, cb.sample(1, 777 + i)[0].tolist())
+        )
         scene = cb.to_scene(prm)
         out[name] = (
             renderer.render(scene, cam_l), renderer.render(scene, cam_r)

@@ -21,6 +21,7 @@ cga = { path = "../cga", editable = true }
 [tool.ruff]
 line-length = 88
 target-version = "py314"
+extend-exclude = ["tools"]
 
 [tool.ruff.lint]
 select = ["E", "F", "I", "UP"]
@@ -31,7 +32,11 @@ select = ["E", "F", "I", "UP"]
 [tool.pyright]
 typeCheckingMode = "strict"
 pythonVersion = "3.14"
+venvPath = "."
+venv = ".venv"
+exclude = ["tools", ".venv"]
 reportMissingTypeStubs = false
+reportPrivateUsage = false
 reportUnknownMemberType = false
 reportUnknownArgumentType = false
 reportUnknownVariableType = false

@@ -11,7 +11,7 @@ import random
 from typing import TYPE_CHECKING
 
 import mlx.core as mx
-from cga.engine import (
+from cga.engine import (  # pyright: ignore[reportMissingImports]
     AmbientLight,
     Color,
     DirectionalLight,
@@ -62,8 +62,8 @@ class LayeredCodebook:
     TEMPLATE_VARIANT = ""
     GEOMETRY_FAMILY = "layered"
     # None = 父 layered 独立采样; 子模板可设置比例/横向/深度约束
-    PART_SCALE_RANGE = None
-    PART_LATERAL_RANGE = None
+    PART_SCALE_RANGE: tuple[float, float] | None = None
+    PART_LATERAL_RANGE: tuple[float, float] | None = None
     DEPTH_GAP_RANGE = (0.7, 1.4)
     TARGET_IDX = (1, 2, 3, 4, 7, 8, 9, 10)
     CLASS_IDX = (0, 6, 5, 11, 12, 13)  # k0,k1,h0,h1,lcol,ldir
@@ -92,6 +92,7 @@ class LayeredCodebook:
         z_range: tuple[float, float] = (2.4, 3.4),
     ) -> tuple[float, ...]:
         """独立物体 → (u,v,s,z), 取景约束拒绝重采。"""
+        s = z = m = 0.0
         for _ in range(8):
             if extrap:
                 s = rng.choice(
@@ -115,9 +116,10 @@ class LayeredCodebook:
         """前/后层连续参数; 父族独立采样, 子族可按 scale/lateral/depth 约束。"""
         for _ in range(8):
             u0, v0, s0, z0 = cls._sample_free(rng, extrap, (3.1, 4.2))
-            if cls.PART_SCALE_RANGE is None:
+            scale_range = cls.PART_SCALE_RANGE
+            if scale_range is None:
                 break
-            s1 = s0 * rng.uniform(*cls.PART_SCALE_RANGE)
+            s1 = s0 * rng.uniform(*scale_range)
             z1 = max(z0 - rng.uniform(*cls.DEPTH_GAP_RANGE), 2.3)
             a0 = Codebook.EXTENT * s0 * Codebook.FX / (Codebook.CAM_Z - z0)
             a1 = Codebook.EXTENT * s1 * Codebook.FX / (Codebook.CAM_Z - z1)

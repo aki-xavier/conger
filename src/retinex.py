@@ -14,6 +14,8 @@ L→L/c) 通过 E 步中心化 log A 打破 (DC 归光照)。
 
 from __future__ import annotations
 
+from typing import cast
+
 import numpy as np
 
 
@@ -56,7 +58,10 @@ class RetinexModel:
     # ── E 步 (坐标上升: 固定光照, 估反照率) ───────────────────────
 
     def responsibilities(
-        self, params: tuple[float, float], observation: np.ndarray, temperature: float = 1.0
+        self,
+        params: tuple[float, float],
+        observation: np.ndarray,
+        temperature: float = 1.0,
     ) -> np.ndarray:
         """固定 L, 分段常数估计 log A (中心化破规范), 返回 (n,)。"""
         log_i = np.log(observation + 1e-12)
@@ -80,16 +85,20 @@ class RetinexModel:
         """固定 A, 线性拟合 log L = l0 + l1·x。"""
         log_i = np.log(observation + 1e-12)
         coef = np.linalg.lstsq(self.xm, log_i - resp, rcond=None)[0]
-        new = (float(coef[0]), float(coef[1]))
+        new: tuple[float, float] = (float(coef[0]), float(coef[1]))
         if damping > 0.0:
-            new = tuple(
-                (1.0 - damping) * a + damping * b for a, b in zip(new, params, strict=True)
+            blended = tuple(
+                (1.0 - damping) * a + damping * b
+                for a, b in zip(new, params, strict=True)
             )
+            new = cast(tuple[float, float], blended)
         return new
 
     # ── 收敛监控 ──────────────────────────────────────────────────
 
-    def log_likelihood(self, params: tuple[float, float], observation: np.ndarray) -> float:
+    def log_likelihood(
+        self, params: tuple[float, float], observation: np.ndarray
+    ) -> float:
         """重构残差负值 (log 域)。"""
         log_i = np.log(observation + 1e-12)
         log_a = self.responsibilities(params, observation)

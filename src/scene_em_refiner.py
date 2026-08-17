@@ -57,7 +57,9 @@ class SceneEMRefiner:
 
     # ── 渲染残差 (正向模型) ───────────────────────────────────────
 
-    def _residual(self, geometry: tuple[float, ...], appearance: tuple[int, int, int]) -> float:
+    def _residual(
+        self, geometry: tuple[float, ...], appearance: tuple[int, int, int]
+    ) -> float:
         u, v, s, z = geometry
         hue, lcol, ldir = appearance
         prm = (
@@ -112,7 +114,8 @@ class SceneEMRefiner:
         new = tuple(cur)
         if damping > 0.0:
             new = tuple(
-                (1.0 - damping) * g + damping * o for g, o in zip(new, geometry, strict=True)
+                (1.0 - damping) * g + damping * o
+                for g, o in zip(new, geometry, strict=True)
             )
         return new
 
@@ -120,7 +123,9 @@ class SceneEMRefiner:
         """观测对数似然代理: 负最佳外观残差 (越小越不像)。"""
         return -float(min(self._residual(geometry, a) for a in self._appearances))
 
-    def sample(self, geometry: tuple[float, ...], rng=None) -> tuple[mx.array, mx.array]:
+    def sample(
+        self, geometry: tuple[float, ...], rng=None
+    ) -> tuple[mx.array, mx.array]:
         """正向模型: 几何 + 随机外观 → 左右帧 (合成验证用)。"""
         import random
 

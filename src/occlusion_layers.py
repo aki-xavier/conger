@@ -21,7 +21,9 @@ import numpy as np
 class OcclusionLayerModel:
     """两层遮挡 → 深度序软后验 E 步 + 加权线性拟合 M 步。"""
 
-    def __init__(self, n: int = 96, a: float = 0.4, b: float = 0.6, sigma: float = 0.03):
+    def __init__(
+        self, n: int = 96, a: float = 0.4, b: float = 0.6, sigma: float = 0.03
+    ):
         if not (0.0 < a < b < 1.0):
             raise ValueError("需 0 < a < b < 1")
         self.n = n
@@ -57,7 +59,9 @@ class OcclusionLayerModel:
         return out + rng.normal(0.0, self.sigma, self.n)
 
     def sample(
-        self, params: tuple[float, float, float, float], rng: np.random.Generator | None = None
+        self,
+        params: tuple[float, float, float, float],
+        rng: np.random.Generator | None = None,
     ) -> np.ndarray:
         """正向模型: 深度序按均匀先验采样 → 观测。"""
         rng = rng or np.random.default_rng(0)
@@ -66,7 +70,10 @@ class OcclusionLayerModel:
     # ── E 步 ──────────────────────────────────────────────────────
 
     def responsibilities(
-        self, params: tuple[float, float, float, float], observation: np.ndarray, temperature: float = 1.0
+        self,
+        params: tuple[float, float, float, float],
+        observation: np.ndarray,
+        temperature: float = 1.0,
     ) -> np.ndarray:
         """深度序后验 q = P(D=0|I) ∈ [0,1] (标量, 存成一维)。"""
         l1 = self._layer(params[:2])
@@ -107,16 +114,22 @@ class OcclusionLayerModel:
 
     # ── 收敛监控 ──────────────────────────────────────────────────
 
-    def log_likelihood(self, params: tuple[float, float, float, float], observation: np.ndarray) -> float:
+    def log_likelihood(
+        self, params: tuple[float, float, float, float], observation: np.ndarray
+    ) -> float:
         """深度序混合对数似然: 非重叠区单层高斯, 重叠区 0.5 均匀混合。"""
         l1 = self._layer(params[:2])
         l2 = self._layer(params[2:])
-        logn = (
-            lambda d: -0.5 * (d / self.sigma) ** 2 - 0.5 * np.log(2 * np.pi * self.sigma**2)
-        )
+
+        def logn(d: np.ndarray) -> np.ndarray:
+            return -0.5 * (d / self.sigma) ** 2 - 0.5 * np.log(
+                2 * np.pi * self.sigma**2
+            )
+
         ll = float(np.sum(logn(observation[self.mask_1_only] - l1[self.mask_1_only])))
         ll += float(np.sum(logn(observation[self.mask_2_only] - l2[self.mask_2_only])))
         o = observation[self.mask_overlap]
-        p = 0.5 * np.exp(-0.5 * ((o - l1[self.mask_overlap]) / self.sigma) ** 2) + \
+        p = 0.5 * np.exp(-0.5 * ((o - l1[self.mask_overlap]) / self.sigma) ** 2) + (
             0.5 * np.exp(-0.5 * ((o - l2[self.mask_overlap]) / self.sigma) ** 2)
+        )
         return ll + float(np.sum(np.log(p + 1e-12)))

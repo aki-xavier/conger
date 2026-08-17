@@ -49,7 +49,10 @@ class TransparentLayerModel:
     # ── E 步 ──────────────────────────────────────────────────────
 
     def responsibilities(
-        self, params: tuple[float, float], observation: np.ndarray, temperature: float = 1.0
+        self,
+        params: tuple[float, float],
+        observation: np.ndarray,
+        temperature: float = 1.0,
     ) -> np.ndarray:
         """每像素属于层 1 的软后验 q(Z=1|x)。"""
         c1, c2 = params
@@ -84,7 +87,9 @@ class TransparentLayerModel:
 
     # ── 收敛监控 ──────────────────────────────────────────────────
 
-    def log_likelihood(self, params: tuple[float, float], observation: np.ndarray) -> float:
+    def log_likelihood(
+        self, params: tuple[float, float], observation: np.ndarray
+    ) -> float:
         """混合高斯观测对数似然 Σ_x log(α·N(I|c1,σ) + (1−α)·N(I|c2,σ))。"""
         c1, c2 = params
         p1 = self.alpha * np.exp(-0.5 * ((observation - c1) / self.sigma) ** 2)

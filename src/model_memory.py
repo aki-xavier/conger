@@ -21,6 +21,7 @@ from __future__ import annotations
 import json
 import math
 from pathlib import Path
+from typing import cast
 
 import mlx.core as mx
 
@@ -66,7 +67,7 @@ def load_transform(path: str | Path) -> tuple[mx.array, mx.array]:
 def load_components(path: str | Path) -> tuple[dict, dict]:
     """只加载分量表 + 元数据 (不含 basis), ~6MB, 供门控/契约检查。"""
     c_path = Path(path).with_name(Path(path).name + ".components.safetensors")
-    d = mx.load(str(c_path))
+    d = cast(dict, mx.load(str(c_path)))
     hd = Utils.st_metadata(str(c_path)).get("__metadata__", {})
     meta = {k: json.loads(v) for k, v in hd.items()}
     if "cat_sizes" in meta:
@@ -104,6 +105,7 @@ def truncate_basis(model: MixtureSPN, d_max: int) -> MixtureSPN:
     d_max = min(max(1, d_max), d)
     if d_max == d:
         return model
+    assert model.basis is not None
     return MixtureSPN(
         model.log_w,
         model.f_mu[:, -d_max:],
@@ -164,7 +166,7 @@ def forget_components(
             pick = mx.random.permutation(sel, key=rng)[:kj]
         else:
             pick = sel[_coreset(model.f_mu[sel], kj, rng)]
-        kept.extend(int(i) for i in pick.tolist())
+        kept.extend(int(i) for i in cast(list, pick.tolist()))
     kept.sort()
     idx = mx.array(kept, dtype=mx.int32)
     s_kept = stratum[idx]

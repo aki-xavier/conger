@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, cast
 
 import mlx.core as mx
 
@@ -88,7 +88,7 @@ class LayeredReconstructor:
         probs = [mx.argmax(p, axis=1).astype(mx.int32) for p in cls.split_cat(cat_p)]
         rows = []
         for i in range(t_pred.shape[0]):
-            t = t_pred[i].tolist()
+            t = cast(list[float], t_pred[i].tolist())
             if stats is None:
                 geom = t
             else:

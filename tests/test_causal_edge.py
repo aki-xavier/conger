@@ -108,7 +108,9 @@ def test_mirror_maps_lateral_to_period_ratio() -> None:
     )
     edges = {
         e.target: e
-        for e in CausalDeltaLearner().learn([mirror, p], env_key=lambda q: q.metadata["env"])
+        for e in CausalDeltaLearner().learn(
+            [mirror, p], env_key=lambda q: q.metadata["env"]
+        )
     }
     assert "period_ratio" in edges
     assert "lateral_ratio" in edges  # attach 提案的 lateral 仍独立成边

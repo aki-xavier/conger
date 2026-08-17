@@ -22,14 +22,16 @@ from stereo import StereoDepth
 def main() -> None:
     ap = argparse.ArgumentParser()
     ap.add_argument("--seed", type=int, default=3)
-    args = ap.parse_args()
+    ap.parse_args()
 
     cfg = InverseConfig(scene_family="single")
     codebook = Codebook(cfg)
     renderer, cam_l, cam_r = Codebook.make_renderer()
     # 固定几何 (球体, 中心偏上), 只扫外观因子
     base = (0, 72.0, 72.0, 0.45, 3.2)
-    rgb = mx.zeros((Codebook.N_HUE, len(Codebook.LIGHT_COLORS), len(Codebook.LIGHT_DIRS), 3))
+    rgb = mx.zeros(
+        (Codebook.N_HUE, len(Codebook.LIGHT_COLORS), len(Codebook.LIGHT_DIRS), 3)
+    )
     for h in range(Codebook.N_HUE):
         for lc in range(len(Codebook.LIGHT_COLORS)):
             for ld in range(len(Codebook.LIGHT_DIRS)):
@@ -42,6 +44,7 @@ def main() -> None:
     mechanism = AppearanceMechanism().fit(rgb)
     err = mechanism.reconstruction_error(rgb)
     inv = mechanism.albedo_invariance(rgb)
+    assert mechanism.albedo is not None and mechanism.lighting is not None
     print(f"重构误差 {err:.4f} / 反照率不变性 {inv:.4f}")
     print("反照率机制项 (单位光照下, 归一化到最大通道):")
     for h in range(Codebook.N_HUE):

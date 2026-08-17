@@ -1,6 +1,7 @@
 """双层遮挡场景族测试: 采样、Scene 构造、目标/类目契约。"""
 
 import math
+from typing import cast
 
 import mlx.core as mx
 
@@ -18,9 +19,9 @@ def test_layered_sampling_and_scene() -> None:
     assert p.shape == (LayeredCodebook.N_COMBO, 14)
     assert bool(mx.all(p[:, 4] > p[:, 10]))
     combos = p[:, [0, 6, 5, 11, 12, 13]].astype(mx.int32)
-    got = {tuple(row) for row in combos.tolist()}
+    got = {tuple(row) for row in cast(list[list[int]], combos.tolist())}
     assert len(got) == LayeredCodebook.N_COMBO
-    scene = cb.to_scene(tuple(float(x) for x in p[0].tolist()))
+    scene = cb.to_scene(tuple(float(x) for x in cast(list[float], p[0].tolist())))
     assert len(scene.objects) == 2
     assert len(scene.lights) == 2
 
@@ -34,7 +35,9 @@ def test_layered_targets_and_decoding() -> None:
     assert t.shape == (p.shape[0], 8)
     assert c.shape == (p.shape[0], 6)
     cat_p = mx.zeros((1, 24))
-    for lo, (nc, val) in enumerate(zip(LayeredReconstructor.CAT_SIZES, c[0].tolist())):
+    sizes = LayeredReconstructor.CAT_SIZES
+    cats = cast(list[int], c[0].tolist())
+    for lo, (nc, val) in enumerate(zip(sizes, cats)):
         col = sum(LayeredReconstructor.CAT_SIZES[:lo]) + val
         cat_p[0, col] = 1.0
     prm = LayeredReconstructor.params(t[:1], cat_p)[0]

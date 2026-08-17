@@ -23,7 +23,9 @@ from typing import Any, Protocol
 class GenerativeModel(Protocol):
     """EM 所需的生成模型接口 (领域适配器实现)。"""
 
-    def responsibilities(self, params: Any, observation: Any, temperature: float = 1.0) -> Any:
+    def responsibilities(
+        self, params: Any, observation: Any, temperature: float = 1.0
+    ) -> Any:
         """E 步: 观测 + 当前参数 → 隐变量软后验 q(Z)。"""
         ...
 

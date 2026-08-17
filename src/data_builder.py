@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+from typing import cast
 
 import mlx.core as mx
 
@@ -85,7 +86,7 @@ class DataBuilder:
         sl = StereoLayers()
         rw = None
         out, stats = [], []
-        for p in params.tolist():
+        for p in cast(list, params.tolist()):
             scene = cb.to_scene(p)
             fl = renderer.render(scene, cam_l)
             fr = renderer.render(scene, cam_r)
@@ -118,7 +119,6 @@ class DataBuilder:
             mx.eval(vec)
             out.append(vec)
         return mx.stack(out), mx.array(stats, dtype=mx.float32)
-
 
     @staticmethod
     def targets(p: mx.array) -> mx.array:

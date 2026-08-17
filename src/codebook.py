@@ -12,10 +12,10 @@ from __future__ import annotations
 
 import colorsys
 import math
-from typing import TYPE_CHECKING, ClassVar
+from typing import TYPE_CHECKING, ClassVar, cast
 
 import mlx.core as mx
-from cga.engine import (
+from cga.engine import (  # pyright: ignore[reportMissingImports]
     AmbientLight,
     BoxGeometry,
     Color,
@@ -46,7 +46,7 @@ class Codebook:
     KINDS = ("sphere", "cylinder", "box")
     N_KIND = 3
     N_OBJECTS = 1
-    N_COMBO = 162
+    N_COMBO_BASE = 162  # 离散组合基数; 实例 N_COMBO 随 n_textures 扩展
     S_RANGE = (0.35, 0.6)  # 半径/半边长, 训练范围
     Z_RANGE = (2.5, 4.0)  # 图元中心世界 z, 训练范围
     ROUGHNESS = (0.2, 0.9)  # 材质 roughness 采样范围 (纹理接线的连续目标)
@@ -65,7 +65,7 @@ class Codebook:
     USES_COMPOSITE_STATS = False
     STEREO_V = "st4"
     TEMPLATE_VARIANT = ""  # 动态子模板非空, 进入缓存指纹
-    GEOMETRY_FAMILY = "single"
+    GEOMETRY_FAMILY: ClassVar[str] = "single"  # 子类按结构族覆盖
     TEMPLATE_COMPLEXITY = 1.0  # 一个独立 primitive 的描述长度基准
     TEMPLATE_LINEAGE = TemplateLineage(
         family="single",
@@ -89,9 +89,9 @@ class Codebook:
 
     def __init__(self, cfg: InverseConfig):
         self.cfg = cfg
-        # 纹理接线: N_COMBO 随 n_textures 扩展 (实例属性遮蔽类常量);
+        # 纹理接线: N_COMBO 随 n_textures 扩展 (实例属性, 基数 N_COMBO_BASE);
         # 贴图库仅 textured 时生成, 默认空 = 现行行为逐字节一致
-        self.N_COMBO = 162 * max(cfg.n_textures, 1)
+        self.N_COMBO = self.N_COMBO_BASE * max(cfg.n_textures, 1)
         self.textures = default_library(cfg.n_textures) if cfg.textured else ()
 
     @staticmethod
@@ -112,12 +112,14 @@ class Codebook:
             ]
         )
 
-    def sample_textured(self, replicates: int, seed: int, extrap: bool = False) -> mx.array:
+    def sample_textured(
+        self, replicates: int, seed: int, extrap: bool = False
+    ) -> mx.array:
         """→ (162·n_textures·R, 10) [kind,u,v,s,z,hue,lcol,ldir,tex_id,roughness]。
 
         基于 8 列 sample 逐行 × n_textures 展开; roughness 固定 0.55
         (实测在自由外观/纹理主线里不可鲁棒估计, §2.3)。"""
-        base = self.sample(replicates, seed, extrap).tolist()
+        base = cast(list, self.sample(replicates, seed, extrap).tolist())
         n_tex = self.cfg.n_textures
         rows = []
         for row in base:

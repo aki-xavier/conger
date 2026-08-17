@@ -25,7 +25,9 @@ from model_memory import (
 from scene_reconstructor import SceneReconstructor
 
 
-def _evaluate(model: MixtureSPN, F: mx.array, P: mx.array, S: mx.array) -> tuple[dict, dict]:
+def _evaluate(
+    model: MixtureSPN, F: mx.array, P: mx.array, S: mx.array
+) -> tuple[dict, dict]:
     """SPN-only 精度: 离散因子准确率 + u/v/s/z RMSE (物理单位)。"""
     t_pred, cat_p, _ = model.predict(F)
     kind = mx.argmax(cat_p[:, :3], axis=1)
@@ -33,10 +35,10 @@ def _evaluate(model: MixtureSPN, F: mx.array, P: mx.array, S: mx.array) -> tuple
     lcol = mx.argmax(cat_p[:, 9:12], axis=1)
     ldir = mx.argmax(cat_p[:, 12:15], axis=1)
     acc = {
-        "kind": float(mx.mean((kind == P[:, 0]).astype(mx.float32))),
-        "hue": float(mx.mean((hue == P[:, 5]).astype(mx.float32))),
-        "lcol": float(mx.mean((lcol == P[:, 6]).astype(mx.float32))),
-        "ldir": float(mx.mean((ldir == P[:, 7]).astype(mx.float32))),
+        "kind": float(mx.mean(mx.equal(kind, P[:, 0]).astype(mx.float32))),
+        "hue": float(mx.mean(mx.equal(hue, P[:, 5]).astype(mx.float32))),
+        "lcol": float(mx.mean(mx.equal(lcol, P[:, 6]).astype(mx.float32))),
+        "ldir": float(mx.mean(mx.equal(ldir, P[:, 7]).astype(mx.float32))),
     }
     phys = SceneReconstructor.physical_targets(t_pred, S, kind)
     gt = P[:, 1:5]

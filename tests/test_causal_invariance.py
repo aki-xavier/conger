@@ -47,9 +47,12 @@ def test_marginal_appearance_recovers_dominant_hue() -> None:
     """把后验质量集中在一个 (hue,lcol,ldir) 上, 各因子边缘应指向该水平。"""
     posterior = mx.zeros((6 * 3 * 3,))
     posterior[1 * 9 + 2 * 3 + 1] = 1.0  # hue=1, lcol=2, ldir=1
-    assert int(mx.argmax(SceneReconstructor.marginal_appearance(posterior, "hue"))) == 1
-    assert int(mx.argmax(SceneReconstructor.marginal_appearance(posterior, "lcol"))) == 2
-    assert int(mx.argmax(SceneReconstructor.marginal_appearance(posterior, "ldir"))) == 1
+    marg_hue = SceneReconstructor.marginal_appearance(posterior, "hue")
+    marg_lcol = SceneReconstructor.marginal_appearance(posterior, "lcol")
+    marg_ldir = SceneReconstructor.marginal_appearance(posterior, "ldir")
+    assert int(mx.argmax(marg_hue)) == 1
+    assert int(mx.argmax(marg_lcol)) == 2
+    assert int(mx.argmax(marg_ldir)) == 1
 
 
 def test_marginal_appearance_rejects_unknown_factor() -> None:

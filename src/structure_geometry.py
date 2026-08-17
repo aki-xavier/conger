@@ -9,6 +9,8 @@ MDL/几何惩罚项。
 from __future__ import annotations
 
 import math
+from collections.abc import Iterable
+from typing import cast
 
 import mlx.core as mx
 
@@ -155,7 +157,7 @@ class StructureGeometry:
         ) -> float:
             if key not in delta:
                 return 0.0
-            lo, hi = (float(x) for x in delta[key])
+            lo, hi = (float(x) for x in cast(Iterable[float], delta[key]))
             outside = max(lo - observed, observed - hi, 0.0)
             if outside > 0.0:
                 # 带外: 只按距离惩罚, 不给窄带特异性奖励 (否则窄带会

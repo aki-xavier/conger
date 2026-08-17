@@ -39,7 +39,10 @@ class MotionLayersModel:
     # ── E 步 ──────────────────────────────────────────────────────
 
     def responsibilities(
-        self, params: tuple[float, ...], observation: np.ndarray, temperature: float = 1.0
+        self,
+        params: tuple[float, ...],
+        observation: np.ndarray,
+        temperature: float = 1.0,
     ) -> np.ndarray:
         """软运动层归属 (n, k), 再空间平滑鼓励连续分割。"""
         v = np.asarray(params, dtype=float)
@@ -68,13 +71,16 @@ class MotionLayersModel:
         )
         if damping > 0.0:
             new = tuple(
-                (1.0 - damping) * a + damping * b for a, b in zip(new, params, strict=True)
+                (1.0 - damping) * a + damping * b
+                for a, b in zip(new, params, strict=True)
             )
         return new
 
     # ── 收敛监控 ──────────────────────────────────────────────────
 
-    def log_likelihood(self, params: tuple[float, ...], observation: np.ndarray) -> float:
+    def log_likelihood(
+        self, params: tuple[float, ...], observation: np.ndarray
+    ) -> float:
         """混合速度对数似然 Σ_x log Σ_k (1/K)·N(u|v_k,σ)。"""
         v = np.asarray(params, dtype=float)
         logp = -(observation[:, None] - v[None, :]) ** 2 / (2.0 * self.sigma**2)

@@ -7,7 +7,7 @@ CompositeGeometry 提供 base/part 的 [u,v,z,area] 锚点; MixtureSPN 只学习
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, cast
 
 import mlx.core as mx
 
@@ -44,7 +44,7 @@ class CompositeReconstructor(LayeredReconstructor):
     def _topk(p: mx.array, k: int) -> list[int]:
         """单头后验 → top-k 下标。"""
         k = max(1, min(k, p.shape[0]))
-        return mx.argsort(p)[::-1][:k].tolist()
+        return cast(list[int], mx.argsort(p)[::-1][:k].tolist())
 
     @classmethod
     def refine_scene(
@@ -144,7 +144,7 @@ class CompositeReconstructor(LayeredReconstructor):
                 fl,
                 fr,
             )
-            order = mx.argsort(posterior)[::-1][:5].tolist()
+            order = cast(list[int], mx.argsort(posterior)[::-1][:5].tolist())
             hypotheses = tuple(
                 HypothesisCandidate(
                     candidates[i], float(posterior[i]), float(scores[i])

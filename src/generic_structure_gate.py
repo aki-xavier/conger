@@ -95,7 +95,7 @@ class GenericStructureGate:
         # 钳到 1e-8 → 后验退化成近 one-hot, 破坏 posterior_floor 出生判据。
         temperature = max(2.0 * abs(best_score), 1e-8) * self.temperature_scale
         posterior = self._softmax(scores, temperature, self.priors)
-        best_name = min(scores, key=scores.get)
+        best_name = min(scores, key=lambda n: scores[n])
         best = replace(
             estimates[best_name],
             structure_id=best_name,
@@ -153,7 +153,7 @@ class GenericStructureGate:
             family_conditional[fam] = cond
             for n in names:
                 posterior[n] = family_posterior[fam] * cond[n]
-        best_name = min(scores, key=scores.get)
+        best_name = min(scores, key=lambda n: scores[n])
         best = replace(
             estimates[best_name],
             structure_id=best_name,

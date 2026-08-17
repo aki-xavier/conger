@@ -1,5 +1,7 @@
 """模型内存/遗忘机制 (model_memory) 的黑盒测试。"""
 
+from typing import cast
+
 import mlx.core as mx
 import pytest
 
@@ -30,6 +32,7 @@ def test_split_assemble_roundtrip(tmp_path) -> None:
     m = _tiny_model()
     split_save(m, tmp_path / "m")
     m2 = assemble(tmp_path / "m")
+    assert m2.basis is not None and m.basis is not None
     assert m2.f_mu.shape == m.f_mu.shape
     assert float(mx.max(mx.abs(m2.f_mu - m.f_mu))) < 1e-6
     assert float(mx.max(mx.abs(m2.basis - m.basis))) < 1e-6
@@ -49,6 +52,7 @@ def test_load_components_excludes_basis(tmp_path) -> None:
 def test_truncate_basis_keeps_high_variance_columns() -> None:
     m = _tiny_model()
     m2 = truncate_basis(m, 8)
+    assert m2.basis is not None and m.basis is not None
     assert m2.basis.shape[1] == 8
     assert m2.f_mu.shape[1] == 8
     # 保留尾部 (最高方差) 列
@@ -68,7 +72,7 @@ def test_forget_components_bounds_k_and_uniform_weights() -> None:
     assert float(mx.sum(mx.exp(m2.log_w))) == pytest.approx(1.0)
     # 三个 stratum 都保留
     strat = mx.argmax(m2.cat_logp[:, :3], axis=1)
-    assert len({int(x) for x in strat.tolist()}) == 3
+    assert len({int(x) for x in cast(list, strat.tolist())}) == 3
 
 
 def test_forget_components_noop_when_k_max_large() -> None:
@@ -79,6 +83,6 @@ def test_forget_components_noop_when_k_max_large() -> None:
 def test_coreset_returns_distinct_indices() -> None:
     Z = mx.random.normal(shape=(100, 5), key=mx.random.key(0))
     idx = _coreset(Z, 10, mx.random.key(1))
-    vals = [int(i) for i in idx.tolist()]
+    vals = [int(i) for i in cast(list, idx.tolist())]
     assert len(set(vals)) == 10
     assert all(0 <= i < 100 for i in vals)

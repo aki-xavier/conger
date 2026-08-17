@@ -38,7 +38,9 @@ def test_em_loop_temperature_damping_and_convergence() -> None:
     assert result.iterations < 200
     assert np.isfinite(result.log_likelihood)
 
-    sharp = EMLoop(model, max_iters=200, tol=1e-10, temperature=0.7).run(obs, (0.0, 0.0))
+    sharp = EMLoop(model, max_iters=200, tol=1e-10, temperature=0.7).run(
+        obs, (0.0, 0.0)
+    )
     assert np.allclose(np.array(sharp.params), np.array(true), atol=0.05)
 
     damped = EMLoop(model, max_iters=200, tol=1e-10, damping=0.3).run(obs, (0.0, 0.0))

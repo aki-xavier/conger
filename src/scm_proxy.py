@@ -79,6 +79,7 @@ class AppearanceMechanism:
     def predict(self, hue: int, lcol: int, ldir: int) -> mx.array:
         """机制组合 → 前景颜色 (3,) 的代理预测。"""
         self._assert_fitted()
+        assert self.albedo is not None and self.lighting is not None
         return self.albedo[hue] * self.lighting[lcol, ldir]
 
     def do_lighting(
@@ -90,6 +91,7 @@ class AppearanceMechanism:
     def reconstruct(self) -> mx.array:
         """代理的完整 (n_hue,n_lcol,n_ldir,3) 重构。"""
         self._assert_fitted()
+        assert self.albedo is not None and self.lighting is not None
         return self.albedo[:, None, None, :] * self.lighting[None, :, :, :]
 
     def reconstruction_error(self, rgb: mx.array) -> float:

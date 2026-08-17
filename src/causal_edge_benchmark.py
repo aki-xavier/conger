@@ -11,6 +11,7 @@
 from __future__ import annotations
 
 import argparse
+from typing import cast
 
 from causal_edge import CausalDeltaLearner
 from codebook import Codebook
@@ -24,7 +25,9 @@ def main() -> None:
     ap = argparse.ArgumentParser()
     ap.add_argument("--seed", type=int, default=5)
     ap.add_argument("--n-per-env", type=int, default=3)
-    ap.add_argument("--drift", action="store_true", help="让 ratio 逐环境漂移 (伪相关对照)")
+    ap.add_argument(
+        "--drift", action="store_true", help="让 ratio 逐环境漂移 (伪相关对照)"
+    )
     args = ap.parse_args()
 
     renderer, cam_l, cam_r = Codebook.make_renderer()
@@ -39,7 +42,7 @@ def main() -> None:
     )
 
     # 环境 = 光照 (lcol, ldir); 每环境多个不同底座几何 (同一 ratio)
-    rows = Codebook.sample(1, args.seed).tolist()
+    rows = cast(list, Codebook.sample(1, args.seed).tolist())
     envs: dict[tuple[int, int], list[tuple]] = {}
     for r in rows:
         key = (int(r[6]), int(r[7]))
@@ -51,7 +54,9 @@ def main() -> None:
     for ei, key in enumerate(env_keys):
         ratio = drift[ei] if drift else 0.45
         for base in envs[key][: args.n_per_env]:
-            gt = proposer._attach(base, part_kind=1, part_hue=2, ratio=ratio, lateral_ratio=0.0)
+            gt = proposer._attach(
+                base, part_kind=1, part_hue=2, ratio=ratio, lateral_ratio=0.0
+            )
             scene = cb.to_scene(gt)
             fl = renderer.render(scene, cam_l)
             fr = renderer.render(scene, cam_r)

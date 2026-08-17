@@ -59,10 +59,11 @@ class StructureGate(GenericStructureGate):
     def decide(
         self,
         estimates: Mapping[str, StructuredHypothesis],
-        fl: mx.array,
-        fr: mx.array,
+        fl: mx.array | None = None,
+        fr: mx.array | None = None,
     ) -> GenericStructureDecision:
         """多结构 StructuredHypothesis → 结构后验 + 最佳估计 + 出生信号。"""
+        assert fl is not None and fr is not None, "视觉门控需要左右图"
         geometry_costs = StructureGeometry.costs(fl, fr)
         stats_cache = {}
         with_residual = {}

@@ -10,6 +10,7 @@ held-out 光照不变 (gap≈0, 不变性≈1); 这对照 §9.1 的相关密度 
 from __future__ import annotations
 
 import argparse
+from typing import cast
 
 from causal_invariance import InvarianceProbe, LightingHoldout
 from codebook import Codebook
@@ -32,7 +33,7 @@ def main() -> None:
         holdout_dir=args.holdout_dir,
     )
     codebook = Codebook(InverseConfig(scene_family="single"))
-    rows = Codebook.sample(2, args.seed).tolist()
+    rows = cast(list, Codebook.sample(2, args.seed).tolist())
     in_rows = [
         r for r in rows if holdout.in_support(int(r[6]), int(r[7]))
     ][: args.n_scenes]

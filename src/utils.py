@@ -1,6 +1,7 @@
 import json
 import math
 from pathlib import Path
+from typing import cast
 
 import matplotlib
 import mlx.core as mx
@@ -48,7 +49,7 @@ class Utils:
         height, width = shape
         x = Utils.fftfreq(width)
         y = Utils.fftfreq(height)
-        return mx.meshgrid(x, y)
+        return cast(list[mx.array], mx.meshgrid(x, y))
 
     @staticmethod
     def grid_shape(n: int) -> tuple[int, int]:

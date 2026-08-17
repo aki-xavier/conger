@@ -10,3 +10,4 @@ class ForwardModel(Protocol):
 
     def residual(self, observation: object, params: tuple[float, ...]) -> float:
         """观测与参数化假设之间的不匹配度 (越小越好)。"""
+        ...

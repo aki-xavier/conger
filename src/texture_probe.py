@@ -63,7 +63,7 @@ def _iso_pair_srgb(g: float, C: float, r_lo: float, r_hi: float):
 def _checker(size: int, c1, c2, tile: int) -> Texture:
     px = [
         [
-            [*((c1 if ((i // tile) + (j // tile)) % 2 == 0 else c2)), 1.0]
+            [*(c1 if ((i // tile) + (j // tile)) % 2 == 0 else c2), 1.0]
             for j in range(size)
         ]
         for i in range(size)
@@ -74,7 +74,7 @@ def _checker(size: int, c1, c2, tile: int) -> Texture:
 def _stripes(size: int, c1, c2, period: int) -> Texture:
     px = [
         [
-            [*((c1 if (j // period) % 2 == 0 else c2)), 1.0]
+            [*(c1 if (j // period) % 2 == 0 else c2), 1.0]
             for j in range(size)
         ]
         for i in range(size)
@@ -135,7 +135,9 @@ class TextureProbe:
         return self.renderer.render(scene, self.cam_l)
 
     @staticmethod
-    def frame_maps(frame: mx.array, rw: RieszWavelet | None) -> tuple[dict, RieszWavelet]:
+    def frame_maps(
+        frame: mx.array, rw: RieszWavelet | None
+    ) -> tuple[dict, RieszWavelet]:
         """一帧 → {lum, chr_re, chr_im: FeatureMaps} (gc 与 FEAT 约定一致)。"""
         lum = FeatureExtractor.frame_lum(frame)
         chr_re, chr_im = FeatureExtractor.frame_chroma(frame)
@@ -183,19 +185,19 @@ class TextureProbe:
 
     @staticmethod
     def _loo_accuracy(descs: list[list[float]], labels: list[int]) -> float | None:
-        X = np.array(descs, dtype=np.float64)
+        xs = np.array(descs, dtype=np.float64)
         y = np.array(labels)
         # 丢弃近零方差列: 灰度纹理的 chroma、白材质的 chroma 全零, z-score
         # 会把浮点噪声放大成伪可分信号 (E3 chroma 0.44 的假象即源于此)。
-        sd = X.std(axis=0)
+        sd = xs.std(axis=0)
         keep = sd > 1e-6
         if not keep.any():
             return None  # 该描述子块无信号, 不可判别
-        X = (X - X.mean(axis=0)) / (sd + 1e-12)
-        X = X[:, keep]
+        xs = (xs - xs.mean(axis=0)) / (sd + 1e-12)
+        xs = xs[:, keep]
         correct = 0
         for i in range(len(y)):
-            d = np.sum((X - X[i]) ** 2, axis=1)
+            d = np.sum((xs - xs[i]) ** 2, axis=1)
             d[i] = np.inf
             correct += int(y[np.argmin(d)] == y[i])
         return correct / len(y)

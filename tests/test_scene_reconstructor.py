@@ -5,6 +5,7 @@
 """
 
 import math
+from typing import cast
 
 import mlx.core as mx
 
@@ -171,7 +172,9 @@ def test_evaluator_full_scene_contract() -> None:
         dtype=mx.float32,
     )
     t_pred = p_gt[:, 1:5]
-    scene_pred = tuple(tuple(map(float, r)) for r in p_gt.tolist())
+    scene_pred = tuple(
+        tuple(map(float, r)) for r in cast(list, p_gt.tolist())
+    )
     out = Evaluator.report("合成", p_gt, t_pred, scene_pred, p_gt)
     for k in ("kind", "hue", "lcol", "ldir"):
         assert out[k] == 1.0

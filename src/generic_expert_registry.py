@@ -15,6 +15,7 @@ class GenericExpert(Protocol):
 
     def estimate(self, observation: object) -> StructuredHypothesis:
         """返回带正向模型残差的结构化假设。"""
+        ...
 
 
 class GenericExpertRegistry:

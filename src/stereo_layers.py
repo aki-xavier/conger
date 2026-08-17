@@ -48,8 +48,8 @@ class StereoLayers:
         def features(rgb: mx.array, frame: mx.array) -> mx.array:
             lum = FeatureExtractor.frame_lum(frame)
             re, im = FeatureExtractor.frame_chroma(frame)
-            gx = mx.roll(lum, -1, axis=1) - lum
-            gy = mx.roll(lum, -1, axis=0) - lum
+            gx = mx.roll(lum, -1, 1) - lum
+            gy = mx.roll(lum, -1, 0) - lum
             return mx.concatenate(
                 [rgb, re[..., None], im[..., None],
                  (5.0 * gx)[..., None], (5.0 * gy)[..., None]],

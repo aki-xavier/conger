@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import math
+from typing import cast
 
 import mlx.core as mx
 
@@ -41,7 +42,7 @@ class ToySeriesExpert:
     def estimate(self, observation: mx.array) -> StructuredHypothesis:
         f = self.family.encode(observation)[None, :]
         t, _, r = self.net.predict(f)
-        params = tuple(float(x) for x in t[0].tolist())
+        params = tuple(float(x) for x in cast(list, t[0].tolist()))
         pred = self.family.simulate(mx.array(params)[None, :])[0]
         residual = float(mx.sqrt(mx.mean((observation - pred) ** 2)))
         max_r = float(mx.max(r)) + 1e-12

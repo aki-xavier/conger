@@ -16,6 +16,8 @@
 
 from __future__ import annotations
 
+from typing import cast
+
 import numpy as np
 
 
@@ -51,7 +53,10 @@ class SoftICPModel:
     # ── E 步 ──────────────────────────────────────────────────────
 
     def responsibilities(
-        self, params: tuple[float, float, float], observation: np.ndarray, temperature: float = 1.0
+        self,
+        params: tuple[float, float, float],
+        observation: np.ndarray,
+        temperature: float = 1.0,
     ) -> np.ndarray:
         """每目标点的软对应 q(j,i) = P(target j ↔ source i) (N, N)。"""
         t = self._transform(params)
@@ -75,11 +80,13 @@ class SoftICPModel:
         expected_source = resp @ self.source  # (N, 2)
         r, t = self._kabsch(expected_source, observation)
         theta = float(np.arctan2(r[1, 0], r[0, 0]))
-        new = (theta, float(t[0]), float(t[1]))
+        new: tuple[float, float, float] = (theta, float(t[0]), float(t[1]))
         if damping > 0.0:
-            new = tuple(
-                (1.0 - damping) * a + damping * b for a, b in zip(new, params, strict=True)
+            blended = tuple(
+                (1.0 - damping) * a + damping * b
+                for a, b in zip(new, params, strict=True)
             )
+            new = cast(tuple[float, float, float], blended)
         return new
 
     @staticmethod
@@ -100,7 +107,9 @@ class SoftICPModel:
 
     # ── 收敛监控 ──────────────────────────────────────────────────
 
-    def log_likelihood(self, params: tuple[float, float, float], observation: np.ndarray) -> float:
+    def log_likelihood(
+        self, params: tuple[float, float, float], observation: np.ndarray
+    ) -> float:
         """混合对应对数似然 Σ_j log Σ_i exp(−‖t_j−R·s_i−t‖²/2σ²)。"""
         t = self._transform(params)
         d = ((observation[:, None, :] - t[None, :, :]) ** 2).sum(axis=2)

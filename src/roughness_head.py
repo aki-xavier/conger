@@ -18,22 +18,23 @@ class RoughnessHead:
     DEFAULT = 0.55
 
     def __init__(self):
-        self.X: np.ndarray | None = None  # (N,16)
+        self.x: np.ndarray | None = None  # (N,16)
         self.y: np.ndarray | None = None  # (N,)
         self.mu: np.ndarray | None = None
         self.sd: np.ndarray | None = None
 
     def fit(self, X: np.ndarray, y: np.ndarray) -> None:
         """球面样本的谱形描述子 + roughness 标签。"""
-        self.X = np.asarray(X, dtype=np.float64)
+        self.x = np.asarray(X, dtype=np.float64)
         self.y = np.asarray(y, dtype=np.float64)
-        self.mu = self.X.mean(axis=0)
-        self.sd = self.X.std(axis=0) + 1e-9
+        self.mu = self.x.mean(axis=0)
+        self.sd = self.x.std(axis=0) + 1e-9
 
     def predict(self, X: np.ndarray) -> np.ndarray:
         """(N,16) → (N,) roughness 估计 (最近邻)。"""
-        assert self.X is not None and self.y is not None, "RoughnessHead 未 fit"
-        a = (self.X - self.mu) / self.sd
+        assert self.x is not None and self.y is not None, "RoughnessHead 未 fit"
+        assert self.mu is not None and self.sd is not None, "RoughnessHead 未 fit"
+        a = (self.x - self.mu) / self.sd
         b = (np.asarray(X, dtype=np.float64) - self.mu) / self.sd
         idx = np.argmin(((a[None, :, :] - b[:, None, :]) ** 2).sum(axis=2), axis=1)
         return self.y[idx]

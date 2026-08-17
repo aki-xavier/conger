@@ -10,6 +10,7 @@ from __future__ import annotations
 import argparse
 from collections.abc import Mapping
 from dataclasses import dataclass
+from typing import cast
 
 import mlx.core as mx
 
@@ -52,7 +53,7 @@ class StructureBenchmark:
         for family_i, (name, expert) in enumerate(self.registry.experts.items()):
             cb = expert.app.codebook
             p = cb.sample(1, self.seed + family_i)
-            for row in p[: self.samples_per_family].tolist():
+            for row in cast(list, p[: self.samples_per_family].tolist()):
                 scene = cb.to_scene(tuple(float(x) for x in row))
                 out.append(
                     (

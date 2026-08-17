@@ -1,6 +1,7 @@
 """CompositeCodebook 测试: 显式附着组合模板与部分感知几何契约。"""
 
 import math
+from typing import cast
 
 import mlx.core as mx
 import pytest
@@ -32,9 +33,11 @@ def test_composite_sampling_and_scene(composite_block: mx.array) -> None:
     assert float(mx.max(mx.abs(p[:, 10] - p[:, 4]))) <= 0.060001
 
     combos = p[:, list(CompositeCodebook.CLASS_IDX)].astype(mx.int32)
-    assert len({tuple(row) for row in combos.tolist()}) == CompositeCodebook.N_COMBO
+    assert len({tuple(row) for row in cast(list, combos.tolist())}) == (
+        CompositeCodebook.N_COMBO
+    )
     scene = CompositeCodebook(InverseConfig()).to_scene(
-        tuple(float(x) for x in p[0].tolist())
+        tuple(float(x) for x in cast(list, p[0].tolist()))
     )
     assert len(scene.objects) == 2
     assert len(scene.lights) == 2
@@ -48,7 +51,7 @@ def test_composite_geometry_recovers_parts(composite_block: mx.array) -> None:
     """部分模板锚点应恢复 base/part 中心顺序和物理深度范围。"""
     cfg = InverseConfig(scene_family="composite")
     cb = CompositeCodebook(cfg)
-    prm = tuple(float(x) for x in composite_block[0].tolist())
+    prm = tuple(float(x) for x in cast(list, composite_block[0].tolist()))
     renderer, cam_l, cam_r = Codebook.make_renderer()
     scene = cb.to_scene(prm)
     fl = renderer.render(scene, cam_l)
@@ -117,7 +120,7 @@ def test_composite_render_refinement(composite_block: mx.array) -> None:
     """固定组合几何, top-k 结构候选可由左右图渲染残差纠正。"""
     cfg = InverseConfig(scene_family="composite", refine_composite=True)
     cb = CompositeCodebook(cfg)
-    gt = tuple(float(x) for x in composite_block[0].tolist())
+    gt = tuple(float(x) for x in cast(list, composite_block[0].tolist()))
     renderer, cam_l, cam_r = Codebook.make_renderer()
     scene = cb.to_scene(gt)
     fl = renderer.render(scene, cam_l)
@@ -161,7 +164,7 @@ def test_composite_app_contract_and_frame_features(
     assert "cp2" in app.data.cache_tag()
 
     renderer, cam_l, cam_r = Codebook.make_renderer()
-    prm = tuple(float(x) for x in composite_block[0].tolist())
+    prm = tuple(float(x) for x in cast(list, composite_block[0].tolist()))
     scene = app.codebook.to_scene(prm)
     fl = renderer.render(scene, cam_l)
     fr = renderer.render(scene, cam_r)

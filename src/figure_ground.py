@@ -14,6 +14,8 @@
 
 from __future__ import annotations
 
+from typing import cast
+
 import numpy as np
 
 
@@ -53,7 +55,9 @@ class FigureGroundModel:
         return float(np.sum(np.log(p + 1e-12)))
 
     def sample(
-        self, params: tuple[float, float, float, float], rng: np.random.Generator | None = None
+        self,
+        params: tuple[float, float, float, float],
+        rng: np.random.Generator | None = None,
     ) -> np.ndarray:
         """(c, r, f, b) → 前景/背景分段的带噪观测。"""
         _, _, f, b = params
@@ -65,14 +69,19 @@ class FigureGroundModel:
     # ── E 步 ──────────────────────────────────────────────────────
 
     def responsibilities(
-        self, params: tuple[float, float, float, float], observation: np.ndarray, temperature: float = 1.0
+        self,
+        params: tuple[float, float, float, float],
+        observation: np.ndarray,
+        temperature: float = 1.0,
     ) -> np.ndarray:
         """软前景归属 q(x) = 软位姿先验 sigmoid × 强度似然。"""
         c, r, f, b = params
         prior_fg = self._fg_prior(c, r)
         inv = 1.0 / max(temperature, 1e-8)
-        w_fg = np.log(prior_fg + 1e-12) - 0.5 * ((observation - f) / self.sigma) ** 2 * inv
-        w_bg = np.log(1.0 - prior_fg + 1e-12) - 0.5 * ((observation - b) / self.sigma) ** 2 * inv
+        d_fg = ((observation - f) / self.sigma) ** 2
+        d_bg = ((observation - b) / self.sigma) ** 2
+        w_fg = np.log(prior_fg + 1e-12) - 0.5 * d_fg * inv
+        w_bg = np.log(1.0 - prior_fg + 1e-12) - 0.5 * d_bg * inv
         m = np.maximum(w_fg, w_bg)
         e_fg = np.exp(w_fg - m)
         e_bg = np.exp(w_bg - m)
@@ -108,16 +117,20 @@ class FigureGroundModel:
                 e = cost(cc, rr)
                 if e < best[2]:
                     best = (cc, rr, e)
-        new = (best[0], best[1], f, b)
+        new: tuple[float, float, float, float] = (best[0], best[1], f, b)
         if damping > 0.0:
-            new = tuple(
-                (1.0 - damping) * a + damping * o for a, o in zip(new, params, strict=True)
+            blended = tuple(
+                (1.0 - damping) * a + damping * o
+                for a, o in zip(new, params, strict=True)
             )
+            new = cast(tuple[float, float, float, float], blended)
         return new
 
     # ── 收敛监控 ──────────────────────────────────────────────────
 
-    def log_likelihood(self, params: tuple[float, float, float, float], observation: np.ndarray) -> float:
+    def log_likelihood(
+        self, params: tuple[float, float, float, float], observation: np.ndarray
+    ) -> float:
         """软先验混合对数似然 (与 E/M 步同一目标)。"""
         c, r, f, b = params
         return self._mixture_ll(c, r, f, b, observation)

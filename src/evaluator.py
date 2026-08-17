@@ -53,9 +53,18 @@ class Evaluator:
         """打印并返回连续目标 RMSE/R² + 离散场景因子分类准确率。"""
         layered = p_gt.shape[1] == 14
         textured = p_gt.shape[1] == 10
-        cols = LAYERED_TARGET_COLS if layered else TEXTURED_TARGET_COLS if textured else (1, 2, 3, 4)
-        targets = LAYERED_TARGETS if layered else TEXTURED_TARGETS if textured else TARGETS
-        factors = LAYERED_FACTORS if layered else TEXTURED_FACTORS if textured else SCENE_FACTORS
+        if layered:
+            cols = LAYERED_TARGET_COLS
+            targets = LAYERED_TARGETS
+            factors = LAYERED_FACTORS
+        elif textured:
+            cols = TEXTURED_TARGET_COLS
+            targets = TEXTURED_TARGETS
+            factors = TEXTURED_FACTORS
+        else:
+            cols = (1, 2, 3, 4)
+            targets = TARGETS
+            factors = SCENE_FACTORS
         gt = p_gt[:, list(cols)]
         base = mx.mean(p_train[:, list(cols)], axis=0, keepdims=True)
         ss_base = mx.sum((gt - base) ** 2, axis=0)
@@ -66,7 +75,7 @@ class Evaluator:
         out: dict[str, float] = {}
         line = f"  {name}:"
         for nm, j in factors:
-            acc = float(mx.mean((pred[:, j] == p_gt[:, j]).astype(mx.float32)))
+            acc = float(mx.mean(mx.equal(pred[:, j], p_gt[:, j]).astype(mx.float32)))
             out[nm] = acc
             line += f" {nm} {acc:.3f} |"
         for j, nm in enumerate(targets):

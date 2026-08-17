@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import argparse
 from pathlib import Path
+from typing import cast
 
 from codebook import Codebook
 from expert_registry import ExpertRegistry
@@ -69,7 +70,7 @@ class MixedTemplateBenchmark:
         for family_i, (name, expert) in enumerate(registry.experts.items()):
             cb = expert.app.codebook
             params = cb.sample(1, self.seed + family_i)
-            for row in params[: self.samples_per_family].tolist():
+            for row in cast(list, params[: self.samples_per_family].tolist()):
                 scene = cb.to_scene(tuple(float(x) for x in row))
                 fl = renderer.render(scene, cam_l)
                 fr = renderer.render(scene, cam_r)

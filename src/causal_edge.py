@@ -12,7 +12,6 @@
 
 from __future__ import annotations
 
-import math
 from collections import defaultdict
 from collections.abc import Callable, Hashable, Iterable
 from dataclasses import dataclass
@@ -20,7 +19,13 @@ from dataclasses import dataclass
 from template_proposal import TemplateProposal
 
 # TemplateDeltaLearner 产出的标量 delta 目标名 (与约束名对齐)
-_TARGET_KEYS = ("scale_ratio", "lateral_ratio", "period_ratio", "depth_gap", "depth_jitter")
+_TARGET_KEYS = (
+    "scale_ratio",
+    "lateral_ratio",
+    "period_ratio",
+    "depth_gap",
+    "depth_jitter",
+)
 
 
 @dataclass(frozen=True)
@@ -65,10 +70,18 @@ class CausalDeltaLearner:
         if "period_ratio" in observed:
             out["period_ratio"] = float(observed["period_ratio"])
         elif "lateral_ratio" in observed:
-            key = "period_ratio" if p.operation in {"mirror", "repeat"} else "lateral_ratio"
+            key = (
+                "period_ratio"
+                if p.operation in {"mirror", "repeat"}
+                else "lateral_ratio"
+            )
             out[key] = float(observed["lateral_ratio"])
         elif "lateral_ratio" in p.delta:
-            key = "period_ratio" if p.operation in {"mirror", "repeat"} else "lateral_ratio"
+            key = (
+                "period_ratio"
+                if p.operation in {"mirror", "repeat"}
+                else "lateral_ratio"
+            )
             out[key] = float(p.delta["lateral_ratio"])
         if "depth_gap" in observed:
             out["depth_gap"] = float(observed["depth_gap"])

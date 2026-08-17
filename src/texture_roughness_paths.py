@@ -26,7 +26,9 @@ from mixture_spn import MixtureSPN
 from riesz import RieszWavelet
 from stereo import StereoDepth
 
-STAT_MAPS = ("slope", "residual", "bump", "centroid", "spread", "skew", "kurt", "mean_ori")
+STAT_MAPS = (
+    "slope", "residual", "bump", "centroid", "spread", "skew", "kurt", "mean_ori",
+)
 
 
 def make_params(kind: int, n: int, seed: int) -> mx.array:

@@ -11,6 +11,7 @@ from collections.abc import Mapping
 from dataclasses import dataclass, field
 from typing import Protocol
 
+from structured_hypothesis import StructuredHypothesis
 from template_proposal import TemplateProposal, TemplateProposer
 
 
@@ -22,7 +23,7 @@ class GateDecision(Protocol):
     posterior: Mapping[str, float]
 
     @property
-    def estimate(self): ...
+    def estimate(self) -> StructuredHypothesis: ...
 
 
 @dataclass(frozen=True)

@@ -11,11 +11,16 @@ import mlx.core as mx
 from cga.engine import Texture
 
 
-def checker(size: int = 16, c1=(0.9, 0.9, 0.9), c2=(0.5, 0.5, 0.5), tile: int = 4) -> Texture:
+def checker(
+    size: int = 16,
+    c1=(0.9, 0.9, 0.9),
+    c2=(0.5, 0.5, 0.5),
+    tile: int = 4,
+) -> Texture:
     """棋盘 (sRGB 两色, tile = 每格 texel 数)。"""
     px = [
         [
-            [*((c1 if ((i // tile) + (j // tile)) % 2 == 0 else c2)), 1.0]
+            [*(c1 if ((i // tile) + (j // tile)) % 2 == 0 else c2), 1.0]
             for j in range(size)
         ]
         for i in range(size)
@@ -23,11 +28,16 @@ def checker(size: int = 16, c1=(0.9, 0.9, 0.9), c2=(0.5, 0.5, 0.5), tile: int = 
     return Texture.from_rgba(px)
 
 
-def stripes(size: int = 16, c1=(0.9, 0.9, 0.9), c2=(0.5, 0.5, 0.5), period: int = 3) -> Texture:
+def stripes(
+    size: int = 16,
+    c1=(0.9, 0.9, 0.9),
+    c2=(0.5, 0.5, 0.5),
+    period: int = 3,
+) -> Texture:
     """竖条纹 (period = 每带 texel 数)。"""
     px = [
         [
-            [*((c1 if (j // period) % 2 == 0 else c2)), 1.0]
+            [*(c1 if (j // period) % 2 == 0 else c2), 1.0]
             for j in range(size)
         ]
         for i in range(size)
@@ -35,7 +45,9 @@ def stripes(size: int = 16, c1=(0.9, 0.9, 0.9), c2=(0.5, 0.5, 0.5), period: int 
     return Texture.from_rgba(px)
 
 
-def gray_noise(size: int = 16, seed: int = 0, lo: float = 0.3, hi: float = 0.7) -> Texture:
+def gray_noise(
+    size: int = 16, seed: int = 0, lo: float = 0.3, hi: float = 0.7
+) -> Texture:
     """宽带灰度噪声 (对比度限幅 [lo,hi], 与背景/前景掩码阈值相容)。"""
     arr = mx.random.normal((size, size), key=mx.random.key(seed))
     arr = (arr - mx.min(arr)) / (mx.max(arr) - mx.min(arr))

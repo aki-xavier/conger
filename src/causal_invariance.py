@@ -9,8 +9,9 @@
 
 from __future__ import annotations
 
+from collections.abc import Hashable, Iterable, Sequence
 from dataclasses import dataclass
-from typing import Any, Hashable, Iterable, Sequence
+from typing import Any, cast
 
 import mlx.core as mx
 
@@ -114,7 +115,7 @@ class InvarianceProbe:
         in_support: list[float] = []
         held_out: list[float] = []
         for key, pairs in groups.items():
-            lcol, ldir = key
+            lcol, ldir = cast(tuple[int, int], key)
             acc = (
                 sum(1 for t, p in pairs if t == p) / len(pairs)
                 if pairs

@@ -1,5 +1,7 @@
 """StructureBenchmark 汇总逻辑测试。"""
 
+from typing import cast
+
 from structure_benchmark import StructureBenchmark, StructureCaseResult
 
 
@@ -23,7 +25,8 @@ def test_structure_benchmark_summary() -> None:
         _result("composite", "composite", 0.7),
     )
     out = StructureBenchmark.summarize(results)
+    confusion = cast(dict[str, dict[str, int]], out["confusion"])
     assert out["n"] == 3
-    assert abs(out["accuracy"] - 2.0 / 3.0) < 1e-12
-    assert out["confusion"]["layered"]["composite"] == 1
+    assert abs(cast(float, out["accuracy"]) - 2.0 / 3.0) < 1e-12
+    assert confusion["layered"]["composite"] == 1
     assert set(out["posterior_mean"]) == {"single", "layered", "composite"}

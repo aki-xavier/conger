@@ -174,6 +174,7 @@ class MixtureSPN:
             scene_classes = stratum[:, None].astype(mx.int32)
             cat_sizes = (cls.N_STRATUM,)
         assert cat_sizes is not None
+        assert scene_classes is not None
         n_stratum = cat_sizes[0]
         gvar = cls._tied_vars(z, stratum, rel_floor, n_stratum)
         clps = []
