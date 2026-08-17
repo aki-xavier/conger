@@ -396,10 +396,12 @@ class SceneReconstructor:
         fl: mx.array,
         fr: mx.array,
     ) -> tuple[tuple[float, ...], tuple[float, ...] | None]:
-        """几何↔光照 ECM 精炼 (u,v,s,z), kind 固定。
+        """几何↔光照 ECM 精炼 (默认只精炼 u,v; s,z 冻结), kind 固定。
 
         返回 (refined_prm, trajectory)。app.cfg.em_refine 为 False 时
         直接返回原 prm + None 轨迹。外观 (hue/lcol/ldir) 沿用 prm。
+        §7.1 下一步 ①: app.cfg.em_freeze_sz=True (默认) 冻结 s/z, 只做
+        u/v 坐标搜索, 规避投影歧义把 s 拖坏。
         """
         if not app.cfg.em_refine:
             return prm, None
@@ -407,12 +409,14 @@ class SceneReconstructor:
         from scene_em_refiner import SceneEMRefiner
 
         kind = int(prm[0])
+        fz = app.cfg.em_freeze_sz
         refiner = SceneEMRefiner(
             app.codebook,
             kind,
             fl,
             fr,
             appearance_topk=app.cfg.em_appearance_topk,
+            freeze=(False, False, fz, fz),
         )
         em = EMLoop(
             refiner,

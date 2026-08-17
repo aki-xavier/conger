@@ -56,6 +56,10 @@ class InverseConfig:
     em_max_iters: int = 2
     em_appearance_topk: int = 3
     em_tolerance: float = 1.0
+    # §7.1 下一步 ①: s/z 不参与 ECM 坐标搜索 (只精炼 u/v)。s/z 有
+    # 投影歧义 (大而远 ≡ 小而近), 贪心搜索把 s 拖坏 (全量验收 s R²
+    # 0.508→-0.376)。True = 冻结 s/z (默认); False = 四维全搜 (旧行为)。
+    em_freeze_sz: bool = True
 
     def __post_init__(self) -> None:
         """显式结构族自动同步旧 n_objects 兼容字段。"""

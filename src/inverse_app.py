@@ -499,6 +499,11 @@ class InverseApp:
             help="推理期几何↔光照 ECM 精炼 (§7.1, 默认关闭, 仅单物体)",
         )
         ap.add_argument(
+            "--em-no-freeze-sz",
+            action="store_true",
+            help="ECM 几何坐标搜索恢复四维全搜 (u,v,s,z; 默认冻结 s/z 只搜 u/v)",
+        )
+        ap.add_argument(
             "--appearance-marginalize",
             action="store_true",
             help="解耦边缘 MAP (因果不变估计): 反照率对光照、光照对反照率/几何"
@@ -535,6 +540,7 @@ class InverseApp:
             n_objects=n_objects,
             scene_family=a.scene_family,
             em_refine=a.em_refine,
+            em_freeze_sz=not a.em_no_freeze_sz,
             n_textures=a.n_textures,
             appearance_marginalize=a.appearance_marginalize,
             basis_dim=a.basis_dim,
