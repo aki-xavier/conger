@@ -58,11 +58,11 @@ def test_marginal_appearance_rejects_unknown_factor() -> None:
 
 
 def test_marginal_joint_sums_to_one() -> None:
-    """kind×hue×lcol×ldir 联合后验的各因子边缘和应为 1。"""
+    """kind×hue×lcol×ldir 联合后验的各因子边缘和应为 1 (光照为联合边缘)。"""
     rng = mx.random.key(1)
     logp = mx.random.normal(shape=(2 * 6 * 3 * 3,), key=rng)
     posterior = mx.exp(logp - mx.logsumexp(logp))
-    for factor in ("kind", "hue", "lcol", "ldir"):
+    for factor in ("kind", "hue", "lighting"):
         m = SceneReconstructor.marginal_joint(posterior, factor, n_kind=2)
         assert float(mx.sum(m)) == pytest.approx(1.0, abs=1e-5)
 
@@ -88,6 +88,18 @@ def test_decoupled_map_prefers_hue_consistent_across_lighting() -> None:
     ki, hi, ci, di = SceneReconstructor.decoupled_map(flat, n_kind=1)
     assert ki == 0
     assert hi == 1  # 边缘化后 hue1 总证据 0.70 > hue0 的 0.30
+
+
+def test_decoupled_map_keeps_lighting_joint() -> None:
+    """光照 (lcol,ldir) 取联合 argmax: 不拆成独立边缘 (否则选幽灵组合)。"""
+    posterior = mx.zeros((1, 6, 3, 3))
+    posterior[0, 0, 0, 0] = 0.40  # 光照 (0,0)
+    posterior[0, 0, 0, 1] = 0.30  # 光照 (0,1)
+    posterior[0, 1, 1, 1] = 0.30  # 光照 (1,1)
+    flat = mx.reshape(posterior, (-1,))
+    ki, hi, ci, di = SceneReconstructor.decoupled_map(flat, n_kind=1)
+    # 独立边缘 lcol=0(0.7)/ldir=1(0.6) 会选幽灵 (0,1); 联合 argmax 选 (0,0)
+    assert (ci, di) == (0, 0)
 
 
 def test_invariance_score_is_worst_group() -> None:

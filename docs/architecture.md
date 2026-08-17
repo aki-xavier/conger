@@ -598,12 +598,14 @@ pipeline 关系: ② (机制代理) → ① (不变性判据) → ③ (结构边
 
 **路线 ① 接入主链路 (不变估计器)**: `SceneReconstructor.marginal_joint`
 (把 top-k kind×hue×lcol×ldir 联合后验按因子边缘化) + `decoupled_map`
-(各因子边缘 argmax 的解耦 MAP)。`refine_scene(marginalize=True)` 用它
-替代联合 argmax, 经 `InverseConfig.appearance_marginalize` +
-`--appearance-marginalize` 开关控制 (默认关, 走联合 argmax)。这是把
-「不变性正则」变成实际估计器: 反照率对光照边缘化后 argmax, 不再被单一
-(hue,光照) 组合的歧义绑架; 支持集内联合后验尖锐 → 与联合 argmax 一致
-(无回归), 歧义/池外时才显示鲁棒性。
+(解耦 MAP)。`refine_scene(marginalize=True)` 用它替代联合 argmax, 经
+`InverseConfig.appearance_marginalize` + `--appearance-marginalize` 开关
+控制 (默认关, 走联合 argmax)。解耦语义: 反照率 (hue) 对光照**联合**边缘
+化后 argmax (反照率↔光照是干净的可分离机制); **光照内部 (lcol,ldir) 保持
+联合 argmax** —— 两者是同一机制的联合变量, 有投影歧义, 拆开边缘化会选到
+幽灵组合 (全量实测: 四因子全拆 → 插值 lcol 0.994→0.870 / ldir 0.895→
+0.731, kind/hue/几何不变)。修正后支持集内与联合 argmax 一致, 只在
+反照率×光照歧义时显示鲁棒性。
 
 **路线 ② `src/scm_proxy.py`**: `AppearanceMechanism` 把黑盒 renderer
 的外观子图分解为乘法机制 `P(I_color|hue,lcol,ldir) ≈ albedo[hue] ⊙

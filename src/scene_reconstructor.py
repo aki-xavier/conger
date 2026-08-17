@@ -206,8 +206,8 @@ class SceneReconstructor:
         """top-k kind × 外观候选联合后验 → 单因子边缘。
 
         后验行主序 (kind, hue, lcol, ldir); 对 nuisance 因子求和得到不变
-        估计: hue 对 kind/光照边缘化, lcol/ldir 对 kind/反照率边缘化。
-        factor ∈ {kind, hue, lcol, ldir}。
+        估计。factor ∈ {kind, hue, lighting}: `lighting` 返回 (lcol,ldir)
+        的**联合**边缘 (展平), 因为光照两因子有投影歧义, 不拆开。
         """
         n_lcol = len(Codebook.LIGHT_COLORS) if n_lcol is None else n_lcol
         n_ldir = len(Codebook.LIGHT_DIRS) if n_ldir is None else n_ldir
@@ -216,11 +216,9 @@ class SceneReconstructor:
             return mx.sum(p, axis=(1, 2, 3))
         if factor == "hue":
             return mx.sum(p, axis=(0, 2, 3))
-        if factor == "lcol":
-            return mx.sum(p, axis=(0, 1, 3))
-        if factor == "ldir":
-            return mx.sum(p, axis=(0, 1, 2))
-        raise ValueError(f"未知场景因子: {factor} (期望 kind/hue/lcol/ldir)")
+        if factor == "lighting":
+            return mx.reshape(mx.sum(p, axis=(0, 1)), (-1,))
+        raise ValueError(f"未知场景因子: {factor} (期望 kind/hue/lighting)")
 
     @staticmethod
     def decoupled_map(
@@ -230,22 +228,36 @@ class SceneReconstructor:
         n_lcol: int | None = None,
         n_ldir: int | None = None,
     ) -> tuple[int, int, int, int]:
-        """联合后验 → 各因子边缘 argmax 的解耦 MAP (不变估计)。
+        """联合后验 → 解耦 MAP: kind/hue 各自边缘 argmax, 光照保持联合。
 
         返回 (kind_idx, hue, lcol, ldir); kind_idx 是后验 kind 维下标
-        (调用方映射回实际 kind)。相比联合 argmax, 反照率与光照各自对
-        nuisance 边缘化, 反照率估计不再被单一光照组合的歧义绑架。
+        (调用方映射回实际 kind)。反照率 (hue) 对光照**联合**边缘化 =
+        因果不变估计 (反照率↔光照是干净的可分离机制); 但光照内部 (lcol,
+        ldir) 是同一机制的联合变量, 两者有投影歧义, 拆开边缘化会破坏其
+        联合可识别性 (全量实测 lcol 0.994→0.870), 故 (lcol,ldir) 取联合
+        argmax。
         """
-        return tuple(
-            int(
-                mx.argmax(
-                    SceneReconstructor.marginal_joint(
-                        posterior, f, n_kind, n_hue, n_lcol, n_ldir
-                    )
+        n_lcol = len(Codebook.LIGHT_COLORS) if n_lcol is None else n_lcol
+        n_ldir = len(Codebook.LIGHT_DIRS) if n_ldir is None else n_ldir
+        kind_idx = int(
+            mx.argmax(
+                SceneReconstructor.marginal_joint(
+                    posterior, "kind", n_kind, n_hue, n_lcol, n_ldir
                 )
             )
-            for f in ("kind", "hue", "lcol", "ldir")
         )
+        hue = int(
+            mx.argmax(
+                SceneReconstructor.marginal_joint(
+                    posterior, "hue", n_kind, n_hue, n_lcol, n_ldir
+                )
+            )
+        )
+        lighting = SceneReconstructor.marginal_joint(
+            posterior, "lighting", n_kind, n_hue, n_lcol, n_ldir
+        )
+        li = int(mx.argmax(lighting))
+        return kind_idx, hue, li // n_ldir, li % n_ldir
 
     @staticmethod
     def appearance_candidates(
