@@ -253,12 +253,11 @@ class ExpertRegistry:
         include_composite: bool = True,
     ) -> ExpertRegistry:
         """默认注册结构专家 (要求对应模型已训练)。"""
-        configs = {"single": InverseConfig(n_objects=1)}
+        configs = {"single": InverseConfig(scene_family="single")}
         if include_layered:
-            configs["layered"] = InverseConfig(n_objects=2, replicates=1)
+            configs["layered"] = InverseConfig(scene_family="layered", replicates=1)
         if include_composite:
             configs["composite"] = InverseConfig(
-                n_objects=2,
                 scene_family="composite",
                 replicates=1,
             )

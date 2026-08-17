@@ -58,7 +58,7 @@ def test_default_registry_includes_three_structure_families(monkeypatch) -> None
 
 def test_missing_expert_model_fails_closed(tmp_path) -> None:
     """缺模型时默认 fail closed; missing_ok 时才跳过。"""
-    cfg = InverseConfig(n_objects=1, model_path=tmp_path / "none.safetensors")
+    cfg = InverseConfig(scene_family="single", model_path=tmp_path / "none.safetensors")
     with pytest.raises(FileNotFoundError):
         SceneExpert.from_config("missing", cfg, tmp_path)
 
@@ -72,7 +72,7 @@ def test_train_and_register_workflow(monkeypatch, tmp_path) -> None:
     registry = ExpertRegistry({"old": _DummyExpert(_estimate(prm, cb))})
     calls = []
     monkeypatch.setattr(
-        InverseApp, "run", lambda app, artifacts=None: calls.append(app.cfg.n_objects)
+        InverseApp, "run", lambda app, artifacts=None: calls.append(app.cfg.family)
     )
     monkeypatch.setattr(
         SceneExpert,
@@ -83,9 +83,9 @@ def test_train_and_register_workflow(monkeypatch, tmp_path) -> None:
             )
         ),
     )
-    cfg = InverseConfig(n_objects=1, model_path=tmp_path / "new.safetensors")
+    cfg = InverseConfig(scene_family="single", model_path=tmp_path / "new.safetensors")
     registry.train_and_register("new", cfg, tmp_path)
-    assert calls == [1]
+    assert calls == ["single"]
     assert "new" in registry.experts
 
 

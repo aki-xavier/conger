@@ -11,8 +11,8 @@
 
 场景: 默认暗背景 + 单图元 (sphere/cylinder/box), 位置/尺寸/深度连续,
 图元色 6 色相 (与 kind 解耦 —— kind 只剩形状线索), 光色 3 / 光向 3
-均为监督目标; `--n-objects 2` 启用双图元遮挡/前后层实验族 (2916 组合),
-`--scene-family composite` 启用双图元附着组合模板。
+均为监督目标; `--scene-family layered` 启用双图元遮挡/前后层实验族
+(2916 组合), `--scene-family composite` 启用双图元附着组合模板。
 离散因子全笛卡尔积覆盖 × R 复制。
 
 数据: 参数采样 → cga 渲染 144×144 立体帧对 (平行 rig, B=0.2) →

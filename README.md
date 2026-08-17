@@ -2,7 +2,7 @@
 
 SPN 逆渲染研究: 左右两张二维立体图像 → Riesz 全分辨率特征 → MixtureSPN → **完整 `cga.Scene` 重建** (kind, u, v, s, z, 图元色相, 光色, 光向)。模型为 MixtureSPN (全分辨率实例级浅混合 SPN: PCA 白化 + 逐 kind 分层, 每样本一个对角高斯块; 连续条件期望 ≡ 分层核回归, 离散场景因子 ≡ 条件后验分类; 无 EM, 确定性)。SPN 初估后, `SceneReconstructor` 覆盖全部 kind, 结构评分沿用共享几何，候选返回前再按各自 kind 的面积→尺寸代理重校准 s，并与 hue×光色×光向候选一起做左右图渲染残差联合精炼。完整机制决策见 `docs/architecture.md`。
 
-训练数据全因子覆盖设计: 单物体离散因子 (kind 3 × 图元色 6 色相 × 光色 3 × 光向 3 = 162 组合) 全笛卡尔积 × R 连续复制; `--n-objects 2` 时双图元前后层为 kind0×kind1×hue0×hue1×光色×光向 = 2916 组合, 约 70% 样本强制投影重叠。图元色与 kind 解耦; 光色/光向不再丢弃, 而是作为完整场景输出显式监督。
+训练数据全因子覆盖设计: 单物体离散因子 (kind 3 × 图元色 6 色相 × 光色 3 × 光向 3 = 162 组合) 全笛卡尔积 × R 连续复制; `--scene-family layered` 时双图元前后层为 kind0×kind1×hue0×hue1×光色×光向 = 2916 组合, 约 70% 样本强制投影重叠。图元色与 kind 解耦; 光色/光向不再丢弃, 而是作为完整场景输出显式监督。
 
 ## 模块 (一文件一类)
 
@@ -22,7 +22,7 @@ python riesz_selftest.py     # Riesz 自检 + 自然图特征可视化
 python inverse.py            # 全量立体 (1296 帧对): 完整 Scene 重建
 ```
 
-选项: `--sigma-rel-floor` (核带宽下限)、`--replicates R` (训练集复制数, 调大触发增量训练)、`--no-cache` (跳过数据缓存)、`--no-refine-appearance` (跳过单物体候选渲染残差精炼)、`--refine-composite` (组合模板启用 top-k kind/hue/light 渲染残差精炼, 默认关闭)、`--kind-topk {1,2,3}` (结构候选数, 默认 3 = 覆盖全部 kind)、`--scene-family {single,layered,composite}` (单图元 / 独立前后层 / 附着组合模板)、`--n-objects {1,2}` (旧配置兼容)、`--model-path` (模型 safetensors 存取, 默认 `artifacts/spn_kindgeo_<数据指纹>`、`spn_layered_anchor_<数据指纹>` 或 `spn_composite_<数据指纹>`; 存在即加载, K 不足则增量追加)。
+选项: `--sigma-rel-floor` (核带宽下限)、`--replicates R` (训练集复制数, 调大触发增量训练)、`--no-cache` (跳过数据缓存)、`--no-refine-appearance` (跳过单物体候选渲染残差精炼)、`--refine-composite` (组合模板启用 top-k kind/hue/light 渲染残差精炼, 默认关闭)、`--kind-topk {1,2,3}` (结构候选数, 默认 3 = 覆盖全部 kind)、`--scene-family {single,layered,composite}` (单图元 / 独立前后层 / 附着组合模板)、`--model-path` (模型 safetensors 存取, 默认 `artifacts/spn_kindgeo_<数据指纹>`、`spn_layered_anchor_<数据指纹>` 或 `spn_composite_<数据指纹>`; 存在即加载, K 不足则增量追加)。
 
 - 通用结构学习: `src/structured_hypothesis.py` / `forward_model.py` / `generic_structure_gate.py` / `generic_expert_registry.py`; 非视觉验证域为 `src/toy_series_family.py` + `src/toy_series_expert.py`
 
@@ -202,7 +202,7 @@ layer 子模板。
 
 消融: 旧固定几何 top-3 为 kind 0.753 / s R² 0.332; 纯解析逐 kind 几何会使插值 s R² 降至 0.160 (掩码观测偏差不可忽略); 共享评分 + kind 后校准得到上述最优平衡。
 
-双层遮挡实验族 (`--n-objects 2 --replicates 1`, N=2916, sl8): StereoLayers 逐层视差 + JointLayerOptimizer 遮挡联合优化后, 插值 kind0/kind1 0.398/0.357、hue0/hue1 0.421/0.171、lcol/ldir 0.390/0.370; u0/v0/u1/v1 R² 0.537/0.711/0.466/0.432。联合模板负责中心/深度, 面积由可见区+轮廓补全 soft fusion 提供; 后层 s/z 仍为负 R², 遮挡几何仍未达到正式阈值。
+双层遮挡实验族 (`--scene-family layered --replicates 1`, N=2916, sl8): StereoLayers 逐层视差 + JointLayerOptimizer 遮挡联合优化后, 插值 kind0/kind1 0.398/0.357、hue0/hue1 0.421/0.171、lcol/ldir 0.390/0.370; u0/v0/u1/v1 R² 0.537/0.711/0.466/0.432。联合模板负责中心/深度, 面积由可见区+轮廓补全 soft fusion 提供; 后层 s/z 仍为负 R², 遮挡几何仍未达到正式阈值。
 
 显式组合模板族 (`--scene-family composite`): `CompositeCodebook` 把两个已有图元组成 base + attached part; 附着件不再是独立前后层, 而是由底座按尺度比例、横向偏移、接触重叠和轻微深度差导出。`CompositeGeometry` 在前景掩码上搜索接触线并分别拟合 base/part 圆/方模板, 再在右图模板窗口内估计部件视差; MixtureSPN 只学习 8 个几何量相对这些锚点的有界残差。自动模板提案由有界文法生成, 训练仍保持显式。
 

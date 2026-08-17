@@ -158,7 +158,7 @@ def test_composite_app_contract_and_frame_features(
     """组合族走 base/part 模板统计, 不复用遮挡逐层统计。"""
     cfg = InverseConfig(scene_family="composite")
     app = InverseApp(cfg)
-    assert cfg.n_objects == 2
+    assert cfg.family == "composite"
     assert isinstance(app.codebook, CompositeCodebook)
     assert app.default_model_path().name.startswith("spn_composite_")
     assert "cp2" in app.data.cache_tag()

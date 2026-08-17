@@ -14,7 +14,7 @@ from structured_hypothesis import StructuredHypothesis
 
 def test_layered_sampling_and_scene() -> None:
     """2916 组合全因子覆盖, 深度规范排序, 双 Mesh + 双灯。"""
-    cb = LayeredCodebook(InverseConfig(n_objects=2))
+    cb = LayeredCodebook(InverseConfig(scene_family="layered"))
     p = cb.sample(1, 123)
     assert p.shape == (LayeredCodebook.N_COMBO, 14)
     assert bool(mx.all(p[:, 4] > p[:, 10]))
@@ -28,7 +28,7 @@ def test_layered_sampling_and_scene() -> None:
 
 def test_layered_targets_and_decoding() -> None:
     """双层参数 → 8 连续目标 + 6 离散因子 → 完整参数。"""
-    cb = LayeredCodebook(InverseConfig(n_objects=2))
+    cb = LayeredCodebook(InverseConfig(scene_family="layered"))
     p = cb.sample(1, 7)
     t = DataBuilder.targets(p)
     c = DataBuilder.scene_classes(p)
@@ -58,7 +58,7 @@ def test_layered_targets_and_decoding() -> None:
 
 def test_layered_residual_roundtrip() -> None:
     """逐层几何锚点: 残差训练目标可无损加回物理目标。"""
-    cb = LayeredCodebook(InverseConfig(n_objects=2))
+    cb = LayeredCodebook(InverseConfig(scene_family="layered"))
     p = cb.sample(1, 11)[:4]
     t = DataBuilder.targets(p)
     c = DataBuilder.scene_classes(p)

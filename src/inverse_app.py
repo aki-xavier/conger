@@ -74,7 +74,7 @@ class InverseApp:
         print(
             f"[1/4] 数据: train {n_tr} / 插值 {n_test} / 外推 {n_test} "
             f"({self.codebook.N_COMBO} 组合×R={cfg.replicates}, "
-            f"n_objects={cfg.n_objects}, family={cfg.family}, 逐块缓存)"
+            f"family={cfg.family}, 逐块缓存)"
         )
         f_tr, p_tr, f_ti, p_ti, f_te, p_te, s_tr, s_ti, s_te = self.data.build(
             cfg.replicates
@@ -480,14 +480,6 @@ class InverseApp:
             help="结构候选数: top-k kind 进入渲染残差联合后验 (默认全覆盖 3)",
         )
         ap.add_argument(
-            "--n-objects",
-            type=int,
-            default=1,
-            choices=(1, 2),
-            help="兼容旧配置的对象数: 1 单图元 / 2 多图元 "
-            "(新配置优先用 --scene-family)",
-        )
-        ap.add_argument(
             "--scene-family",
             default=None,
             choices=("single", "layered", "composite"),
@@ -524,11 +516,6 @@ class InverseApp:
             "设 0 或负数回全维; 模型路径带 _dN 后缀",
         )
         a = ap.parse_args()
-        n_objects = (
-            (1 if a.scene_family == "single" else 2)
-            if a.scene_family is not None
-            else a.n_objects
-        )
         return InverseConfig(
             use_cache=not a.no_cache,
             model_path=Path(a.model_path) if a.model_path else None,
@@ -537,7 +524,6 @@ class InverseApp:
             refine_appearance=not a.no_refine_appearance,
             refine_composite=a.refine_composite,
             kind_topk=a.kind_topk,
-            n_objects=n_objects,
             scene_family=a.scene_family,
             em_refine=a.em_refine,
             em_freeze_sz=not a.em_no_freeze_sz,

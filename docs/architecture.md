@@ -1,7 +1,7 @@
 # conger 架构与流程图
 
 SPN 逆渲染研究: 左右两张二维立体图像 → Riesz 全分辨率特征 → 完整
-`cga.Scene` 重建 (含光照; `--n-objects 2` 启用双图元遮挡/前后层实验族)。
+`cga.Scene` 重建 (含光照; `--scene-family layered` 启用双图元遮挡/前后层实验族)。
 本文档是全部流程的总图 + 机制决策录; 各模块 docstring 有机制细节。
 
 ## 0. 主线切换 (2026-08-12/13)
@@ -198,7 +198,7 @@ p_{\mathrm{SPN}}(k\mid I)\exp(-\ell(k,h,c,d)/T),
 
 ## 4. 遮挡/前后层实验族 (LayeredCodebook)
 
-`--n-objects 2` 启用最小多层支持集: 两个不透明图元, 参数按深度规范
+`--scene-family layered` 启用最小多层支持集: 两个不透明图元, 参数按深度规范
 排序 (z0>z1, 0=前层/更靠近相机), 共享光色/光向; 离散因子为
 kind0×kind1×hue0×hue1×lcol×ldir=2916 组合全笛卡尔积, 连续位置/尺寸/
 深度逐样本随机, 约 70% 样本强制投影重叠。renderer 的最近命中自然产生

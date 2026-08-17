@@ -41,10 +41,8 @@ class InverseConfig:
     # ·459MB, 且精度实测反升 (截掉白化放大的低方差尾维噪声)。仅影响模型
     # (入模型路径指纹 _d{N}), 不影响数据缓存。
     basis_dim: int | None = 48
-    # 场景结构支持集: 1 = 单图元; 2 = 双图元遮挡/前后层 (实验路径)
-    n_objects: int = 1
-    # 显式结构族: None 时由 n_objects 兼容推导; composite 是双图元
-    # 附着组合模板 (区别于 layered 的独立前后层)
+    # 显式结构族: single 单图元 / layered 独立前后层 / composite 双图元
+    # 附着组合模板 (区别于 layered 的独立前后层)。None 时按 single。
     scene_family: str | None = None
     # 纹理自由度: 0 = 关 (现行单物体管线, 不回归); >0 = 给单物体图元
     # 加 albedo map 纹理类型 (离散, cat_logp) + roughness (连续, t_mu)。
@@ -62,12 +60,7 @@ class InverseConfig:
     em_freeze_sz: bool = True
 
     def __post_init__(self) -> None:
-        """显式结构族自动同步旧 n_objects 兼容字段。"""
-        if self.scene_family in {"layered", "composite"}:
-            object.__setattr__(self, "n_objects", 2)
-        elif self.scene_family == "single":
-            object.__setattr__(self, "n_objects", 1)
-        # basis_dim<=0 = 全维哨兵 → 归一化为 None (路径/fit 语义一致)
+        """派生量后处理: basis_dim<=0 = 全维哨兵 → 归一化为 None。"""
         if self.basis_dim is not None and self.basis_dim < 1:
             object.__setattr__(self, "basis_dim", None)
 
@@ -78,10 +71,8 @@ class InverseConfig:
 
     @property
     def family(self) -> str:
-        """当前结构族 (scene_family 优先; n_objects 仅作旧配置兼容)。"""
-        if self.scene_family is not None:
-            return self.scene_family
-        return "layered" if self.n_objects == 2 else "single"
+        """当前结构族 (scene_family; None → single)。"""
+        return self.scene_family or "single"
 
     @property
     def textured(self) -> bool:
