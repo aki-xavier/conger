@@ -729,12 +729,11 @@ N=1296 时驱逐分量 (即使 greedy 最远点 coreset) 立刻掉精度 —— 
 
 `model_memory.py` 提供 `split_save/load_transform/load_components/assemble`
 + `truncate_basis` + `forget_components(policy=coreset|random)` +
-`model_size_mb`; `model_memory_benchmark.py` 扫描量化。**已接入主链路**:
-`MixtureSPN.fit(basis_dim)` 拟合期截断 (磁盘模型即缩小), 经
-`InverseConfig.basis_dim` + `--basis-dim` 开关 (默认 None=全维), 模型路径
-带 `_d{basis_dim}` 后缀与全维模型并存。全量验收 (D=48) 自检通过且全面
-优于基线 (§10.3 表)。**未设默认**: 默认改 D=48 会切换默认模型路径 (需
-重训/已有 d48 模型), 属下一步的默认值决策 —— 数据支持强烈建议设为 48。
+`model_size_mb`; `model_memory_benchmark.py` 扫描量化。**已接入主链路且
+默认开启**: `MixtureSPN.fit(basis_dim)` 拟合期截断 (磁盘模型即缩小), 经
+`InverseConfig.basis_dim` (默认 48) + `--basis-dim` (默认 48, 0/负数回全维)
+开关, 模型路径带 `_d{basis_dim}` 后缀与全维模型并存。全量验收 (D=48)
+自检通过且全面优于基线 (§10.3 表), 故把 48 设为默认。
 
 ## 11. 四机制同源: 白化基是枢纽 (2026-08-17)
 

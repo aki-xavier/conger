@@ -514,9 +514,9 @@ class InverseApp:
         ap.add_argument(
             "--basis-dim",
             type=int,
-            default=None,
-            help="白化基内在维截断 (docs §10.3): 默认 None=全维; 设 N 只保留最高"
-            "方差的 N 维 (模型缩小 + 精度实测反升), 模型路径带 _dN 后缀",
+            default=48,
+            help="白化基内在维截断 (docs §10.3): 默认 48 (全面优于基线); "
+            "设 0 或负数回全维; 模型路径带 _dN 后缀",
         )
         a = ap.parse_args()
         n_objects = (

@@ -36,10 +36,11 @@ class InverseConfig:
     # argmax (反照率对光照、光照对反照率/几何分别边缘化) 替代联合
     # argmax。见 docs §9.3 路线 ①。
     appearance_marginalize: bool = False
-    # 白化基内在维截断 (docs §10.3): None=全维 (现状); 设 N 只保留最高
-    # 方差的 N 维, 模型 ~459MB→(N/497)·459MB, 且精度实测反升 (截掉白化
-    # 放大的低方差尾维噪声)。仅影响模型 (入模型路径指纹), 不影响数据缓存。
-    basis_dim: int | None = None
+    # 白化基内在维截断 (docs §10.3): 默认 48 (全量验收全面优于基线);
+    # None 或 <=0 = 全维。设 N 只保留最高方差的 N 维, 模型 ~459MB→(N/497)
+    # ·459MB, 且精度实测反升 (截掉白化放大的低方差尾维噪声)。仅影响模型
+    # (入模型路径指纹 _d{N}), 不影响数据缓存。
+    basis_dim: int | None = 48
     # 场景结构支持集: 1 = 单图元; 2 = 双图元遮挡/前后层 (实验路径)
     n_objects: int = 1
     # 显式结构族: None 时由 n_objects 兼容推导; composite 是双图元
@@ -62,6 +63,9 @@ class InverseConfig:
             object.__setattr__(self, "n_objects", 2)
         elif self.scene_family == "single":
             object.__setattr__(self, "n_objects", 1)
+        # basis_dim<=0 = 全维哨兵 → 归一化为 None (路径/fit 语义一致)
+        if self.basis_dim is not None and self.basis_dim < 1:
+            object.__setattr__(self, "basis_dim", None)
 
     @property
     def feat_spec(self) -> tuple[tuple[str, str], ...]:

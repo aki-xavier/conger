@@ -193,12 +193,15 @@ def test_fit_basis_dim_truncates_high_variance(
     assert mx.allclose(m.f_var, full.f_var[:, -3:], atol=1e-6)
 
 
-def test_fit_basis_dim_raises_on_invalid(
+def test_fit_basis_dim_nonpositive_means_full(
     separable: tuple[mx.array, mx.array, mx.array],
 ) -> None:
+    """basis_dim<=0 或 None = 全维 (不截断), 供 CLI 回退。"""
     f_all, t_all, k_all = separable
-    with pytest.raises(ValueError):
-        MixtureSPN.fit(f_all, t_all, k_all, basis_dim=0)
+    full = MixtureSPN.fit(f_all, t_all, k_all)
+    for bd in (None, 0, -1):
+        m = MixtureSPN.fit(f_all, t_all, k_all, basis_dim=bd)
+        assert m.f_mu.shape[1] == full.f_mu.shape[1]
 
 
 def test_correlation_pathology() -> None:
