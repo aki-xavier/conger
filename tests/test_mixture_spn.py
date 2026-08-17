@@ -109,7 +109,7 @@ def test_instance_regression(
     rmse = float(mx.sqrt(mx.mean((tm - t_all) ** 2)))
     assert rmse < 0.5, f"实例级回归 RMSE {rmse}"
     # kind: 簇间可分 → kind 后验应近完美
-    acc = float(mx.mean((mx.argmax(kp, axis=1) == k_all).astype(mx.float32)))
+    acc = float(mx.mean(mx.equal(mx.argmax(kp, axis=1), k_all).astype(mx.float32)))
     assert acc > 0.99, f"可分混合 kind {acc:.3f}"
 
 
@@ -173,8 +173,32 @@ def test_incremental_add(
     tm, kp, _ = m.predict(f_all)
     rmse = float(mx.sqrt(mx.mean((tm - t_all) ** 2)))
     assert rmse < 0.5, f"增量回归 RMSE {rmse}"
-    acc = float(mx.mean((mx.argmax(kp, axis=1) == k_all).astype(mx.float32)))
+    acc = float(mx.mean(mx.equal(mx.argmax(kp, axis=1), k_all).astype(mx.float32)))
     assert acc > 0.99, f"增量 kind {acc:.3f}"
+
+
+def test_fit_basis_dim_truncates_high_variance(
+    separable: tuple[mx.array, mx.array, mx.array],
+) -> None:
+    """fit(basis_dim) 保留最高方差维, 与后置截断 (model_memory) 等价。"""
+    f_all, t_all, k_all = separable
+    full = MixtureSPN.fit(f_all, t_all, k_all)
+    m = MixtureSPN.fit(f_all, t_all, k_all, basis_dim=3)
+    assert m.f_mu.shape[1] == 3
+    assert m.basis.shape[1] == 3
+    assert full.basis is not None and m.basis is not None
+    # 保留尾部 (最高方差) 维; tied 方差与全量 fit 的对应列一致
+    assert bool(mx.all(mx.equal(m.basis, full.basis[:, -3:])))
+    assert bool(mx.all(mx.equal(m.f_mu, full.f_mu[:, -3:])))
+    assert mx.allclose(m.f_var, full.f_var[:, -3:], atol=1e-6)
+
+
+def test_fit_basis_dim_raises_on_invalid(
+    separable: tuple[mx.array, mx.array, mx.array],
+) -> None:
+    f_all, t_all, k_all = separable
+    with pytest.raises(ValueError):
+        MixtureSPN.fit(f_all, t_all, k_all, basis_dim=0)
 
 
 def test_correlation_pathology() -> None:
@@ -198,7 +222,7 @@ def test_correlation_pathology() -> None:
     t = mx.zeros((n, 1))  # 目标不参与本组断言
     m = MixtureSPN.fit(f, t, k)
     _, kp, _ = m.predict(f)
-    acc = float(mx.mean((mx.argmax(kp, axis=1) == k).astype(mx.float32)))
+    acc = float(mx.mean(mx.equal(mx.argmax(kp, axis=1), k).astype(mx.float32)))
     # 白化后两类在正交方向上 d'=6 应完全可分; 断 0.95
     assert acc > 0.95, f"相关特征类分离失败 {acc:.3f}"
 

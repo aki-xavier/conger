@@ -36,6 +36,10 @@ class InverseConfig:
     # argmax (反照率对光照、光照对反照率/几何分别边缘化) 替代联合
     # argmax。见 docs §9.3 路线 ①。
     appearance_marginalize: bool = False
+    # 白化基内在维截断 (docs §10.3): None=全维 (现状); 设 N 只保留最高
+    # 方差的 N 维, 模型 ~459MB→(N/497)·459MB, 且精度实测反升 (截掉白化
+    # 放大的低方差尾维噪声)。仅影响模型 (入模型路径指纹), 不影响数据缓存。
+    basis_dim: int | None = None
     # 场景结构支持集: 1 = 单图元; 2 = 双图元遮挡/前后层 (实验路径)
     n_objects: int = 1
     # 显式结构族: None 时由 n_objects 兼容推导; composite 是双图元

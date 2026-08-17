@@ -154,9 +154,21 @@ class MixtureSPN:
         rel_floor: float = 1e-2,
         scene_classes: mx.array | None = None,  # (N,4) kind,hue,lcol,ldir
         cat_sizes: tuple[int, ...] | None = None,
+        basis_dim: int | None = None,  # 白化基内在维截断 (None=全维)
     ) -> MixtureSPN:
-        """逐分层实例级组装 (P(stratum)·P(f,t,场景因子|stratum)), 确定性。"""
+        """逐分层实例级组装 (P(stratum)·P(f,t,场景因子|stratum)), 确定性。
+
+        basis_dim 保留最高方差的 basis_dim 维 (§10.3: 内在维 ~32–64, 截掉
+        白化放大的低方差尾维噪声 → 模型 15× 更小 + 精度反升)。None = 全维
+        (现状, 不回归)。与 model_memory.truncate_basis 等价 (拟合期 vs 后置)。
+        """
         f_mean, basis, z = cls._whiten(f)
+        if basis_dim is not None:
+            if basis_dim < 1:
+                raise ValueError("basis_dim 必须 >=1")
+            basis_dim = min(basis_dim, z.shape[1])
+            basis = basis[:, -basis_dim:]
+            z = z[:, -basis_dim:]
         mus, vars_, tmus, ws = [], [], [], []
         n = z.shape[0]
         if scene_classes is None:

@@ -9,6 +9,7 @@ from __future__ import annotations
 import argparse
 import math
 from pathlib import Path
+from typing import Any, cast
 
 import matplotlib
 
@@ -62,7 +63,8 @@ class InverseApp:
             "layered": "spn_layered_anchor",
             "composite": "spn_composite",
         }[self.cfg.family]
-        return root / f"{prefix}_{self.data.cache_tag()}.safetensors"
+        dim_tag = f"_d{self.cfg.basis_dim}" if self.cfg.basis_dim else ""
+        return root / f"{prefix}_{self.data.cache_tag()}{dim_tag}.safetensors"
 
     def run(self, artifacts: Path | None = None) -> None:
         cfg = self.cfg
@@ -87,12 +89,12 @@ class InverseApp:
                     f"  视差管线 {nm}: ẑ RMSE "
                     f"{float(mx.sqrt(mx.mean(err**2))):.4f} "
                     f"bias {float(mx.mean(err)):+.4f} "
-                    f"(d 中位 {float(mx.median(st[:, 1])):.2f}px)"
+                    f"(d 中位 {float(cast(Any, mx).median(st[:, 1])):.2f}px)"
                 )
         elif cfg.family == "layered":
             print("  视差管线: 双层遮挡使用 StereoLayers 逐层统计")
         else:
-            if self.codebook.GEOMETRY_FAMILY == "lateral":
+            if str(self.codebook.GEOMETRY_FAMILY) == "lateral":
                 print("  视差管线: 横向组合使用 LateralCompositeGeometry 统计")
             else:
                 print("  视差管线: 附着组合使用 CompositeGeometry base/part 统计")
@@ -153,6 +155,7 @@ class InverseApp:
                     if cfg.family == "single"
                     else LayeredReconstructor.CAT_SIZES
                 ),
+                basis_dim=cfg.basis_dim,
             )
             net.save(model_path)
             print(f"      模型已保存 → {model_path.name}")
@@ -193,7 +196,7 @@ class InverseApp:
                 )
                 ti_pred = CompositeReconstructor.targets_from_params(ci_pred)
                 te_pred = CompositeReconstructor.targets_from_params(ce_pred)
-            if self.codebook.GEOMETRY_FAMILY == "lateral":
+            if str(self.codebook.GEOMETRY_FAMILY) == "lateral":
                 print("  横向组合: 左右 part 模板锚点 + SPN 有界残差")
             else:
                 print("  附着组合: base/part 模板锚点 + SPN 有界残差")
@@ -257,7 +260,7 @@ class InverseApp:
         renderer, cam_l, cam_r = SceneReconstructor.rig()
         out = []
         for i, (prm, kp, st, gt) in enumerate(
-            zip(scene_pred, cat_p, stats, p_gt.tolist(), strict=True)
+            zip(scene_pred, cat_p, stats, cast(list, p_gt.tolist()), strict=True)
         ):
             scene_gt = self.codebook.to_scene(tuple(float(x) for x in gt))
             fl = renderer.render(scene_gt, cam_l)
@@ -293,7 +296,7 @@ class InverseApp:
         renderer, cam_l, cam_r = SceneReconstructor.rig()
         out = []
         for i, (prm, kp, gt) in enumerate(
-            zip(scene_pred, cat_p, p_gt.tolist(), strict=True)
+            zip(scene_pred, cat_p, cast(list, p_gt.tolist()), strict=True)
         ):
             scene_gt = self.codebook.to_scene(tuple(float(x) for x in gt))
             fl = renderer.render(scene_gt, cam_l)
@@ -328,7 +331,12 @@ class InverseApp:
         """连续目标 GT vs Pred 散点 (插值蓝/外推红)。"""
         cb = Codebook
         names = Evaluator.target_names(p_ti)
-        cols = LAYERED_TARGET_COLS if p_ti.shape[1] == 14 else TEXTURED_TARGET_COLS if p_ti.shape[1] == 10 else (1, 2, 3, 4)
+        if p_ti.shape[1] == 14:
+            cols = LAYERED_TARGET_COLS
+        elif p_ti.shape[1] == 10:
+            cols = TEXTURED_TARGET_COLS
+        else:
+            cols = (1, 2, 3, 4)
         n = len(names)
         fig, axes = plt.subplots(2, (n + 1) // 2, figsize=(4.5 * ((n + 1) // 2), 8))
         rng = {"s": cb.S_RANGE + cb.S_EXTRA, "z": cb.Z_RANGE + cb.Z_EXTRA}
@@ -366,7 +374,7 @@ class InverseApp:
         picks = [0, n // 2, n - 1]
         fig, axes = plt.subplots(len(picks), 2, figsize=(5, 2.6 * len(picks)))
         for row, i in enumerate(picks):
-            gt = p_gt[i].tolist()
+            gt = cast(list[float], p_gt[i].tolist())
             pd = scene_pred[i]
             for col, prm in enumerate((gt, pd)):
                 img = renderer.render(self.codebook.to_scene(prm), cam)
@@ -503,6 +511,13 @@ class InverseApp:
             help="纹理自由度: 0=关(默认); >0=单物体加 n 种 albedo map 纹理(离散) "
             "+ roughness(连续), 组合数 162→162×n",
         )
+        ap.add_argument(
+            "--basis-dim",
+            type=int,
+            default=None,
+            help="白化基内在维截断 (docs §10.3): 默认 None=全维; 设 N 只保留最高"
+            "方差的 N 维 (模型缩小 + 精度实测反升), 模型路径带 _dN 后缀",
+        )
         a = ap.parse_args()
         n_objects = (
             (1 if a.scene_family == "single" else 2)
@@ -522,4 +537,5 @@ class InverseApp:
             em_refine=a.em_refine,
             n_textures=a.n_textures,
             appearance_marginalize=a.appearance_marginalize,
+            basis_dim=a.basis_dim,
         )
