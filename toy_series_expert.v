@@ -1,7 +1,6 @@
 module conger
 
-// toy_series_expert.v — MixtureSPN-wrapped non-visual structure expert
-// (V port of src/toy_series_expert.py).
+// toy_series_expert.v — MixtureSPN-wrapped toy structure expert.
 import math
 import mlx
 
@@ -32,7 +31,7 @@ pub fn train_toy_expert(mechanism string, n int, seed u64) ToySeriesExpert {
 }
 
 // estimate returns a StructuredHypothesis for one observation sequence. The
-// non-visual domain has no scene payload, hence `voidptr` as the type parameter.
+// toy domain has no scene payload, hence `voidptr` as the type parameter.
 pub fn (e ToySeriesExpert) estimate(observation mlx.Array) StructuredHypothesis[voidptr] {
 	f := e.family.encode(observation).expand_dims(0)
 	tm, _, r := e.net.predict(f)

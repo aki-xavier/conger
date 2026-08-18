@@ -1,7 +1,7 @@
 module conger
 
 // template_delta_learner.v — estimate child-template constraints from birth
-// proposals (V port of src/template_delta_learner.py).
+// proposals.
 import json2
 import math
 

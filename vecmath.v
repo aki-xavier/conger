@@ -2,15 +2,14 @@ module conger
 
 // vecmath.v — pure-f64 array/numerical helpers.
 //
-// The GenericEM framework and its instances are numpy-based in the Python
-// reference. This file supplies the small set of vectorised numpy primitives
-// those modules need (linspace / arange / diff / roll / 2x2 & n×n solves /
+// The GenericEM framework and its instances need a small set of vectorised
+// numerical primitives (linspace / arange / diff / roll / 2x2 & n×n solves /
 // least squares / 2D Kabsch), plus a deterministic xorshift64* PRNG used by
 // the forward models' `sample`.
 //
-// Exact RNG stream parity with numpy is intentionally NOT required: the test
-// suite checks statistical convergence within tolerances, not bit-identical
-// noise realisations.
+// Exact RNG stream parity across implementations is intentionally NOT required:
+// the test suite checks statistical convergence within tolerances, not
+// bit-identical noise realisations.
 import math
 
 // Rng is a deterministic xorshift64* generator (statistical stand-in for

@@ -1,18 +1,15 @@
 # conger 架构与流程图（内核）
 
-> **V 移植 + 拆分说明**: 本仓库已从 Python 移植到 V, 并拆分为两个平行项目 —— **`conger`(本仓库) 为通用 SPN / 结构学习内核** (模块 `conger`: MixtureSPN + 通用结构学习框架 + 模板学习 + 模型内存 / 持久化 + 纯数学 / MLX 工具 + 非视觉验证域), **`conger-vision`(平行项目) 为视觉层** (模块 `conger_vision`: cga 渲染、Codebook、Riesz 前端、立体几何、场景重建、纹理、外观 / ECM、`InverseApp`, `import conger` 依赖内核)。
->
-> 视觉层的机制决策（Riesz 前端、渲染、立体几何、双层/组合/lateral 场景族、ECM、外观/因果、模型内存验证）已迁移至 [`conger-vision/docs/architecture.md`](../conger-vision/docs/architecture.md)。本文档聚焦内核自身的分层架构、数据流、控制流与模块边界。
-
-内核不依赖图像、`cga` 渲染或任何视觉概念；视觉侧经 `import conger` 复用本内核。
+> 本文档描述 `conger` 内核（模块 `conger`：MixtureSPN + 通用结构学习框架 +
+> 模板学习 + 模型内存 / 持久化 + 纯数学 / MLX 工具 + 验证域）自身的分层架构、
+> 数据流、控制流与模块边界。内核不依赖图像、渲染等外部概念，可被任意下游项目
+> import。
 
 ## 内核架构与主管线（本仓库 `conger` · V 内核，2026-08-18）
 
 > 本节梳理**当前仓库**（通用 SPN / 结构学习内核，模块 `conger`）的核心架构
-> 设计与主管线流程，与 `conger-vision` 的「全系统（内核 + 视觉）机制决策录」互补：
-> 视觉主线与历史机制演进（原 §0–§11）已迁移至 [`conger-vision/docs/architecture.md`](../conger-vision/docs/architecture.md)，本节聚焦内核自身的分层架构、数据流、
-> 控制流与模块边界。视觉侧 `conger-vision` 经 `import conger` 复用本内核；
-> 内核不依赖图像、`cga` 渲染或任何视觉概念。
+> 设计与主管线流程：分层架构、数据流、控制流与模块边界。
+> 内核不依赖图像、渲染等外部概念，可被任意下游项目 import。
 
 ### 内核分层架构（一文件一类，模块平铺在仓库根目录）
 
@@ -38,7 +35,7 @@ flowchart TD
     subgraph L5["⑤ 工具"]
         J["types.v (TemplateDelta/Metadata/Constraints) · vecmath.v (f64 原语+RNG) · mlxutil.v (MLX 辅助)"]
     end
-    subgraph L6["⑥ 非视觉验证域"]
+    subgraph L6["⑥ 验证域"]
         K["toy_series_family.v · toy_series_expert.v<br/>线性/振荡专家"]
     end
     L1 --> L2 --> L3 --> L4
@@ -48,8 +45,8 @@ flowchart TD
 
 - **依赖方向单向**：核心 SPN → 结构框架 → 模板学习 → 持久化；工具层（⑤）被其余各层复用；
   验证域（⑥）以 `ToySeries` 时间序列实例驱动核心 SPN、结构门控与出生控制，**证明整套
-  通用结构学习框架可脱离视觉独立运行**（视觉路径只是它的一个领域适配器）。
-- **泛型载荷**：`StructuredHypothesis[T].scene` 为泛型载荷 `T`（视觉层用 `cga.Scene`、非视觉验证域用 `voidptr`），内核不解箱 —— 这是「内核不依赖视觉」的关键边界。
+  通用结构学习框架可独立运行**，可被任意下游领域适配。
+- **泛型载荷**：`StructuredHypothesis[T].scene` 为泛型载荷 `T`（toy 验证域用 `voidptr`），内核不解箱 —— 这是内核领域无关的关键边界。
 - **接口协议**：`GenericExpert[T].estimate(observation mlx.Array) → StructuredHypothesis[T]`、
   `TemplateProposer.propose(cases []StructureCase) []TemplateProposal`。
 

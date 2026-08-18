@@ -1,7 +1,6 @@
 module conger
 
-// template_grammar.v — bounded geometric template grammar (V port of
-// src/template_grammar.py).
+// template_grammar.v — bounded geometric template grammar.
 
 pub struct TemplateRule {
 pub:

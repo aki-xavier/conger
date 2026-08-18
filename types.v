@@ -1,9 +1,8 @@
 module conger
 
-// types.v — typed template delta / metadata / constraint records. The V port
-// replaces the Python reference's free-form `dict[str, Any]` maps with these
-// compile-time-checked structs, so a mistyped key becomes a compile error
-// instead of a silent zero value.
+// types.v — typed template delta / metadata / constraint records. These
+// compile-time-checked structs replace free-form key/value maps, so a
+// mistyped key becomes a compile error instead of a silent zero value.
 
 // TemplateDelta carries a proposal's per-observation delta evidence (point
 // estimates extracted from one concrete birth case).

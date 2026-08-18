@@ -1,7 +1,7 @@
 module conger
 
 // structure_birth.v — unknown-structure sample queue, birth request and
-// candidate training registration (V port of src/structure_birth.py).
+// candidate training registration.
 import mlx
 
 pub struct StructureCase {

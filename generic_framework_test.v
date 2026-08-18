@@ -1,6 +1,6 @@
 module conger
 
-// generic_framework_test.v — non-visual validation of the generic structure
+// generic_framework_test.v — toy-domain validation of the generic structure
 // framework (time-series mechanism experts).
 import math
 import mlx
@@ -32,10 +32,11 @@ fn test_nonvisual_structure_gating() {
 	out_s := registry.decide(sine_y)
 	assert out_l.estimate.structure_id == 'linear'
 	assert out_s.estimate.structure_id == 'sine'
-	// NB: the posterior thresholds are slightly relaxed vs the Python 0.8 —
-	// mlx-v links mlx-c 0.6.0 whose GPU matmul matches the CPU reduction
-	// (Gram g[0,0] ≈ 4.6549 vs Python mlx 0.32.0's fused GPU matmul 4.6520),
-	// which shifts the softmax posterior to ~0.793 for the winning family.
+	// NB: the posterior thresholds are slightly relaxed vs the reference 0.8,
+	// to absorb the numerical difference of the GPU fused matmul: mlx-v links
+	// mlx-c 0.6.0 whose GPU matmul matches the CPU reduction (Gram g[0,0] ≈
+	// 4.6549 vs the fused GPU matmul's 4.6520), which shifts the softmax
+	// posterior to ~0.793 for the winning family.
 	assert out_l.posterior['linear'] > 0.78
 	assert out_s.posterior['sine'] > 0.78
 	assert !out_l.needs_new_structure

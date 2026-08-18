@@ -1,7 +1,6 @@
 module conger
 
-// template_proposal.v — unified description of a structure-birth candidate
-// (V port of src/template_proposal.py).
+// template_proposal.v — unified description of a structure-birth candidate.
 
 pub struct TemplateProposal {
 pub:

@@ -1,10 +1,9 @@
 module conger
 
 // structured_hypothesis.v — domain-independent structured hypothesis / posterior
-// return object (V port of src/structured_hypothesis.py). Generic over the
-// opaque scene payload `T` (conger-vision uses `cga.Scene`, the non-visual
-// validation domain uses `voidptr`), so the generic core never type-erases the
-// domain payload.
+// return object. Generic over the opaque scene payload `T` (a domain-specific
+// payload; `voidptr` in the toy validation domain), so the generic core never
+// type-erases the domain payload.
 import mlx
 
 pub struct HypothesisCandidate {
@@ -16,7 +15,7 @@ pub:
 
 pub struct StructuredHypothesis[T] {
 pub:
-	scene                 T // domain payload (conger-vision: cga.Scene); zero value = none
+	scene                 T // domain-specific payload; zero value = none
 	params                []f64
 	spn_posterior         ?mlx.Array
 	structure_id          string = 'unknown'

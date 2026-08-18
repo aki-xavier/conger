@@ -1,8 +1,7 @@
 module conger
 
-// generic_structure_gate.v — domain-independent structural-posterior gate
-// (V port of src/generic_structure_gate.py). Pure-f64 softmax (the score arrays
-// are tiny; no MLX needed).
+// generic_structure_gate.v — domain-independent structural-posterior gate.
+// Pure-f64 softmax (the score arrays are tiny; no MLX needed).
 import math
 
 pub struct GenericStructureDecision[T] {

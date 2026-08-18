@@ -1,7 +1,7 @@
 module conger
 
-// generic_expert_registry.v — domain-independent expert registry (V port of
-// src/generic_expert_registry.py). Generic over the scene payload `T`.
+// generic_expert_registry.v — domain-independent expert registry, generic
+// over the scene payload `T`.
 import mlx
 
 // GenericExpert maps an observation to a StructuredHypothesis.

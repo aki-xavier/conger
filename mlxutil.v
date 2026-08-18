@@ -2,14 +2,14 @@ module conger
 
 // mlxutil.v — small MLX helpers used across the mlx-based modules.
 //
-// The Python reference uses `mlx.core` (`mx`) arrays throughout; the V port
-// uses the `mlx-v` bindings (module `mlx`). This file centralises the few
-// idioms that mlx-v does not expose ergonomically: boolean-mask indexing,
-// axis-wise variance/std, axis-wise logsumexp and CPU-only eigendecomposition.
+// The mlx-based modules use the `mlx-v` bindings (module `mlx`). This file
+// centralises the few idioms that mlx-v does not expose ergonomically:
+// boolean-mask indexing, axis-wise variance/std, axis-wise logsumexp and
+// CPU-only eigendecomposition.
 import mlx
 
 // nonzero_indices returns the flat int32 indices where a boolean array is true.
-// Port of Utils.nonzero (the argsort trick: MLX has no boolean indexing).
+// Uses the argsort trick: MLX has no boolean indexing.
 pub fn nonzero_indices(sel mlx.Array) mlx.Array {
 	n := int(sel.size())
 	flat := sel.reshape([n])
@@ -35,8 +35,8 @@ pub fn axis_logsumexp(x mlx.Array, axis int) mlx.Array {
 	return m.add(x.subtract(m).exp().sum_axis(axis, true).log())
 }
 
-// split_keys splits a PRNG key into `num` independent keys (matching the Python
-// reference's mx.random.split(key, num)).
+// split_keys splits a PRNG key into `num` independent keys (mx.random.split
+// semantics).
 pub fn split_keys(seed u64, num int) []mlx.Array {
 	keys := mlx.random_split_n(mlx.random_key(seed), num)
 	mut out := []mlx.Array{len: num}
@@ -61,7 +61,7 @@ pub fn sel1(n int) mlx.Array {
 }
 
 // col returns a true 1-D column j of an array (take_axis keeps the index dim,
-// so squeeze it away to match Python's a[:, j]).
+// so squeeze it away to get plain a[:, j] indexing semantics).
 pub fn col(a mlx.Array, j int) mlx.Array {
 	return a.take_axis(sel1(j), 1).squeeze_axis(1)
 }

@@ -1,7 +1,7 @@
 module conger
 
 // registry_manifest.v — JSON persistence for dynamic child templates and the
-// expert registry (V port of src/registry_manifest.py). Uses json2's struct
+// expert registry. Uses json2's struct
 // codegen directly, so the typed ChildTemplateSpec / TemplateConstraints
 // round-trip without a hand-written Any conversion.
 import json2

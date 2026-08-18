@@ -1,7 +1,6 @@
 module conger
 
-// template_lineage.v — structure-template lineage/inheritance contract
-// (V port of src/template_lineage.py).
+// template_lineage.v — structure-template lineage/inheritance contract.
 
 pub struct TemplateLineage {
 pub:

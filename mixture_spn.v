@@ -1,7 +1,7 @@
 module conger
 
 // mixture_spn.v — MixtureSPN: full-resolution shallow mixture SPN (sum of
-// instance-level diagonal-Gaussian blocks), V port of src/mixture_spn.py.
+// instance-level diagonal-Gaussian blocks).
 import math
 import os
 import mlx
@@ -154,8 +154,8 @@ pub fn fit_mixture_spn(f mlx.Array, t mlx.Array, stratum mlx.Array, rel_floor f6
 	return m
 }
 
-// fit_simple fits with a single-kind stratum (cat_sizes=[3]), matching the
-// Python MixtureSPN.fit(f, t, stratum) default path.
+// fit_simple fits with a single-kind stratum (cat_sizes=[3]), the default
+// fit path.
 pub fn fit_simple(f mlx.Array, t mlx.Array, stratum mlx.Array, basis_dim int) MixtureSPN {
 	scene := stratum.expand_dims(1).astype(.int32)
 	return fit_mixture_spn(f, t, stratum, 1e-2, scene, [n_stratum_default], basis_dim)
@@ -210,7 +210,7 @@ pub fn whiten(f mlx.Array) (mlx.Array, mlx.Array, mlx.Array) {
 	xc := f.subtract(f_mean.expand_dims(0))
 	g := xc.matmul(xc.transpose())
 	mut lam, mut u := eigh_cpu(g)
-	// threshold computed in f64 then narrowed (matches Python's float(max(lam))*1e-6)
+	// threshold computed in f64 then narrowed (max(lam)*1e-6)
 	maxlam := f32(f64(lam.max().item_f32()) * 1e-6)
 	keep := nonzero_indices(lam.greater(mlx.f32_scalar(maxlam)))
 	lam = lam.take(keep)

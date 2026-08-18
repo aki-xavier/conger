@@ -1,7 +1,6 @@
 module conger
 
-// model_memory.v — model memory / on-demand load + dynamic forgetting
-// (V port of src/model_memory.py).
+// model_memory.v — model memory / on-demand load + dynamic forgetting.
 import math
 import mlx
 

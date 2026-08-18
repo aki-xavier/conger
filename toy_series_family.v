@@ -1,7 +1,6 @@
 module conger
 
-// toy_series_family.v — non-visual time-series mechanism family (linear / sine),
-// V port of src/toy_series_family.py.
+// toy_series_family.v — toy time-series mechanism family (linear / sine).
 import math
 import mlx
 
@@ -73,7 +72,7 @@ pub fn (f ToySeriesFamily) residual(observation mlx.Array, params []f64) f64 {
 }
 
 // encode maps a 1D sequence to a 16-d summary feature vector, computed with MLX
-// float32 ops to match the Python reference bit-for-bit.
+// float32 ops, kept in float32 for numerical consistency.
 pub fn (f ToySeriesFamily) encode(y mlx.Array) mlx.Array {
 	yf := y.astype(.float32)
 	n := y.dim(0)
