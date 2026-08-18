@@ -2,7 +2,6 @@ module conger
 
 // child_codebook_operations_test.v — V port of tests/test_child_codebook_operations.py.
 import math
-import mlx
 
 fn ccf_test_spec(operation string, name string) ChildTemplateSpec {
 	family := if operation == 'layer' { 'layered' } else { 'composite' }

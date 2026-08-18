@@ -8,12 +8,12 @@ struct InverseConfig {
 	replicates         int  = 8
 	sigma_rel_floor    f64  = 1e-2
 	refine_appearance  bool = true
-	refine_composite   bool = false
+	refine_composite   bool
 	kind_topk          int  = 3
 	basis_dim          int  = 48
 	scene_family       string
-	n_textures         int  = 0
-	em_refine          bool = false
+	n_textures         int
+	em_refine          bool
 	em_max_iters       int  = 2
 	em_appearance_topk int  = 3
 	em_freeze_sz       bool = true

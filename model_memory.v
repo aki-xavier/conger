@@ -74,11 +74,11 @@ fn assemble_model(path string) MixtureSPN {
 		csizes = [3]
 	}
 	mut m := MixtureSPN{
-		log_w:     comp['log_w']
-		f_mu:      comp['f_mu']
-		f_var:     comp['f_var']
-		t_mu:      comp['t_mu']
-		cat_logp:  comp['cat_logp']
+		log_w:     comp['log_w'] or { mlx.empty() }
+		f_mu:      comp['f_mu'] or { mlx.empty() }
+		f_var:     comp['f_var'] or { mlx.empty() }
+		t_mu:      comp['t_mu'] or { mlx.empty() }
+		cat_logp:  comp['cat_logp'] or { mlx.empty() }
 		rel_floor: meta.rel_floor
 		f_mean:    f_mean
 		basis:     basis

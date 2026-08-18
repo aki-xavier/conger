@@ -2,7 +2,6 @@ module conger
 
 // scene_reconstructor_test.v — full cga.Scene reconstructor tests.
 import math
-import cga
 import mlx
 
 fn test_scene_param_decoding() {

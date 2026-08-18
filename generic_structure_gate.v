@@ -100,7 +100,8 @@ fn (g GenericStructureGate) decide(estimates map[string]StructuredHypothesis) Ge
 	temperature := math.max(2.0 * math.abs(best_score), 1e-8) * g.temperature_scale
 	posterior := softmax_map(scores, temperature, g.priors)
 	best_name := argmin_of(scores)
-	best := estimates[best_name].with_structure(best_name, posterior[best_name], posterior)
+	best := (estimates[best_name] or { panic('unknown expert') }).with_structure(best_name,
+		posterior[best_name], posterior)
 	needs_new := best_raw > g.birth_residual
 		&& (g.posterior_floor < 0.0 || posterior[best_name] < g.posterior_floor)
 	return GenericStructureDecision{
@@ -148,7 +149,8 @@ fn (g GenericStructureGate) decide_hierarchical(estimates map[string]StructuredH
 		}
 	}
 	best_name := argmin_of(scores)
-	best := estimates[best_name].with_structure(best_name, posterior[best_name], posterior)
+	best := (estimates[best_name] or { panic('unknown expert') }).with_structure(best_name,
+		posterior[best_name], posterior)
 	needs_new := best_raw > g.birth_residual
 		&& (g.posterior_floor < 0.0 || posterior[best_name] < g.posterior_floor)
 	return GenericStructureDecision{

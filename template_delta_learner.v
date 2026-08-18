@@ -63,7 +63,7 @@ fn tdl_hash(constraints map[string]MetaValue) string {
 	keys.sort()
 	mut text := ''
 	for k in keys {
-		text += k + '=' + tdl_repr(constraints[k]) + ';'
+		text += k + '=' + tdl_repr(constraints[k] or { MetaValue('') }) + ';'
 	}
 	mut h := u32(2166136261)
 	for b in text.bytes() {

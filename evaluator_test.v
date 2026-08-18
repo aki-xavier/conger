@@ -2,7 +2,6 @@ module conger
 
 // evaluator_test.v — full Evaluator coverage (single + layered-composite).
 import math
-import mlx
 
 fn test_evaluator_layered_report() {
 	p_gt := arr32([

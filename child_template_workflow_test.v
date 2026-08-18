@@ -3,7 +3,6 @@ module conger
 // child_template_workflow_test.v — V port of tests/test_child_template_workflow.py
 // (the render-proposal → explicit registration path).
 import os
-import mlx
 
 fn ctw_parent_expert() SceneExpert {
 	return SceneExpert{

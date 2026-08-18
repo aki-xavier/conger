@@ -8,7 +8,7 @@ struct TemplateLineage {
 	parent_family string // '' = None
 	operation     string
 	complexity    f64
-	generation    int = 0
+	generation    int
 	delta         map[string]MetaValue
 }
 

@@ -2,7 +2,6 @@ module conger
 
 // template_delta_learner_test.v — V port of tests/test_template_delta_learner.py.
 import math
-import mlx
 import os
 
 fn tdl_parent_expert() SceneExpert {

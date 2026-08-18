@@ -30,7 +30,7 @@ fn test_hierarchical_posterior_decomposes_and_normalizes() {
 	out := GenericStructureGate{}.decide_hierarchical(estimates)
 	assert math.abs(map_sum(out.posterior) - 1.0) < 1e-6
 	for name, _ in estimates {
-		fam := estimates[name].geometry_family
+		fam := (estimates[name] or { continue }).geometry_family
 		expected := out.family_posterior[fam] * out.family_conditional[fam][name]
 		assert math.abs(out.posterior[name] - expected) < 1e-12
 	}

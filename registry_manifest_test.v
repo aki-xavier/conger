@@ -76,7 +76,7 @@ fn test_registry_manifest_restores_child_expert() {
 	})
 	restored.load_manifest(manifest_path, dir, false) or { panic(err) }
 	assert spec.name in restored.experts
-	assert restored.experts[spec.name].lineage().family == spec.name
+	assert (restored.experts[spec.name] or { panic('missing') }).lineage().family == spec.name
 	ch := restored.children_of('layered')
 	assert ch.len == 1 && ch[0] == spec.name
 	os.rm(os.join_path(dir, 'manifest.json')) or {}

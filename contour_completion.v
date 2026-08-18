@@ -101,8 +101,6 @@ fn cc_fit_shape(shape int, front mlx.Array, back mlx.Array) (f64, f64, f64, f64)
 fn cc_complete(front_mask mlx.Array, back_mask mlx.Array) (f64, f64, f64, int, f64) {
 	front := cc_down(front_mask)
 	back := cc_down(back_mask)
-	h := back.dim(0)
-	w := back.dim(1)
 	if back.astype(.int32).sum().item_i32() < 8 {
 		cx, cy := cc_centroid(back)
 		return cx * cc_down, cy * cc_down, 0.0, 0, 1.0
