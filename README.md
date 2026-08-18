@@ -17,7 +17,7 @@ make fmt         # v fmt -w .
 
 （等价直接命令：`v -gc boehm -no-memory-limit test .`，依赖经 `~/.vmodules` 解析，无需 `VMODULES` 环境变量。）
 
-8 个 V 测试文件全部通过（MixtureSPN 黑盒 / 模型内存 / 通用结构门控与出生控制 / 模板文法·提案 / 因果边 / 结构基准汇总）。视觉侧的 30 个测试在 `conger-vision` 项目内运行。
+11 个 V 测试文件全部通过（MixtureSPN 黑盒 / 模型内存 / 通用结构门控与出生控制 / 模板文法·提案 / 因果边 / 结构基准汇总 / 注册表清单往返 / 通用 EM·前向模型 / 模板约束学习·血缘）。视觉侧的 30 个测试在 `conger-vision` 项目内运行。
 
 ## 模块（一文件一类）
 
@@ -35,7 +35,7 @@ make fmt         # v fmt -w .
 
 通用基准汇总：`structure_benchmark.v`（跨结构门控的 accuracy / confusion / ECE 汇总）。
 
-测试：根目录 `*_test.v`（8 个文件）。`docs/architecture.md` — 全系统架构与机制决策录。
+测试：根目录 `*_test.v`（11 个文件）。`docs/architecture.md` — 全系统架构与机制决策录（其顶部「内核架构与主管线」一节为当前内核的分层架构与数据/控制流总图）。
 
 ## 推理接口
 
