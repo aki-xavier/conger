@@ -231,7 +231,7 @@ fn (app InverseApp) refine_composite_scenes(scene_pred [][]f64, cat_p mlx.Array,
 }
 
 // self_check asserts the single-family metric thresholds.
-fn (app InverseApp) self_check(mi map[string]f64, me map[string]f64) {
+fn (app InverseApp) self_check(mi map[string]f64, _ map[string]f64) {
 	if app.cfg.family() != 'single' {
 		return
 	}

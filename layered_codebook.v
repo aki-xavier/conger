@@ -33,7 +33,7 @@ fn lcb_inside(u f64, v f64, s f64, z f64) bool {
 }
 
 // lcb_sample_free samples one free object (u,v,s,z) with rejection.
-fn lcb_sample_free(mut rng Rng, extrap bool, z_lo f64, z_hi f64) (f64, f64, f64, f64) {
+fn lcb_sample_free(mut rng Rng, _ bool, z_lo f64, z_hi f64) (f64, f64, f64, f64) {
 	mut s := 0.0
 	mut z := 0.0
 	mut m := 0.0

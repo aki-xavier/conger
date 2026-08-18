@@ -20,7 +20,7 @@ fn new_codebook(cfg InverseConfig) Codebook {
 fn obj_color(hue_idx int) int {
 	h := f64(hue_idx) / f64(n_hue)
 	r, g, b := hsv_to_rgb(h, 0.8, 0.85)
-	return (int(r * 255.0) << 16) | (int(g * 255.0) << 8) | int(b * 255.0)
+	return int((u32(int(r * 255.0)) << 16) | (u32(int(g * 255.0)) << 8) | u32(int(b * 255.0)))
 }
 
 // hsv_to_rgb converts HSV (h∈[0,1], s,v∈[0,1]) to sRGB (r,g,b ∈[0,1]).

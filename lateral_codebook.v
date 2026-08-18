@@ -30,7 +30,7 @@ fn lc_spacing_factor(operation string) f64 {
 
 // lc_sample_composite samples base (left) / part (right) at the same depth →
 // (u0,v0,s0,z0,u1,v1,s1,z1). The part keeps the same y as the base.
-fn lc_sample_composite(mut rng Rng, extrap bool) []f64 {
+fn lc_sample_composite(mut rng Rng, _ bool) []f64 {
 	for _ in 0 .. 64 {
 		s0 := rng.uniform(s_range_lo, s_range_hi)
 		z0 := rng.uniform(z_range_lo, z_range_hi)

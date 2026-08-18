@@ -80,7 +80,7 @@ fn (mut r SceneEMRefiner) residual(geometry []f64, appearance [3]int) f64 {
 }
 
 // responsibilities runs the E step: q(A|G) over appearance candidates.
-fn (mut r SceneEMRefiner) responsibilities(geometry []f64, observation FramePair, temperature f64) mlx.Array {
+fn (mut r SceneEMRefiner) responsibilities(geometry []f64, _ FramePair, temperature f64) mlx.Array {
 	mut scores := []f32{}
 	for a in r.appearances {
 		scores << f32(r.residual(geometry, a))
@@ -92,7 +92,7 @@ fn (mut r SceneEMRefiner) responsibilities(geometry []f64, observation FramePair
 }
 
 // maximize runs the M step: coordinate search over unfrozen geometry dims.
-fn (mut r SceneEMRefiner) maximize(q mlx.Array, observation FramePair, geometry []f64, damping f64) []f64 {
+fn (mut r SceneEMRefiner) maximize(q mlx.Array, _ FramePair, geometry []f64, damping f64) []f64 {
 	ov := q.argsort().data_i32()
 	mut order := []int{}
 	for i := q.dim(0) - 1; i >= 0 && order.len < r.appearance_topk; i-- {
@@ -132,7 +132,7 @@ fn (mut r SceneEMRefiner) maximize(q mlx.Array, observation FramePair, geometry 
 }
 
 // log_likelihood returns −min appearance residual.
-fn (mut r SceneEMRefiner) log_likelihood(geometry []f64, observation FramePair) f64 {
+fn (mut r SceneEMRefiner) log_likelihood(geometry []f64, _ FramePair) f64 {
 	mut best := 1e18
 	for a in r.appearances {
 		res := r.residual(geometry, a)

@@ -209,7 +209,7 @@ fn ccf_sample_lateral(mut rng Rng, cb ChildCodebook) []f64 {
 }
 
 // ccf_block builds one child replicate block.
-fn ccf_block(cb ChildCodebook, seed u64, extrap bool) mlx.Array {
+fn ccf_block(cb ChildCodebook, seed u64, _ bool) mlx.Array {
 	mut rng := new_rng(seed)
 	mut rows := []f32{}
 	for k0 in cb.base_kinds {

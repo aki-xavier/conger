@@ -190,7 +190,7 @@ fn cg_window_centroid(weights mlx.Array, cx f64, cy f64, r f64) ?[]f64 {
 }
 
 // cg_disk_evidence returns full-resolution disk-fit (scale_ratio, lateral_ratio).
-fn cg_disk_evidence(fl mlx.Array, fr mlx.Array) ?[]f64 {
+fn cg_disk_evidence(fl mlx.Array, _ mlx.Array) ?[]f64 {
 	wl := foreground_weights(fl)
 	fg := wl.greater(mlx.f32_scalar(0.01))
 	sp := cg_split_score(fg)

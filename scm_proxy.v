@@ -51,7 +51,7 @@ fn (m AppearanceMechanism) predict(hue int, lcol int, ldir int) mlx.Array {
 }
 
 // do_lighting is the counterfactual do(lighting=…) query.
-fn (m AppearanceMechanism) do_lighting(hue int, lcol int, ldir int, lcol_new int, ldir_new int) mlx.Array {
+fn (m AppearanceMechanism) do_lighting(hue int, _ int, _ int, lcol_new int, ldir_new int) mlx.Array {
 	return m.predict(hue, lcol_new, ldir_new)
 }
 

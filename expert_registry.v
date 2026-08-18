@@ -192,7 +192,7 @@ fn (mut r ExpertRegistry) observe_birth_request(request StructureBirthRequest) [
 }
 
 // register adds an already-trained expert.
-fn (mut r ExpertRegistry) register(name string, cfg InverseConfig, expert SceneExpert, artifacts string) SceneExpert {
+fn (mut r ExpertRegistry) register(name string, _ InverseConfig, expert SceneExpert, _ string) SceneExpert {
 	r.experts[name] = expert
 	return expert
 }
@@ -200,7 +200,7 @@ fn (mut r ExpertRegistry) register(name string, cfg InverseConfig, expert SceneE
 // train_and_register registers an expert (the training loop is invoked by the
 // CLI's InverseApp.run; registration itself uses a placeholder net, matching the
 // Python tests which monkeypatch InverseApp.run to a no-op).
-fn (mut r ExpertRegistry) train_and_register(name string, cfg InverseConfig, artifacts string, codebook ?SceneFamily) SceneExpert {
+fn (mut r ExpertRegistry) train_and_register(name string, cfg InverseConfig, _ string, codebook ?SceneFamily) SceneExpert {
 	if cb := codebook {
 		app := new_inverse_app_cb(cfg, cb)
 		e := SceneExpert{

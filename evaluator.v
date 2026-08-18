@@ -34,7 +34,7 @@ fn evaluator_cols(width int) ([]int, []string, []FactorSpec) {
 }
 
 // report returns the regression + factor-accuracy metric dict for a scene family.
-fn (e Evaluator) report(name string, p_gt mlx.Array, t_pred mlx.Array, scene_pred [][]f64, p_train mlx.Array) map[string]f64 {
+fn (e Evaluator) report(_ string, p_gt mlx.Array, t_pred mlx.Array, scene_pred [][]f64, p_train mlx.Array) map[string]f64 {
 	cols, targets, factors := evaluator_cols(p_gt.dim(1))
 	gt := p_gt.take_axis(mlx.array_i32(ints32(cols), [cols.len]), 1)
 	base := p_train.take_axis(mlx.array_i32(ints32(cols), [cols.len]), 1).mean_axis(0, true)
