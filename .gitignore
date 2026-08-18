@@ -231,3 +231,4 @@ artifacts/*.pkl
 artifacts/*.txt
 artifacts/*.json
 artifacts/*.safetensors
+.vmodules
