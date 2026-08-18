@@ -244,3 +244,19 @@ pub fn fmax2(a f64, b f64) f64 {
 pub fn clamp01(x f64) f64 {
 	return fmax2(0.0, fmin2(x, 1.0))
 }
+
+// logsumexp returns log(Σ exp(x)), computed stably. Empty input → -inf.
+pub fn logsumexp(x []f64) f64 {
+	if x.len == 0 {
+		return math.inf(-1)
+	}
+	mut m := x[0]
+	for v in x {
+		m = fmax2(m, v)
+	}
+	mut s := 0.0
+	for v in x {
+		s += math.exp(v - m)
+	}
+	return m + math.log(s)
+}

@@ -131,6 +131,8 @@ JSON 持久化（`rm_save`/`rm_load`），供跨进程恢复。
 | | `generic_expert_registry.v` | `GenericExpert[T]` · `GenericExpertRegistry[T]` |
 | | `structure_birth.v` | `StructureCase` · `StructureBirthRequest` · `StructureBirthController` |
 | | `generic_em.v` · `forward_model.v` | `EMLoop[M,O,R]` · `EMResult[T]` · `ForwardModel` |
+| | `kernel_graph.v` | `LikelihoodKernel` · `KernelNode` · `KernelGraph` · `KernelContext` · `SourceKernel` · `topo_order` · `run_recurrent` · `RecurrentTrace` |
+| | `likelihood_kernels.v` | `GaussianKernel` · `GaussianMixtureKernel` · `CondGaussianKernel` · `MixtureSPNKernel` |
 | 模板学习 | `template_proposal.v` | `TemplateProposal` · `TemplateProposer` |
 | | `template_grammar.v` | `TemplateGrammar` · `TemplateRule` · `primitives`/`composites`/`rules` |
 | | `template_lineage.v` | `TemplateLineage` · `ChildTemplateSpec` · `single/layered/composite/lateral_lineage` |
@@ -139,7 +141,7 @@ JSON 持久化（`rm_save`/`rm_load`），供跨进程恢复。
 | 内存/持久化 | `model_memory.v` | `split_save` · `load_transform` · `load_components` · `assemble_model` · `truncate_basis` · `forget_components` · `coreset` · `model_size_mb` |
 | | `registry_manifest.v` | `RegistryManifest` · `RegisteredChildTemplate` · `rm_save`/`rm_load` |
 | 工具 | `types.v` | `TemplateDelta` · `TemplateMetadata` · `TemplateConstraints` |
-| | `vecmath.v` | `Rng` · `linspace` · `solve_2x2` · `solve_n` · `lstsq_2` · `kabsch_2d` |
+| | `vecmath.v` | `Rng` · `linspace` · `solve_2x2` · `solve_n` · `lstsq_2` · `kabsch_2d` · `logsumexp` |
 | | `mlxutil.v` | `nonzero_indices` · `axis_var`/`axis_std` · `axis_logsumexp` · `eigh_cpu` · `split_keys` · `fft2`/`ifft2` |
 | 验证域 | `toy_series_family.v` · `toy_series_expert.v` | `ToySeriesFamily`(linear/sine) · `ToySeriesExpert` · `train_toy_expert` |
 | | `structure_benchmark.v` | `StructureCaseResult` · `StructureBenchmarkSummary` · `sb_summarize` · `sb_ece` |
