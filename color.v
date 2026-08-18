@@ -5,8 +5,9 @@ module conger
 // The Python reference bridges PIL→numpy for image loading and uses numpy for a
 // few constant matrices; those constants are inlined as f32 arrays here. The
 // complex-valued `hsl_to_complex`/`split_dual_path` and the PIL-based
-// `image_to_mlx` are not ported (no complex-array construction in mlx-v, and no
-// PIL); they are unused by the test suite.
+// `image_to_mlx` are not ported (no PIL in the V stack); they are unused by the
+// test suite. (`complex_from` in mlxutil.v does provide complex-array
+// construction, which the Riesz frontend uses.)
 import mlx
 
 struct Color {}

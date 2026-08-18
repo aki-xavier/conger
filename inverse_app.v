@@ -196,7 +196,8 @@ fn (app InverseApp) refine_scenes(scene_pred [][]f64, cat_p mlx.Array, stats mlx
 		fl := renderer.render(scene_gt, cam_l)
 		fr := renderer.render(scene_gt, cam_r)
 		kind_p := mlx.array_f32(cp[i * cat_p.dim(1)..(i + 1) * cat_p.dim(1)], [
-			cat_p.dim(1)]).take_axis(mlx.arange(0.0, f64(n_kind), 1.0, .int32), 0)
+			cat_p.dim(1),
+		]).take_axis(mlx.arange(0.0, f64(n_kind), 1.0, .int32), 0)
 		st := mlx.array_f32(stats.data_f32()[i * stats.dim(1)..(i + 1) * stats.dim(1)], [
 			1,
 			stats.dim(1),

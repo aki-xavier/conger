@@ -9,8 +9,8 @@ struct InverseConfig {
 	sigma_rel_floor    f64  = 1e-2
 	refine_appearance  bool = true
 	refine_composite   bool
-	kind_topk          int  = 3
-	basis_dim          int  = 48
+	kind_topk          int = 3
+	basis_dim          int = 48
 	scene_family       string
 	n_textures         int
 	em_refine          bool

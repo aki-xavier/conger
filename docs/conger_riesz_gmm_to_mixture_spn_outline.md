@@ -2,7 +2,7 @@
 
 主题：我是如何从 Riesz-GMM 显式建模，切换到 conger 当前实例级 MixtureSPN 逆渲染。
 配套 PPTX：`docs/conger_riesz_gmm_to_mixture_spn.pptx`（16:9, 15 页）。
-生成脚本：`tools/build_conger_research_pptx.py`。
+生成脚本：`tools/build_conger_research_pptx.py`（随 Python 源码一并移除，不再随仓库提供）。
 
 ---
 

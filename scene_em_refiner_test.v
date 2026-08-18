@@ -74,29 +74,41 @@ fn new_quadratic_refiner(freeze []bool) SceneEMRefiner {
 fn test_scene_em_maximize_skips_frozen_dims() {
 	init := [0.0, 0.0, 0.3, 0.7]
 	mut refiner := new_quadratic_refiner([false, false, true, true])
-	q := refiner.responsibilities(init, FramePair{ fl: mlx.zeros([8, 8, 3], .float32), fr: mlx.zeros([
-		8,
-		8,
-		3,
-	], .float32) }, 1.0)
-	got := refiner.maximize(q, FramePair{ fl: mlx.zeros([8, 8, 3], .float32), fr: mlx.zeros([
-		8,
-		8,
-		3,
-	], .float32) }, init, 0.0)
+	q := refiner.responsibilities(init, FramePair{
+		fl: mlx.zeros([8, 8, 3], .float32)
+		fr: mlx.zeros([
+			8,
+			8,
+			3,
+		], .float32)
+	}, 1.0)
+	got := refiner.maximize(q, FramePair{
+		fl: mlx.zeros([8, 8, 3], .float32)
+		fr: mlx.zeros([
+			8,
+			8,
+			3,
+		], .float32)
+	}, init, 0.0)
 	assert got[2] == 0.3 && got[3] == 0.7
 	assert got[0] > 0.0 && got[1] > 0.0
 
 	mut ref_full := new_quadratic_refiner([false, false, false, false])
-	qf := ref_full.responsibilities(init, FramePair{ fl: mlx.zeros([8, 8, 3], .float32), fr: mlx.zeros([
-		8,
-		8,
-		3,
-	], .float32) }, 1.0)
-	gotf := ref_full.maximize(qf, FramePair{ fl: mlx.zeros([8, 8, 3], .float32), fr: mlx.zeros([
-		8,
-		8,
-		3,
-	], .float32) }, init, 0.0)
+	qf := ref_full.responsibilities(init, FramePair{
+		fl: mlx.zeros([8, 8, 3], .float32)
+		fr: mlx.zeros([
+			8,
+			8,
+			3,
+		], .float32)
+	}, 1.0)
+	gotf := ref_full.maximize(qf, FramePair{
+		fl: mlx.zeros([8, 8, 3], .float32)
+		fr: mlx.zeros([
+			8,
+			8,
+			3,
+		], .float32)
+	}, init, 0.0)
 	assert gotf[2] != 0.3
 }
