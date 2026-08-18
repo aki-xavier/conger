@@ -3,7 +3,8 @@ module conger
 // causal_edge.v — structure-level causal discovery: upgrade template-delta edges
 // into candidate causal edges (V port of src/causal_edge.py).
 
-struct CausalEdge {
+pub struct CausalEdge {
+pub:
 	parent_family string
 	operation     string
 	target        string
@@ -15,16 +16,17 @@ struct CausalEdge {
 }
 
 // is_causal requires ≥2 environments of cross-env evidence and low drift.
-fn (e CausalEdge) is_causal() bool {
+pub fn (e CausalEdge) is_causal() bool {
 	return e.n_envs >= 2 && e.agreement >= 0.5
 }
 
-struct CausalDeltaLearner {
+pub struct CausalDeltaLearner {
+pub:
 	agreement_threshold f64 = 0.5
 }
 
 // targets extracts scalar targets from a proposal (observed delta overrides grid).
-fn (l CausalDeltaLearner) targets(p TemplateProposal) map[string]f64 {
+pub fn (l CausalDeltaLearner) targets(p TemplateProposal) map[string]f64 {
 	observed := meta_map(p.metadata, 'observed')
 	mut out := map[string]f64{}
 	if 'scale_ratio' in observed {
@@ -58,7 +60,7 @@ fn (l CausalDeltaLearner) targets(p TemplateProposal) map[string]f64 {
 }
 
 // default_env_key returns env → seed → case_index → "0".
-fn default_env_key(p TemplateProposal) string {
+pub fn default_env_key(p TemplateProposal) string {
 	if v := p.metadata['env'] {
 		return meta_value_str(v)
 	}
@@ -72,7 +74,7 @@ fn default_env_key(p TemplateProposal) string {
 }
 
 // agreement returns 1 − midpoint drift / pooled width (∈[0,1]).
-fn (l CausalDeltaLearner) agreement(mids []f64, ranges [][]f64) f64 {
+pub fn (l CausalDeltaLearner) agreement(mids []f64, ranges [][]f64) f64 {
 	if mids.len <= 1 {
 		return 1.0
 	}
@@ -112,7 +114,7 @@ fn (l CausalDeltaLearner) agreement(mids []f64, ranges [][]f64) f64 {
 }
 
 // learn groups proposals by (parent, operation, target) × env and returns edges.
-fn (l CausalDeltaLearner) learn(proposals []TemplateProposal) []CausalEdge {
+pub fn (l CausalDeltaLearner) learn(proposals []TemplateProposal) []CausalEdge {
 	mut groups := map[string]map[string][]f64{}
 	mut order := []string{}
 	for p in proposals {
@@ -187,11 +189,11 @@ fn (l CausalDeltaLearner) learn(proposals []TemplateProposal) []CausalEdge {
 	return edges
 }
 
-fn meta_as_f64(v MetaValue) f64 {
+pub fn meta_as_f64(v MetaValue) f64 {
 	return v as f64
 }
 
-fn meta_value_str(v MetaValue) string {
+pub fn meta_value_str(v MetaValue) string {
 	match v {
 		string { return v }
 		int { return v.str() }

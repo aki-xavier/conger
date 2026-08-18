@@ -4,17 +4,18 @@ module conger
 // proposals (V port of src/template_delta_learner.py).
 import math
 
-struct TemplateDeltaLearner {
+pub struct TemplateDeltaLearner {
+pub:
 	min_evidence int = 2
 	range_margin f64 = 0.10
 }
 
-fn tdl_isfinite(v f64) bool {
+pub fn tdl_isfinite(v f64) bool {
 	return !math.is_nan(v) && !math.is_inf(v, 0)
 }
 
 // tdl_range returns a numeric evidence range with relative/absolute margin.
-fn (tdl TemplateDeltaLearner) tdl_range(values []f64) []f64 {
+pub fn (tdl TemplateDeltaLearner) tdl_range(values []f64) []f64 {
 	mut lo := values[0]
 	mut hi := values[0]
 	for v in values {
@@ -30,7 +31,7 @@ fn (tdl TemplateDeltaLearner) tdl_range(values []f64) []f64 {
 }
 
 // tdl_repr serialises a MetaValue for the spec-name digest.
-fn tdl_repr(v MetaValue) string {
+pub fn tdl_repr(v MetaValue) string {
 	match v {
 		string {
 			return 's:${v}'
@@ -55,7 +56,7 @@ fn tdl_repr(v MetaValue) string {
 }
 
 // tdl_hash returns a short deterministic digest of the constraints.
-fn tdl_hash(constraints map[string]MetaValue) string {
+pub fn tdl_hash(constraints map[string]MetaValue) string {
 	mut keys := []string{}
 	for k, _ in constraints {
 		keys << k
@@ -74,7 +75,7 @@ fn tdl_hash(constraints map[string]MetaValue) string {
 }
 
 // tdl_spec builds one ChildTemplateSpec from a proposal group.
-fn (tdl TemplateDeltaLearner) tdl_spec(parent string, operation string, proposals []TemplateProposal, lineages map[string]TemplateLineage) ChildTemplateSpec {
+pub fn (tdl TemplateDeltaLearner) tdl_spec(parent string, operation string, proposals []TemplateProposal, lineages map[string]TemplateLineage) ChildTemplateSpec {
 	mut ratios := []f64{}
 	mut laterals := []f64{}
 	mut depth_gaps := []f64{}
@@ -174,7 +175,7 @@ fn (tdl TemplateDeltaLearner) tdl_spec(parent string, operation string, proposal
 }
 
 // tdl_learn aggregates proposals → ChildTemplateSpec list.
-fn (tdl TemplateDeltaLearner) tdl_learn(requests []StructureBirthRequest, lineages map[string]TemplateLineage) []ChildTemplateSpec {
+pub fn (tdl TemplateDeltaLearner) tdl_learn(requests []StructureBirthRequest, lineages map[string]TemplateLineage) []ChildTemplateSpec {
 	mut groups := map[string][]TemplateProposal{}
 	mut order := []string{}
 	for request in requests {

@@ -3,7 +3,8 @@ module conger
 // template_proposal.v — unified description of a structure-birth candidate
 // (V port of src/template_proposal.py).
 
-struct TemplateProposal {
+pub struct TemplateProposal {
+pub:
 	family        string
 	operation     string
 	params        []f64
@@ -16,6 +17,6 @@ struct TemplateProposal {
 }
 
 // TemplateProposer generates scorable new-template candidates from birth evidence.
-interface TemplateProposer {
+pub interface TemplateProposer {
 	propose(cases []StructureCase) []TemplateProposal
 }

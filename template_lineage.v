@@ -3,7 +3,8 @@ module conger
 // template_lineage.v — structure-template lineage/inheritance contract
 // (V port of src/template_lineage.py).
 
-struct TemplateLineage {
+pub struct TemplateLineage {
+pub:
 	family        string
 	parent_family string // '' = None
 	operation     string
@@ -12,18 +13,19 @@ struct TemplateLineage {
 	delta         map[string]MetaValue
 }
 
-fn (t TemplateLineage) is_root() bool {
+pub fn (t TemplateLineage) is_root() bool {
 	return t.parent_family == ''
 }
 
-fn (t TemplateLineage) signature() string {
+pub fn (t TemplateLineage) signature() string {
 	parent := if t.parent_family != '' { t.parent_family } else { 'root' }
 	return '${parent}->${t.family}:${t.operation}'
 }
 
 // ChildTemplateSpec is a candidate child-template constraint estimated from
 // multiple template proposals.
-struct ChildTemplateSpec {
+pub struct ChildTemplateSpec {
+pub:
 	name           string
 	family         string
 	parent_family  string
@@ -37,7 +39,7 @@ struct ChildTemplateSpec {
 }
 
 // lineage returns the registrable lineage object for this spec.
-fn (c ChildTemplateSpec) lineage() TemplateLineage {
+pub fn (c ChildTemplateSpec) lineage() TemplateLineage {
 	mut delta := map[string]MetaValue{}
 	for k, v in c.constraints {
 		delta[k] = v
@@ -54,7 +56,7 @@ fn (c ChildTemplateSpec) lineage() TemplateLineage {
 
 // --- the built-in template lineages (single → layered → composite) ------------
 
-fn single_lineage() TemplateLineage {
+pub fn single_lineage() TemplateLineage {
 	return TemplateLineage{
 		family:        'single'
 		parent_family: ''
@@ -64,7 +66,7 @@ fn single_lineage() TemplateLineage {
 	}
 }
 
-fn layered_lineage() TemplateLineage {
+pub fn layered_lineage() TemplateLineage {
 	mut delta := map[string]MetaValue{}
 	delta['relation'] = 'independent_front_back'
 	delta['n_objects'] = 2
@@ -78,7 +80,7 @@ fn layered_lineage() TemplateLineage {
 	}
 }
 
-fn composite_lineage() TemplateLineage {
+pub fn composite_lineage() TemplateLineage {
 	mut delta := map[string]MetaValue{}
 	delta['relation'] = 'attached_on_top'
 	return TemplateLineage{
@@ -91,7 +93,7 @@ fn composite_lineage() TemplateLineage {
 	}
 }
 
-fn lateral_lineage() TemplateLineage {
+pub fn lateral_lineage() TemplateLineage {
 	mut delta := map[string]MetaValue{}
 	delta['relation'] = 'mirror'
 	return TemplateLineage{

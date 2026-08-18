@@ -5,7 +5,8 @@ module conger
 // are tiny; no MLX needed).
 import math
 
-struct GenericStructureDecision {
+pub struct GenericStructureDecision {
+pub:
 	estimate            StructuredHypothesis
 	posterior           map[string]f64
 	residuals           map[string]f64
@@ -15,7 +16,8 @@ struct GenericStructureDecision {
 	family_conditional  map[string]map[string]f64
 }
 
-struct GenericStructureGate {
+pub struct GenericStructureGate {
+pub:
 	birth_residual    f64 = 1.0
 	posterior_floor   f64 = -1.0 // -1.0 = None (no floor)
 	priors            map[string]f64
@@ -25,7 +27,7 @@ struct GenericStructureGate {
 }
 
 // softmax_map normalises scores into a posterior (order-independent softmax).
-fn softmax_map(scores map[string]f64, temperature f64, priors map[string]f64) map[string]f64 {
+pub fn softmax_map(scores map[string]f64, temperature f64, priors map[string]f64) map[string]f64 {
 	mut logp := map[string]f64{}
 	mut maxlog := -1e300
 	for n, s in scores {
@@ -48,7 +50,7 @@ fn softmax_map(scores map[string]f64, temperature f64, priors map[string]f64) ma
 	return probs
 }
 
-fn min_of(m map[string]f64) f64 {
+pub fn min_of(m map[string]f64) f64 {
 	mut best := 1e300
 	for _, v in m {
 		if v < best {
@@ -58,7 +60,7 @@ fn min_of(m map[string]f64) f64 {
 	return best
 }
 
-fn max_of(m map[string]f64) f64 {
+pub fn max_of(m map[string]f64) f64 {
 	mut best := -1e300
 	for _, v in m {
 		if v > best {
@@ -68,7 +70,7 @@ fn max_of(m map[string]f64) f64 {
 	return best
 }
 
-fn argmin_of(m map[string]f64) string {
+pub fn argmin_of(m map[string]f64) string {
 	mut best_name := ''
 	mut best := 1e300
 	for n, v in m {
@@ -81,7 +83,7 @@ fn argmin_of(m map[string]f64) string {
 }
 
 // scores_map returns (residuals, scores) for each expert.
-fn (g GenericStructureGate) scores_map(estimates map[string]StructuredHypothesis) (map[string]f64, map[string]f64) {
+pub fn (g GenericStructureGate) scores_map(estimates map[string]StructuredHypothesis) (map[string]f64, map[string]f64) {
 	mut residuals := map[string]f64{}
 	mut scores := map[string]f64{}
 	for name, est in estimates {
@@ -93,7 +95,7 @@ fn (g GenericStructureGate) scores_map(estimates map[string]StructuredHypothesis
 }
 
 // decide returns the flat (single-level) gate decision.
-fn (g GenericStructureGate) decide(estimates map[string]StructuredHypothesis) GenericStructureDecision {
+pub fn (g GenericStructureGate) decide(estimates map[string]StructuredHypothesis) GenericStructureDecision {
 	residuals, scores := g.scores_map(estimates)
 	best_raw := min_of(residuals)
 	best_score := min_of(scores)
@@ -114,7 +116,7 @@ fn (g GenericStructureGate) decide(estimates map[string]StructuredHypothesis) Ge
 }
 
 // decide_hierarchical returns the two-level (family → member) gate decision.
-fn (g GenericStructureGate) decide_hierarchical(estimates map[string]StructuredHypothesis) GenericStructureDecision {
+pub fn (g GenericStructureGate) decide_hierarchical(estimates map[string]StructuredHypothesis) GenericStructureDecision {
 	residuals, scores := g.scores_map(estimates)
 	best_raw := min_of(residuals)
 	mut groups := map[string][]string{}

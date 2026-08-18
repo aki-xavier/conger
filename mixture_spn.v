@@ -5,14 +5,15 @@ module conger
 import math
 import mlx
 
-const nc = 64 // E-step sample block rows
-const kc = 8 // E-step component block columns
+pub const nc = 64 // E-step sample block rows
+pub const kc = 8 // E-step component block columns
 
-struct MixtureSPN {
+pub struct MixtureSPN {
+pub:
 	rel_floor f64
 	f_mean    ?mlx.Array // (V,)
 	basis     ?mlx.Array // (V,D)
-mut:
+pub mut:
 	log_w     mlx.Array // (K,)
 	f_mu      mlx.Array // (K,D)
 	f_var     mlx.Array // (K,D)
@@ -23,23 +24,23 @@ mut:
 	norm      mlx.Array // (K,) feature-side normalising constant
 }
 
-const n_stratum_default = 3
+pub const n_stratum_default = 3
 
-fn (mut m MixtureSPN) init_norm() {
+pub fn (mut m MixtureSPN) init_norm() {
 	log2pi := math.log(2.0 * math.pi)
 	m.norm =
 		m.log_w.subtract(m.f_var.log().add(mlx.f32_scalar(f32(log2pi))).sum_axis(1, false).multiply(mlx.f32_scalar(0.5)))
 }
 
 // z projects raw features into whitened coordinates (N,D).
-fn (m MixtureSPN) z(f mlx.Array) mlx.Array {
+pub fn (m MixtureSPN) z(f mlx.Array) mlx.Array {
 	f_mean := m.f_mean or { panic('model missing whitening basis: cannot predict') }
 	basis := m.basis or { panic('model missing whitening basis: cannot predict') }
 	return f.subtract(f_mean.expand_dims(0)).matmul(basis)
 }
 
 // logq_feat computes the feature-side unnormalised log joint (N,K), blockwise.
-fn (m MixtureSPN) logq_feat(z mlx.Array) mlx.Array {
+pub fn (m MixtureSPN) logq_feat(z mlx.Array) mlx.Array {
 	zn := z.dim(0)
 	kn := m.f_mu.dim(0)
 	mut out := []mlx.Array{}
@@ -63,7 +64,7 @@ fn (m MixtureSPN) logq_feat(z mlx.Array) mlx.Array {
 }
 
 // tied_vars computes per-stratum tied diagonal variance.
-fn tied_vars(z mlx.Array, stratum mlx.Array, rel_floor f64, n_stratum int) mlx.Array {
+pub fn tied_vars(z mlx.Array, stratum mlx.Array, rel_floor f64, n_stratum int) mlx.Array {
 	mut out := []mlx.Array{}
 	for j in 0 .. n_stratum {
 		sel := nonzero_indices(stratum.equal(mlx.int_scalar(j)))
@@ -81,7 +82,7 @@ fn tied_vars(z mlx.Array, stratum mlx.Array, rel_floor f64, n_stratum int) mlx.A
 }
 
 // cat_logp converts per-factor class columns into concatenated one-hot log probs.
-fn cat_logp(classes mlx.Array, sizes []int) mlx.Array {
+pub fn cat_logp(classes mlx.Array, sizes []int) mlx.Array {
 	mut cols := []mlx.Array{}
 	for j, sz in sizes {
 		cl := classes.take_axis(sel1(j), 1) // (N,1)
@@ -93,7 +94,7 @@ fn cat_logp(classes mlx.Array, sizes []int) mlx.Array {
 }
 
 // infer_cat_sizes maps the concatenated head width to per-factor class counts.
-fn infer_cat_sizes(cat_width int) []int {
+pub fn infer_cat_sizes(cat_width int) []int {
 	if cat_width == n_stratum_default {
 		return [n_stratum_default]
 	}
@@ -104,7 +105,7 @@ fn infer_cat_sizes(cat_width int) []int {
 }
 
 // fit assembles the instance-level mixture deterministically.
-fn fit_mixture_spn(f mlx.Array, t mlx.Array, stratum mlx.Array, rel_floor f64, scene_classes mlx.Array, cat_sizes []int, basis_dim int) MixtureSPN {
+pub fn fit_mixture_spn(f mlx.Array, t mlx.Array, stratum mlx.Array, rel_floor f64, scene_classes mlx.Array, cat_sizes []int, basis_dim int) MixtureSPN {
 	mut f_mean, mut basis, mut zz := whiten(f)
 	if basis_dim >= 1 {
 		d := zz.dim(1)
@@ -154,13 +155,13 @@ fn fit_mixture_spn(f mlx.Array, t mlx.Array, stratum mlx.Array, rel_floor f64, s
 
 // fit_simple fits with a single-kind stratum (cat_sizes=[3]), matching the
 // Python MixtureSPN.fit(f, t, stratum) default path.
-fn fit_simple(f mlx.Array, t mlx.Array, stratum mlx.Array, basis_dim int) MixtureSPN {
+pub fn fit_simple(f mlx.Array, t mlx.Array, stratum mlx.Array, basis_dim int) MixtureSPN {
 	scene := stratum.expand_dims(1).astype(.int32)
 	return fit_mixture_spn(f, t, stratum, 1e-2, scene, [n_stratum_default], basis_dim)
 }
 
 // expand_categories pads the category contract for new classes (logp=-inf).
-fn (mut m MixtureSPN) expand_categories(new_sizes []int) {
+pub fn (mut m MixtureSPN) expand_categories(new_sizes []int) {
 	old := m.cat_sizes
 	assert old.len == new_sizes.len
 	mut cols := []mlx.Array{}
@@ -181,7 +182,7 @@ fn (mut m MixtureSPN) expand_categories(new_sizes []int) {
 }
 
 // add appends new sample components and re-estimates tied variance/weights.
-fn (mut m MixtureSPN) add(f mlx.Array, t mlx.Array, stratum mlx.Array, scene_classes mlx.Array) {
+pub fn (mut m MixtureSPN) add(f mlx.Array, t mlx.Array, stratum mlx.Array, scene_classes mlx.Array) {
 	z_new := m.z(f)
 	m.f_mu = mlx.concatenate([m.f_mu, z_new], 0)
 	m.t_mu = mlx.concatenate([m.t_mu, t], 0)
@@ -200,7 +201,7 @@ fn (mut m MixtureSPN) add(f mlx.Array, t mlx.Array, stratum mlx.Array, scene_cla
 }
 
 // whiten returns (mean, basis, whitened coords) via PCA (Gram eigendecomposition).
-fn whiten(f mlx.Array) (mlx.Array, mlx.Array, mlx.Array) {
+pub fn whiten(f mlx.Array) (mlx.Array, mlx.Array, mlx.Array) {
 	f_mean := f.mean_axis(0, false)
 	xc := f.subtract(f_mean.expand_dims(0))
 	g := xc.matmul(xc.transpose())
@@ -217,7 +218,7 @@ fn whiten(f mlx.Array) (mlx.Array, mlx.Array, mlx.Array) {
 }
 
 // predict returns (E[t|x], P(scene factors|x), responsibilities).
-fn (m MixtureSPN) predict(f mlx.Array) (mlx.Array, mlx.Array, mlx.Array) {
+pub fn (m MixtureSPN) predict(f mlx.Array) (mlx.Array, mlx.Array, mlx.Array) {
 	logq := m.logq_feat(m.z(f))
 	r := logq.subtract(axis_logsumexp(logq, 1)).exp()
 	t_mean := r.matmul(m.t_mu)
@@ -226,7 +227,7 @@ fn (m MixtureSPN) predict(f mlx.Array) (mlx.Array, mlx.Array, mlx.Array) {
 }
 
 // save writes the model to a safetensors file.
-fn (m MixtureSPN) save(path string) {
+pub fn (m MixtureSPN) save(path string) {
 	mut tens := mlx.new_map_string_to_array()
 	tens.insert('log_w', m.log_w)
 	tens.insert('f_mu', m.f_mu)
@@ -243,7 +244,7 @@ fn (m MixtureSPN) save(path string) {
 }
 
 // load_mixture_spn reads a safetensors model back.
-fn load_mixture_spn(path string) MixtureSPN {
+pub fn load_mixture_spn(path string) MixtureSPN {
 	// safetensors tensors are mmap-lazy; force the Load ops onto the CPU stream
 	// (a Load op cannot be evaluated on the GPU stream).
 	mlx.use_cpu()
@@ -284,11 +285,11 @@ fn load_mixture_spn(path string) MixtureSPN {
 	return m
 }
 
-fn min_i(a int, b int) int {
+pub fn min_i(a int, b int) int {
 	return if a < b { a } else { b }
 }
 
-fn encode_ints(vals []int) string {
+pub fn encode_ints(vals []int) string {
 	mut parts := []string{cap: vals.len}
 	for v in vals {
 		parts << v.str()
@@ -296,7 +297,7 @@ fn encode_ints(vals []int) string {
 	return parts.join(',')
 }
 
-fn decode_ints(s string) []int {
+pub fn decode_ints(s string) []int {
 	if s == '' {
 		return []int{}
 	}

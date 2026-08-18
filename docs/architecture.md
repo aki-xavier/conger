@@ -1,6 +1,8 @@
 # conger 架构与流程图
 
-> **V 移植说明**: 本仓库已从 Python 移植到 V (模块 `conger` 平铺在仓库根目录)。本文档记录的机制决策仍准确, 但文中 `src/*.py` 路径对应根目录同名 `*.v`, `python src/x.py` / `inverse.py` 命令对应 `make test` (测试) 与 `inverse_app.v` 的 `run()` 主链路; argparse CLI / 基准 / 纹理 numpy 实验脚本未移植, 见 `README.md`「未移植部分」。
+> **V 移植 + 拆分说明**: 本仓库已从 Python 移植到 V, 并拆分为两个平行项目 —— **`conger`(本仓库) 为通用 SPN / 结构学习内核** (模块 `conger`: MixtureSPN + 通用结构学习框架 + 模板学习 + 模型内存 / 持久化 + 纯数学 / MLX 工具 + 非视觉验证域), **`conger-vision`(平行项目) 为视觉层** (模块 `conger_vision`: cga 渲染、Codebook、Riesz 前端、立体几何、场景重建、纹理、外观 / ECM、`InverseApp`, `import conger` 依赖内核)。
+>
+> 本文档记录的是全系统(内核 + 视觉)的机制决策, 仍准确: 文中 `src/*.py` 路径对应 `conger` 根目录同名 `*.v`(内核部分) 或 `conger-vision` 根目录同名 `*.v`(视觉部分); `python src/x.py` / `inverse.py` 命令对应两个仓库各自的 `make test` 与 `conger-vision` 的 `InverseApp.run()` 主链路; argparse CLI / 基准 / 纹理 numpy 实验脚本未移植。
 
 SPN 逆渲染研究: 左右两张二维立体图像 → Riesz 全分辨率特征 → 完整
 `cga.Scene` 重建 (含光照; `--scene-family layered` 启用双图元遮挡/前后层实验族)。

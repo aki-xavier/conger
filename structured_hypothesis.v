@@ -2,17 +2,18 @@ module conger
 
 // structured_hypothesis.v — domain-independent structured hypothesis / posterior
 // return object (V port of src/structured_hypothesis.py).
-import cga
 import mlx
 
-struct HypothesisCandidate {
+pub struct HypothesisCandidate {
+pub:
 	params      []f64
 	probability f64
 	residual    f64
 }
 
-struct StructuredHypothesis {
-	scene                 ?cga.Scene
+pub struct StructuredHypothesis {
+pub:
+	scene                 voidptr // opaque domain payload (vision: &cga.Scene); 0 = none
 	params                []f64
 	spn_posterior         ?mlx.Array
 	structure_id          string = 'unknown'
@@ -38,7 +39,7 @@ struct StructuredHypothesis {
 }
 
 // new_hypothesis returns a StructuredHypothesis with the visual factor defaults.
-fn new_hypothesis() StructuredHypothesis {
+pub fn new_hypothesis() StructuredHypothesis {
 	return StructuredHypothesis{
 		factor_sizes:   [3, 6, 3, 3]
 		factor_indices: [0, 5, 6, 7]
@@ -46,7 +47,7 @@ fn new_hypothesis() StructuredHypothesis {
 }
 
 // with_structure returns a copy with the structure-id/posterior fields replaced.
-fn (est StructuredHypothesis) with_structure(id string, sp f64, sps map[string]f64) StructuredHypothesis {
+pub fn (est StructuredHypothesis) with_structure(id string, sp f64, sps map[string]f64) StructuredHypothesis {
 	return StructuredHypothesis{
 		scene:                 est.scene
 		params:                est.params
@@ -75,7 +76,7 @@ fn (est StructuredHypothesis) with_structure(id string, sp f64, sps map[string]f
 }
 
 // with_residual_geometry returns a copy with the residual / geometry-cost fields replaced.
-fn (est StructuredHypothesis) with_residual_geometry(r f64, gc f64) StructuredHypothesis {
+pub fn (est StructuredHypothesis) with_residual_geometry(r f64, gc f64) StructuredHypothesis {
 	return StructuredHypothesis{
 		scene:                 est.scene
 		params:                est.params
@@ -104,7 +105,7 @@ fn (est StructuredHypothesis) with_residual_geometry(r f64, gc f64) StructuredHy
 }
 
 // factor_marginals returns the per-factor marginal posteriors.
-fn (h StructuredHypothesis) factor_marginals() []mlx.Array {
+pub fn (h StructuredHypothesis) factor_marginals() []mlx.Array {
 	sizes := if h.factor_sizes.len > 0 { h.factor_sizes } else { [3, 6, 3, 3] }
 	indices := if h.factor_indices.len > 0 { h.factor_indices } else { [0, 5, 6, 7] }
 	mut vals := [][]f64{len: sizes.len}

@@ -15,14 +15,14 @@ import math
 
 // Rng is a deterministic xorshift64* generator (statistical stand-in for
 // numpy.random.default_rng).
-struct Rng {
-mut:
+pub struct Rng {
+pub mut:
 	state u64
 }
 
 // new_rng creates a deterministic generator from a 64-bit seed (0 is remapped
 // so that seed 0 is still usable).
-fn new_rng(seed u64) Rng {
+pub fn new_rng(seed u64) Rng {
 	mut s := seed
 	if s == 0 {
 		s = 0x9e3779b97f4a7c15
@@ -33,7 +33,7 @@ fn new_rng(seed u64) Rng {
 }
 
 @[inline]
-fn (mut r Rng) next_u64() u64 {
+pub fn (mut r Rng) next_u64() u64 {
 	mut x := r.state
 	x ^= x >> 12
 	x ^= x << 25
@@ -44,17 +44,17 @@ fn (mut r Rng) next_u64() u64 {
 
 // f64 returns a uniform float in [0, 1).
 @[inline]
-fn (mut r Rng) f64() f64 {
+pub fn (mut r Rng) f64() f64 {
 	return f64(r.next_u64() >> 11) * (1.0 / 9007199254740992.0)
 }
 
 // uniform returns a uniform float in [lo, hi).
-fn (mut r Rng) uniform(lo f64, hi f64) f64 {
+pub fn (mut r Rng) uniform(lo f64, hi f64) f64 {
 	return lo + (hi - lo) * r.f64()
 }
 
 // normal returns a normally distributed value via Box-Muller.
-fn (mut r Rng) normal(mu f64, sigma f64) f64 {
+pub fn (mut r Rng) normal(mu f64, sigma f64) f64 {
 	u1 := math.max(r.f64(), 1e-12)
 	u2 := r.f64()
 	z := math.sqrt(-2.0 * math.log(u1)) * math.cos(2.0 * math.pi * u2)
@@ -62,7 +62,7 @@ fn (mut r Rng) normal(mu f64, sigma f64) f64 {
 }
 
 // py_round implements Python's round() (banker's rounding, half to even).
-fn py_round(x f64) int {
+pub fn py_round(x f64) int {
 	floor := int(math.floor(x))
 	frac := x - f64(floor)
 	if frac < 0.5 {
@@ -78,7 +78,7 @@ fn py_round(x f64) int {
 }
 
 // linspace returns n evenly spaced values in [start, stop].
-fn linspace(start f64, stop f64, n int) []f64 {
+pub fn linspace(start f64, stop f64, n int) []f64 {
 	mut out := []f64{len: n}
 	if n == 1 {
 		out[0] = start
@@ -92,7 +92,7 @@ fn linspace(start f64, stop f64, n int) []f64 {
 }
 
 // arange_f64 returns [0, 1, ..., n-1] as f64.
-fn arange_f64(n int) []f64 {
+pub fn arange_f64(n int) []f64 {
 	mut out := []f64{len: n}
 	for i in 0 .. n {
 		out[i] = f64(i)
@@ -101,7 +101,7 @@ fn arange_f64(n int) []f64 {
 }
 
 // diff returns forward differences a[i+1]-a[i].
-fn diff(a []f64) []f64 {
+pub fn diff(a []f64) []f64 {
 	mut out := []f64{len: a.len - 1}
 	for i in 0 .. a.len - 1 {
 		out[i] = a[i + 1] - a[i]
@@ -110,7 +110,7 @@ fn diff(a []f64) []f64 {
 }
 
 // roll shifts a 1D array by `shift` positions (wraps around), like np.roll(a, shift, axis=0).
-fn roll(a []f64, shift int) []f64 {
+pub fn roll(a []f64, shift int) []f64 {
 	n := a.len
 	mut out := []f64{len: n}
 	for i in 0 .. n {
@@ -121,7 +121,7 @@ fn roll(a []f64, shift int) []f64 {
 }
 
 // solve_2x2 solves A x = b for a 2x2 matrix given row-major.
-fn solve_2x2(a [][]f64, b []f64) []f64 {
+pub fn solve_2x2(a [][]f64, b []f64) []f64 {
 	det := a[0][0] * a[1][1] - a[0][1] * a[1][0]
 	return [
 		(b[0] * a[1][1] - b[1] * a[0][1]) / det,
@@ -131,7 +131,7 @@ fn solve_2x2(a [][]f64, b []f64) []f64 {
 
 // solve_n solves a dense n×n linear system via Gaussian elimination with
 // partial pivoting.
-fn solve_n(a [][]f64, b []f64) []f64 {
+pub fn solve_n(a [][]f64, b []f64) []f64 {
 	n := b.len
 	mut aug := [][]f64{len: n, init: []f64{len: n + 1}}
 	for i in 0 .. n {
@@ -175,7 +175,7 @@ fn solve_n(a [][]f64, b []f64) []f64 {
 
 // lstsq_2 solves a two-column least-squares problem via normal equations
 // (XᵀX) c = Xᵀy. Used by the 2-parameter linear fits (Retinex, occlusion).
-fn lstsq_2(x [][]f64, y []f64) []f64 {
+pub fn lstsq_2(x [][]f64, y []f64) []f64 {
 	n := x.len
 	mut xtx := [][]f64{len: 2, init: []f64{len: 2}}
 	mut xty := []f64{len: 2}
@@ -195,7 +195,7 @@ fn lstsq_2(x [][]f64, y []f64) []f64 {
 // kabsch_2d returns the least-squares rigid transform (R, t) mapping
 // corresponding points p → q (q ≈ R·p + t). For 2D the optimal rotation angle
 // is atan2(H01-H10, H00+H11), which is exactly the SVD-based Kabsch result.
-fn kabsch_2d(p [][]f64, q [][]f64) ([][]f64, []f64) {
+pub fn kabsch_2d(p [][]f64, q [][]f64) ([][]f64, []f64) {
 	n := p.len
 	mut pm := []f64{len: 2}
 	mut qm := []f64{len: 2}
@@ -235,7 +235,7 @@ fn kabsch_2d(p [][]f64, q [][]f64) ([][]f64, []f64) {
 }
 
 // f32s converts []f64 to []f32 (test/data helper).
-fn f32s(a []f64) []f32 {
+pub fn f32s(a []f64) []f32 {
 	mut out := []f32{len: a.len}
 	for i, v in a {
 		out[i] = f32(v)
@@ -244,11 +244,16 @@ fn f32s(a []f64) []f32 {
 }
 
 // fmin2 returns the smaller of two f64 values.
-fn fmin2(a f64, b f64) f64 {
+pub fn fmin2(a f64, b f64) f64 {
 	return if a < b { a } else { b }
 }
 
+// fmax2 returns the larger of two f64 values.
+pub fn fmax2(a f64, b f64) f64 {
+	return if a > b { a } else { b }
+}
+
 // clamp01 clamps x into [0, 1].
-fn clamp01(x f64) f64 {
+pub fn clamp01(x f64) f64 {
 	return fmax2(0.0, fmin2(x, 1.0))
 }

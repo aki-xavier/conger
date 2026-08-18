@@ -3,7 +3,8 @@ module conger
 // template_grammar.v — bounded geometric template grammar (V port of
 // src/template_grammar.py).
 
-struct TemplateRule {
+pub struct TemplateRule {
+pub:
 	operation  string
 	base_kind  int
 	part_kind  int = -1 // -1 = None
@@ -11,20 +12,21 @@ struct TemplateRule {
 	depth      int = 1
 }
 
-fn (r TemplateRule) signature() string {
+pub fn (r TemplateRule) signature() string {
 	if r.part_kind < 0 {
 		return 'primitive:${r.base_kind}'
 	}
 	return '${r.operation}:${r.base_kind}:${r.part_kind}'
 }
 
-struct TemplateGrammar {
+pub struct TemplateGrammar {
+pub:
 	operations []string = ['attach']
 	max_depth  int      = 2
 	kinds      []int
 }
 
-fn new_template_grammar(operations []string, max_depth int, kinds []int) TemplateGrammar {
+pub fn new_template_grammar(operations []string, max_depth int, kinds []int) TemplateGrammar {
 	for op in operations {
 		if op != 'attach' && op != 'layer' && op != 'mirror' && op != 'repeat' {
 			panic('unknown template operation: ${op}')
@@ -42,7 +44,7 @@ fn new_template_grammar(operations []string, max_depth int, kinds []int) Templat
 	}
 }
 
-fn (g TemplateGrammar) op_complexity(op string) (f64, bool) {
+pub fn (g TemplateGrammar) op_complexity(op string) (f64, bool) {
 	match op {
 		'attach' { return 1.5, false }
 		'layer' { return 2.0, false }
@@ -53,7 +55,7 @@ fn (g TemplateGrammar) op_complexity(op string) (f64, bool) {
 }
 
 // primitives returns the depth=1 primitive rules.
-fn (g TemplateGrammar) primitives() []TemplateRule {
+pub fn (g TemplateGrammar) primitives() []TemplateRule {
 	mut out := []TemplateRule{}
 	for k in g.kinds {
 		out << TemplateRule{
@@ -68,7 +70,7 @@ fn (g TemplateGrammar) primitives() []TemplateRule {
 }
 
 // composites returns the depth=2 primitive∘primitive rules.
-fn (g TemplateGrammar) composites() []TemplateRule {
+pub fn (g TemplateGrammar) composites() []TemplateRule {
 	mut out := []TemplateRule{}
 	for op in g.operations {
 		complexity, same_kind := g.op_complexity(op)
@@ -89,7 +91,7 @@ fn (g TemplateGrammar) composites() []TemplateRule {
 }
 
 // rules returns the bounded search space (depth1 primitives + optional depth2).
-fn (g TemplateGrammar) rules() []TemplateRule {
+pub fn (g TemplateGrammar) rules() []TemplateRule {
 	mut out := g.primitives()
 	if g.max_depth >= 2 {
 		out << g.composites()

@@ -10,7 +10,7 @@ import mlx
 
 // nonzero_indices returns the flat int32 indices where a boolean array is true.
 // Port of Utils.nonzero (the argsort trick: MLX has no boolean indexing).
-fn nonzero_indices(sel mlx.Array) mlx.Array {
+pub fn nonzero_indices(sel mlx.Array) mlx.Array {
 	n := int(sel.size())
 	flat := sel.reshape([n])
 	k := int(flat.astype(.float32).sum().item_f32())
@@ -20,24 +20,24 @@ fn nonzero_indices(sel mlx.Array) mlx.Array {
 }
 
 // axis_var returns the population variance along `axis` (ddof=0), keepdims.
-fn axis_var(x mlx.Array, axis int) mlx.Array {
+pub fn axis_var(x mlx.Array, axis int) mlx.Array {
 	return x.var_axis(axis, true, 0)
 }
 
 // axis_std returns the population standard deviation along `axis`, keepdims.
-fn axis_std(x mlx.Array, axis int) mlx.Array {
+pub fn axis_std(x mlx.Array, axis int) mlx.Array {
 	return x.std_axis(axis, true, 0)
 }
 
 // axis_logsumexp returns log(Σ exp(x)) along `axis`, keepdims, computed stably.
-fn axis_logsumexp(x mlx.Array, axis int) mlx.Array {
+pub fn axis_logsumexp(x mlx.Array, axis int) mlx.Array {
 	m := x.max_axis(axis, true)
 	return m.add(x.subtract(m).exp().sum_axis(axis, true).log())
 }
 
 // split_keys splits a PRNG key into `num` independent keys (matching the Python
 // reference's mx.random.split(key, num)).
-fn split_keys(seed u64, num int) []mlx.Array {
+pub fn split_keys(seed u64, num int) []mlx.Array {
 	keys := mlx.random_split_n(mlx.random_key(seed), num)
 	mut out := []mlx.Array{len: num}
 	for i in 0 .. num {
@@ -47,7 +47,7 @@ fn split_keys(seed u64, num int) []mlx.Array {
 }
 
 // arr32 builds a float32 array from f64 literals (avoiding f32() casts everywhere).
-fn arr32(vals []f64, shape []int) mlx.Array {
+pub fn arr32(vals []f64, shape []int) mlx.Array {
 	mut f := []f32{len: vals.len}
 	for i, v in vals {
 		f[i] = f32(v)
@@ -56,24 +56,24 @@ fn arr32(vals []f64, shape []int) mlx.Array {
 }
 
 // sel1 returns a length-1 int32 index array selecting element `n` along an axis.
-fn sel1(n int) mlx.Array {
+pub fn sel1(n int) mlx.Array {
 	return mlx.array_i32([i32(n)], [1])
 }
 
 // col returns a true 1-D column j of an array (take_axis keeps the index dim,
 // so squeeze it away to match Python's a[:, j]).
-fn col(a mlx.Array, j int) mlx.Array {
+pub fn col(a mlx.Array, j int) mlx.Array {
 	return a.take_axis(sel1(j), 1).squeeze_axis(1)
 }
 
 // slice_rows returns rows [start, end) of a 2-D array.
-fn slice_rows(x mlx.Array, start int, end int) mlx.Array {
+pub fn slice_rows(x mlx.Array, start int, end int) mlx.Array {
 	return x.take_axis(mlx.arange(f64(start), f64(end), 1.0, .int32), 0)
 }
 
 // eigh_cpu returns (eigenvalues ascending, eigenvectors) of a symmetric matrix,
 // evaluated on the CPU stream (MLX has no GPU eigendecomposition).
-fn eigh_cpu(g mlx.Array) (mlx.Array, mlx.Array) {
+pub fn eigh_cpu(g mlx.Array) (mlx.Array, mlx.Array) {
 	mlx.use_cpu()
 	lam, u := g.eigh('L')
 	mlx.use_gpu()
@@ -82,7 +82,7 @@ fn eigh_cpu(g mlx.Array) (mlx.Array, mlx.Array) {
 
 // roll_axis rolls a 2-D array along `axis` by `shift` (wrapping), matching
 // numpy's mx.roll(lum, shift, axis). shift = -1 pulls the next row/column in.
-fn roll_axis(x mlx.Array, shift int, axis int) mlx.Array {
+pub fn roll_axis(x mlx.Array, shift int, axis int) mlx.Array {
 	n := x.dim(axis)
 	mut idx := []i32{len: n}
 	for i in 0 .. n {
@@ -100,7 +100,7 @@ fn roll_axis(x mlx.Array, shift int, axis int) mlx.Array {
 // [top, top+patch.dim(0)) and cols [left, left+patch.dim(1)) replaced by
 // `patch` (both must share all trailing dims beyond axis 1). This is the
 // immutable-mlx replacement for numpy's `base[top:top+ph, left:left+pw] = patch`.
-fn overwrite_region(base mlx.Array, patch mlx.Array, top int, left int) mlx.Array {
+pub fn overwrite_region(base mlx.Array, patch mlx.Array, top int, left int) mlx.Array {
 	h := base.dim(0)
 	w := base.dim(1)
 	ih := patch.dim(0)
@@ -115,7 +115,7 @@ fn overwrite_region(base mlx.Array, patch mlx.Array, top int, left int) mlx.Arra
 }
 
 // complex_from builds a complex64 array re + i·im from two real arrays.
-fn complex_from(re mlx.Array, im mlx.Array) mlx.Array {
+pub fn complex_from(re mlx.Array, im mlx.Array) mlx.Array {
 	re_c := re.astype(.complex64)
 	im_c := im.astype(.complex64)
 	i := mlx.complex_scalar(0.0, 1.0)
@@ -123,16 +123,16 @@ fn complex_from(re mlx.Array, im mlx.Array) mlx.Array {
 }
 
 // fft2 returns the 2-D complex FFT (backward norm, matching mx.fft.fft2).
-fn fft2(x mlx.Array) mlx.Array {
+pub fn fft2(x mlx.Array) mlx.Array {
 	return x.fftn([x.dim(0), x.dim(1)], [0, 1], .backward)
 }
 
 // ifft2 returns the 2-D complex inverse FFT (backward norm, matching mx.fft.ifft2).
-fn ifft2(x mlx.Array) mlx.Array {
+pub fn ifft2(x mlx.Array) mlx.Array {
 	return x.ifftn([x.dim(0), x.dim(1)], [0, 1], .backward)
 }
 
 // pad_edge pads a 2-D array by `p` on both axes with edge mode.
-fn pad_edge(x mlx.Array, p int) mlx.Array {
+pub fn pad_edge(x mlx.Array, p int) mlx.Array {
 	return x.pad([0, 1], [p, p], [p, p], mlx.f32_scalar(0.0), 'edge')
 }

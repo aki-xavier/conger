@@ -6,7 +6,7 @@ import math
 import mlx
 
 // split_save writes the whitening transform and component table to separate files.
-fn split_save(m MixtureSPN, path string) (string, string) {
+pub fn split_save(m MixtureSPN, path string) (string, string) {
 	t_path := path + '.transform.safetensors'
 	c_path := path + '.components.safetensors'
 	mut tens := mlx.new_map_string_to_array()
@@ -28,7 +28,7 @@ fn split_save(m MixtureSPN, path string) (string, string) {
 }
 
 // load_transform loads only the whitening transform (f_mean, basis).
-fn load_transform(path string) (mlx.Array, mlx.Array) {
+pub fn load_transform(path string) (mlx.Array, mlx.Array) {
 	mlx.use_cpu()
 	tens, _ := mlx.load_safetensors(path + '.transform.safetensors')
 	f_mean := tens.get('f_mean')
@@ -40,14 +40,15 @@ fn load_transform(path string) (mlx.Array, mlx.Array) {
 }
 
 // ModelMeta holds the component-file metadata.
-struct ModelMeta {
+pub struct ModelMeta {
+pub:
 	rel_floor f64
 	cat_sizes []int
 	n_stratum int
 }
 
 // load_components loads only the component table + metadata (no basis).
-fn load_components(path string) (map[string]mlx.Array, ModelMeta) {
+pub fn load_components(path string) (map[string]mlx.Array, ModelMeta) {
 	mlx.use_cpu()
 	tens, meta := mlx.load_safetensors(path + '.components.safetensors')
 	mut comp := map[string]mlx.Array{}
@@ -66,7 +67,7 @@ fn load_components(path string) (map[string]mlx.Array, ModelMeta) {
 }
 
 // assemble builds a full MixtureSPN from split files.
-fn assemble_model(path string) MixtureSPN {
+pub fn assemble_model(path string) MixtureSPN {
 	f_mean, basis := load_transform(path)
 	comp, meta := load_components(path)
 	mut csizes := meta.cat_sizes.clone()
@@ -90,7 +91,7 @@ fn assemble_model(path string) MixtureSPN {
 }
 
 // truncate_basis keeps the highest-variance d_max columns.
-fn truncate_basis(m MixtureSPN, d_max int) MixtureSPN {
+pub fn truncate_basis(m MixtureSPN, d_max int) MixtureSPN {
 	d := m.f_mu.dim(1)
 	dm := min_i(max_i(1, d_max), d)
 	if dm == d {
@@ -115,7 +116,7 @@ fn truncate_basis(m MixtureSPN, d_max int) MixtureSPN {
 }
 
 // coreset returns k farthest-point row indices of Z.
-fn coreset(z mlx.Array, k int, rng mlx.Array) mlx.Array {
+pub fn coreset(z mlx.Array, k int, rng mlx.Array) mlx.Array {
 	n := z.dim(0)
 	if k >= n {
 		return mlx.arange(0.0, f64(n), 1.0, .int32)
@@ -138,7 +139,7 @@ fn coreset(z mlx.Array, k int, rng mlx.Array) mlx.Array {
 }
 
 // forget_components bounds K to k_max (coreset/random), per-stratum proportional.
-fn forget_components(m MixtureSPN, k_max int, policy string, seed u64) MixtureSPN {
+pub fn forget_components(m MixtureSPN, k_max int, policy string, seed u64) MixtureSPN {
 	k := m.f_mu.dim(0)
 	km := max_i(m.n_stratum, min_i(k_max, k))
 	if km >= k {
@@ -190,7 +191,7 @@ fn forget_components(m MixtureSPN, k_max int, policy string, seed u64) MixtureSP
 }
 
 // model_size_mb returns the total tensor bytes in MB.
-fn model_size_mb(m MixtureSPN) f64 {
+pub fn model_size_mb(m MixtureSPN) f64 {
 	mut tot := usize(0)
 	tot += m.log_w.size() * m.log_w.itemsize()
 	tot += m.f_mu.size() * m.f_mu.itemsize()
@@ -206,6 +207,6 @@ fn model_size_mb(m MixtureSPN) f64 {
 	return f64(tot) / 1e6
 }
 
-fn max_i(a int, b int) int {
+pub fn max_i(a int, b int) int {
 	return if a > b { a } else { b }
 }

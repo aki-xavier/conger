@@ -4,7 +4,8 @@ module conger
 // candidate training registration (V port of src/structure_birth.py).
 import mlx
 
-struct StructureCase {
+pub struct StructureCase {
+pub:
 	fl           mlx.Array
 	fr           mlx.Array
 	residuals    map[string]f64
@@ -13,7 +14,8 @@ struct StructureCase {
 	structure_id string = 'unknown'
 }
 
-struct StructureBirthRequest {
+pub struct StructureBirthRequest {
+pub:
 	cases               []StructureCase
 	residual_mean       f64
 	best_posterior_mean f64
@@ -21,17 +23,18 @@ struct StructureBirthRequest {
 	proposals           []TemplateProposal
 }
 
-struct StructureBirthController {
+pub struct StructureBirthController {
+pub:
 	min_cases int = 3
 	max_cases int = 128
 	proposer  ?TemplateProposer
-mut:
+pub mut:
 	cases []StructureCase
 }
 
 // observe records one gate result; returns none until the evidence threshold is
 // reached, then a birth request (and clears the accumulated cases).
-fn (mut b StructureBirthController) observe(decision GenericStructureDecision, fl mlx.Array, fr mlx.Array) ?StructureBirthRequest {
+pub fn (mut b StructureBirthController) observe(decision GenericStructureDecision, fl mlx.Array, fr mlx.Array) ?StructureBirthRequest {
 	if !decision.needs_new_structure {
 		return none
 	}

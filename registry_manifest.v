@@ -6,20 +6,22 @@ import json2
 import os
 
 // RegisteredChildTemplate records a trained dynamic child template.
-struct RegisteredChildTemplate {
+pub struct RegisteredChildTemplate {
+pub:
 	spec       ChildTemplateSpec
 	model_path string
 }
 
 // RegistryManifest is the strong-typed registry_manifest.json.
-struct RegistryManifest {
+pub struct RegistryManifest {
+pub:
 	children []RegisteredChildTemplate
 	pending  []ChildTemplateSpec
 	version  int = 1
 }
 
 // rm_meta_to_any converts a MetaValue to a json2.Any tree node.
-fn rm_meta_to_any(v MetaValue) json2.Any {
+pub fn rm_meta_to_any(v MetaValue) json2.Any {
 	match v {
 		string {
 			return json2.Any(v)
@@ -48,7 +50,7 @@ fn rm_meta_to_any(v MetaValue) json2.Any {
 }
 
 // rm_meta_from_any converts a json2.Any tree node back to a MetaValue.
-fn rm_meta_from_any(a json2.Any) MetaValue {
+pub fn rm_meta_from_any(a json2.Any) MetaValue {
 	if a is string {
 		return MetaValue(a as string)
 	}
@@ -70,7 +72,7 @@ fn rm_meta_from_any(a json2.Any) MetaValue {
 }
 
 // rm_spec_to_any serialises a ChildTemplateSpec.
-fn rm_spec_to_any(s ChildTemplateSpec) map[string]json2.Any {
+pub fn rm_spec_to_any(s ChildTemplateSpec) map[string]json2.Any {
 	mut c := map[string]json2.Any{}
 	for k, v in s.constraints {
 		c[k] = rm_meta_to_any(v)
@@ -90,7 +92,7 @@ fn rm_spec_to_any(s ChildTemplateSpec) map[string]json2.Any {
 }
 
 // rm_spec_from_any deserialises a ChildTemplateSpec.
-fn rm_spec_from_any(m map[string]json2.Any) ChildTemplateSpec {
+pub fn rm_spec_from_any(m map[string]json2.Any) ChildTemplateSpec {
 	mut constraints := map[string]MetaValue{}
 	cm := m['constraints'] or { json2.Any(map[string]json2.Any{}) }.as_map()
 	for k, v in cm {
@@ -111,7 +113,7 @@ fn rm_spec_from_any(m map[string]json2.Any) ChildTemplateSpec {
 }
 
 // rm_manifest_to_any serialises the whole manifest.
-fn rm_manifest_to_any(mf RegistryManifest) map[string]json2.Any {
+pub fn rm_manifest_to_any(mf RegistryManifest) map[string]json2.Any {
 	mut children := []json2.Any{}
 	for c in mf.children {
 		children << json2.Any({
@@ -131,7 +133,7 @@ fn rm_manifest_to_any(mf RegistryManifest) map[string]json2.Any {
 }
 
 // rm_manifest_from_any deserialises the whole manifest.
-fn rm_manifest_from_any(m map[string]json2.Any) RegistryManifest {
+pub fn rm_manifest_from_any(m map[string]json2.Any) RegistryManifest {
 	mut children := []RegisteredChildTemplate{}
 	ca := m['children'] or { json2.Any([]json2.Any{}) }.as_array()
 	for child in ca {
@@ -155,7 +157,7 @@ fn rm_manifest_from_any(m map[string]json2.Any) RegistryManifest {
 }
 
 // rm_save writes the manifest to path (creating parent directories).
-fn rm_save(mf RegistryManifest, path string) {
+pub fn rm_save(mf RegistryManifest, path string) {
 	dir := os.dir(path)
 	if dir != '.' && dir != '' && !os.exists(dir) {
 		os.mkdir_all(dir, os.MkdirParams{}) or { panic(err) }
@@ -165,7 +167,7 @@ fn rm_save(mf RegistryManifest, path string) {
 }
 
 // rm_load reads and parses the manifest at path.
-fn rm_load(path string) RegistryManifest {
+pub fn rm_load(path string) RegistryManifest {
 	content := os.read_file(path) or { panic(err) }
 	decoded := json2.decode[map[string]json2.Any](content) or { panic(err) }
 	return rm_manifest_from_any(decoded)
