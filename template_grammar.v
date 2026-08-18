@@ -32,7 +32,10 @@ pub fn new_template_grammar(operations []string, max_depth int, kinds []int) Tem
 			panic('unknown template operation: ${op}')
 		}
 	}
-	assert max_depth >= 1
+	// NB: explicit panic, not `assert` — V strips asserts in `-prod` builds.
+	if max_depth < 1 {
+		panic('new_template_grammar: max_depth must be >= 1 (got ${max_depth})')
+	}
 	mut ks := kinds.clone()
 	if ks.len == 0 {
 		ks = [0, 1, 2]

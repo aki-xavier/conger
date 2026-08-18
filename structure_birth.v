@@ -33,8 +33,10 @@ pub mut:
 }
 
 // observe records one gate result; returns none until the evidence threshold is
-// reached, then a birth request (and clears the accumulated cases).
-pub fn (mut b StructureBirthController) observe(decision GenericStructureDecision, fl mlx.Array, fr mlx.Array) ?StructureBirthRequest {
+// reached, then a birth request (and clears the accumulated cases). Generic over
+// the scene payload `T` only because the gate decision carries it; the birth
+// bookkeeping itself is scene-agnostic.
+pub fn (mut b StructureBirthController) observe[T](decision GenericStructureDecision[T], fl mlx.Array, fr mlx.Array) ?StructureBirthRequest {
 	if !decision.needs_new_structure {
 		return none
 	}
@@ -56,8 +58,8 @@ pub fn (mut b StructureBirthController) observe(decision GenericStructureDecisio
 	mut rsum := 0.0
 	mut psum := 0.0
 	for c in cases {
-		rsum += min_of(c.residuals)
-		psum += max_of(c.posterior)
+		rsum += min_of(c.residuals) or { 0.0 }
+		psum += max_of(c.posterior) or { 0.0 }
 	}
 	residual_mean := rsum / f64(cases.len)
 	best_posterior_mean := psum / f64(cases.len)

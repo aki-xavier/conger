@@ -5,17 +5,17 @@ module conger
 import math
 import mlx
 
-fn generic_registry() GenericExpertRegistry {
-	mut experts := map[string]GenericExpert{}
+fn generic_registry() GenericExpertRegistry[voidptr] {
+	mut experts := map[string]GenericExpert[voidptr]{}
 	experts['linear'] = train_toy_expert('linear', 192, 1)
 	experts['sine'] = train_toy_expert('sine', 192, 2)
-	gate := GenericStructureGate{
+	gate := GenericStructureGate[voidptr]{
 		birth_residual: 0.30
 	}
 	birth := &StructureBirthController{
 		min_cases: 2
 	}
-	return GenericExpertRegistry{
+	return GenericExpertRegistry[voidptr]{
 		experts:          experts
 		gate:             gate
 		birth_controller: birth
@@ -43,25 +43,25 @@ fn test_nonvisual_structure_gating() {
 }
 
 fn test_template_complexity_penalty() {
-	simple := StructuredHypothesis{
+	simple := StructuredHypothesis[voidptr]{
 		structure_id: 'simple'
 		params:       [0.0]
 		residual:     0.20
 		complexity:   1.0
 	}
-	complex_ := StructuredHypothesis{
+	complex_ := StructuredHypothesis[voidptr]{
 		structure_id: 'complex'
 		params:       [0.0]
 		residual:     0.19
 		complexity:   10.0
 	}
-	mut estimates := map[string]StructuredHypothesis{}
+	mut estimates := map[string]StructuredHypothesis[voidptr]{}
 	estimates['simple'] = simple
 	estimates['complex'] = complex_
-	raw := GenericStructureGate{}.decide(estimates)
+	raw := GenericStructureGate[voidptr]{}.decide(estimates)
 	assert raw.estimate.structure_id == 'complex'
 
-	gate := GenericStructureGate{
+	gate := GenericStructureGate[voidptr]{
 		birth_residual:    0.15
 		complexity_weight: 0.1
 	}

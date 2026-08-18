@@ -148,7 +148,12 @@ pub fn forget_components(m MixtureSPN, k_max int, policy string, seed u64) Mixtu
 	stratum := m.cat_logp.take_axis(mlx.arange(0.0, f64(m.n_stratum), 1.0, .int32), 1).argmax_axis(1,
 		false)
 	rng := mlx.random_key(seed)
-	mut kept := []int{}
+	// Exact proportional allocation (largest-remainder method): the kept total
+	// must be exactly `km`. Per-stratum independent rounding could overshoot or
+	// undershoot the target.
+	mut sels := []mlx.Array{}
+	mut njs := []int{}
+	mut quotas := []f64{}
 	for j in 0 .. m.n_stratum {
 		sel := nonzero_indices(stratum.equal(mlx.int_scalar(j)))
 		nj := sel.dim(0)
@@ -157,8 +162,66 @@ pub fn forget_components(m MixtureSPN, k_max int, policy string, seed u64) Mixtu
 			// split is over the *observed* strata only)
 			continue
 		}
-		mut kj := max_i(1, py_round(f64(km) * f64(nj) / f64(k)))
-		kj = min_i(kj, nj)
+		sels << sel
+		njs << nj
+		quotas << f64(km) * f64(nj) / f64(k)
+	}
+	ns := sels.len
+	mut alloc := []int{len: ns}
+	mut frac := []f64{len: ns}
+	mut total := 0
+	for i in 0 .. ns {
+		mut base := int(quotas[i]) // floor quota
+		if base < 1 {
+			base = 1 // keep every observed stratum represented
+		}
+		if base > njs[i] {
+			base = njs[i]
+		}
+		alloc[i] = base
+		total += base
+		frac[i] = quotas[i] - f64(int(quotas[i]))
+	}
+	// grow to exactly km by largest fractional remainder
+	for total < km {
+		mut best := -1
+		mut best_frac := 0.0
+		mut first := true
+		for i in 0 .. ns {
+			if alloc[i] < njs[i] && (first || frac[i] > best_frac) {
+				best_frac = frac[i]
+				best = i
+				first = false
+			}
+		}
+		if best < 0 {
+			break
+		}
+		alloc[best]++
+		total++
+	}
+	// trim back to exactly km (defensive: only if floor→at-least-1 overshot)
+	for total > km {
+		mut best := -1
+		mut best_frac := 0.0
+		mut first := true
+		for i in 0 .. ns {
+			if alloc[i] > 1 && (first || frac[i] < best_frac) {
+				best_frac = frac[i]
+				best = i
+				first = false
+			}
+		}
+		if best < 0 {
+			break
+		}
+		alloc[best]--
+		total--
+	}
+	mut kept := []int{}
+	for i in 0 .. ns {
+		sel := sels[i]
+		kj := alloc[i]
 		mut pick := mlx.Array{}
 		if policy == 'random' {
 			pick = mlx.random_permutation(sel, 0, rng).take(mlx.arange(0.0, f64(kj), 1.0, .int32))

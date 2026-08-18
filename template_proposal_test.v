@@ -12,10 +12,6 @@ fn (s StaticProposer) propose(cases []StructureCase) []TemplateProposal {
 	for i in 0 .. 14 {
 		params[i] = f64(i)
 	}
-	mut delta := map[string]MetaValue{}
-	delta['relation'] = 'attach'
-	mut metadata := map[string]MetaValue{}
-	metadata['n_cases'] = cases.len
 	return [
 		TemplateProposal{
 			family:        'composite'
@@ -25,19 +21,23 @@ fn (s StaticProposer) propose(cases []StructureCase) []TemplateProposal {
 			complexity:    1.5
 			score:         2.5
 			parent_family: 'layered'
-			delta:         delta
-			metadata:      metadata
+			delta:         TemplateDelta{
+				relation: 'attach'
+			}
+			metadata:      TemplateMetadata{
+				n_cases: cases.len
+			}
 		},
 	]
 }
 
 fn test_birth_request_carries_template_proposals() {
-	estimate := StructuredHypothesis{
+	estimate := StructuredHypothesis[voidptr]{
 		structure_id: 'single'
 		params:       [0.0]
 		residual:     10.0
 	}
-	decision := GenericStructureDecision{
+	decision := GenericStructureDecision[voidptr]{
 		estimate:            estimate
 		posterior:           {
 			'single': 0.4
@@ -61,7 +61,7 @@ fn test_birth_request_carries_template_proposals() {
 	assert req.proposals.len == 1
 	assert req.cases[0].structure_id == 'single'
 	assert req.proposals[0].parent_family == 'layered'
-	assert meta_str(req.proposals[0].delta, 'relation') == 'attach'
-	assert meta_int(req.proposals[0].metadata, 'n_cases') == 2
+	assert req.proposals[0].delta.relation == 'attach'
+	assert (req.proposals[0].metadata.n_cases or { 0 }) == 2
 	assert req.reason.contains('1 个模板提案')
 }

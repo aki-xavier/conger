@@ -10,7 +10,7 @@ pub:
 	operation     string
 	complexity    f64
 	generation    int
-	delta         map[string]MetaValue
+	delta         TemplateConstraints
 }
 
 pub fn (t TemplateLineage) is_root() bool {
@@ -30,7 +30,7 @@ pub:
 	family         string
 	parent_family  string
 	operation      string
-	constraints    map[string]MetaValue
+	constraints    TemplateConstraints
 	complexity     f64
 	generation     int
 	evidence_count int
@@ -40,17 +40,13 @@ pub:
 
 // lineage returns the registrable lineage object for this spec.
 pub fn (c ChildTemplateSpec) lineage() TemplateLineage {
-	mut delta := map[string]MetaValue{}
-	for k, v in c.constraints {
-		delta[k] = v
-	}
 	return TemplateLineage{
 		family:        c.name
 		parent_family: c.parent_family
 		operation:     c.operation
 		complexity:    c.complexity
 		generation:    c.generation
-		delta:         delta
+		delta:         c.constraints
 	}
 }
 
@@ -67,41 +63,41 @@ pub fn single_lineage() TemplateLineage {
 }
 
 pub fn layered_lineage() TemplateLineage {
-	mut delta := map[string]MetaValue{}
-	delta['relation'] = 'independent_front_back'
-	delta['n_objects'] = 2
 	return TemplateLineage{
 		family:        'layered'
 		parent_family: 'single'
 		operation:     'layer'
 		complexity:    2.0
 		generation:    1
-		delta:         delta
+		delta:         TemplateConstraints{
+			relation:  'independent_front_back'
+			n_objects: 2
+		}
 	}
 }
 
 pub fn composite_lineage() TemplateLineage {
-	mut delta := map[string]MetaValue{}
-	delta['relation'] = 'attached_on_top'
 	return TemplateLineage{
 		family:        'composite'
 		parent_family: 'layered'
 		operation:     'attach'
 		complexity:    1.5
 		generation:    2
-		delta:         delta
+		delta:         TemplateConstraints{
+			relation: 'attached_on_top'
+		}
 	}
 }
 
 pub fn lateral_lineage() TemplateLineage {
-	mut delta := map[string]MetaValue{}
-	delta['relation'] = 'mirror'
 	return TemplateLineage{
 		family:        'lateral'
 		parent_family: 'composite'
 		operation:     'mirror'
 		complexity:    1.4
 		generation:    3
-		delta:         delta
+		delta:         TemplateConstraints{
+			relation: 'mirror'
+		}
 	}
 }

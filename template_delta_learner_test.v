@@ -1,14 +1,10 @@
 module conger
 
 // template_delta_learner_test.v — TemplateDeltaLearner aggregation + the
-// built-in template lineages (both previously untested in this repo).
+// built-in template lineages.
 import math
 
 fn tdl_proposal(parent string, op string, ratio f64, residual f64, score f64) TemplateProposal {
-	mut delta := map[string]MetaValue{}
-	delta['ratio'] = ratio
-	mut metadata := map[string]MetaValue{}
-	metadata['env'] = 0
 	return TemplateProposal{
 		family:        '${parent}_${op}_x'
 		operation:     op
@@ -16,8 +12,12 @@ fn tdl_proposal(parent string, op string, ratio f64, residual f64, score f64) Te
 		complexity:    1.5
 		score:         score
 		parent_family: parent
-		delta:         delta
-		metadata:      metadata
+		delta:         TemplateDelta{
+			ratio: ratio
+		}
+		metadata:      TemplateMetadata{
+			env: 0
+		}
 	}
 }
 
@@ -46,9 +46,9 @@ fn test_tdl_learn_groups_and_builds_spec() {
 	assert math.abs(s.residual_mean - 0.4) < 1e-12
 	assert math.abs(s.score_mean - 2.0) < 1e-12
 	// scale_ratio is the [min,max] evidence range padded by range_margin
-	scale := meta_list(s.constraints, 'scale_ratio')
-	assert scale[0] < 0.4 && scale[1] > 0.6
-	assert meta_str(s.constraints, 'relation') == 'attach'
+	scale := s.constraints.scale_ratio
+	assert scale.len == 2 && scale[0] < 0.4 && scale[1] > 0.6
+	assert s.constraints.relation == 'attach'
 }
 
 fn test_tdl_learn_skips_insufficient_evidence() {
@@ -67,25 +67,6 @@ fn test_tdl_learn_skips_insufficient_evidence() {
 	}).len == 0
 }
 
-fn test_tdl_repr_distinguishes_values() {
-	assert tdl_repr(MetaValue(1)) == 'i:1'
-	assert tdl_repr(MetaValue('x')) == 's:x'
-	// lists are order-sensitive
-	assert tdl_repr(MetaValue([1.0, 2.0])) != tdl_repr(MetaValue([2.0, 1.0]))
-	// maps are order-independent and include their contents
-	mut m1 := map[string]f64{}
-	m1['a'] = 1.0
-	m1['b'] = 2.0
-	mut m2 := map[string]f64{}
-	m2['a'] = 1.0
-	m2['c'] = 2.0
-	assert tdl_repr(MetaValue(m1)) != tdl_repr(MetaValue(m2))
-	mut m3 := map[string]f64{}
-	m3['b'] = 2.0
-	m3['a'] = 1.0
-	assert tdl_repr(MetaValue(m1)) == tdl_repr(MetaValue(m3))
-}
-
 fn test_tdl_range_margin() {
 	tdl := TemplateDeltaLearner{
 		range_margin: 0.10
@@ -93,6 +74,24 @@ fn test_tdl_range_margin() {
 	r := tdl.tdl_range([0.4, 0.6])
 	assert math.abs(r[0] - 0.38) < 1e-12
 	assert math.abs(r[1] - 0.62) < 1e-12
+}
+
+fn test_tdl_hash_distinguishes_constraints() {
+	a := TemplateConstraints{
+		relation:    'attach'
+		scale_ratio: [0.4, 0.6]
+	}
+	b := TemplateConstraints{
+		relation:    'attach'
+		scale_ratio: [0.5, 0.7]
+	}
+	c := TemplateConstraints{
+		relation:   'attach'
+		part_kinds: [1, 2]
+	}
+	assert tdl_hash(a) != tdl_hash(b)
+	assert tdl_hash(a) != tdl_hash(c)
+	assert tdl_hash(a) == tdl_hash(a)
 }
 
 fn test_builtin_lineages() {
@@ -103,17 +102,19 @@ fn test_builtin_lineages() {
 	assert composite_lineage().parent_family == 'layered'
 	assert lateral_lineage().operation == 'mirror'
 	assert lateral_lineage().generation == 3
+	assert layered_lineage().delta.relation == 'independent_front_back'
+	assert (layered_lineage().delta.n_objects or { 0 }) == 2
 }
 
 fn test_child_spec_lineage() {
-	mut constraints := map[string]MetaValue{}
-	constraints['relation'] = MetaValue('attach')
 	spec := ChildTemplateSpec{
 		name:           'layered_attach_abc'
 		family:         'composite'
 		parent_family:  'layered'
 		operation:      'attach'
-		constraints:    constraints
+		constraints:    TemplateConstraints{
+			relation: 'attach'
+		}
 		complexity:     1.5
 		generation:     2
 		evidence_count: 3
@@ -126,5 +127,5 @@ fn test_child_spec_lineage() {
 	assert lin.operation == spec.operation
 	assert lin.generation == spec.generation
 	assert lin.complexity == spec.complexity
-	assert meta_str(lin.delta, 'relation') == 'attach'
+	assert lin.delta.relation == 'attach'
 }

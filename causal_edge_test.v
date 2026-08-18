@@ -3,11 +3,6 @@ module conger
 // causal_edge_test.v — structure-level causal discovery black-box tests.
 
 fn causal_proposal(env int, ratio f64, lateral f64) TemplateProposal {
-	mut delta := map[string]MetaValue{}
-	delta['ratio'] = ratio
-	delta['lateral_ratio'] = lateral
-	mut metadata := map[string]MetaValue{}
-	metadata['env'] = env
 	return TemplateProposal{
 		family:        'composite_attach_xyz'
 		operation:     'attach'
@@ -16,8 +11,13 @@ fn causal_proposal(env int, ratio f64, lateral f64) TemplateProposal {
 		complexity:    1.5
 		score:         100.0
 		parent_family: 'composite'
-		delta:         delta
-		metadata:      metadata
+		delta:         TemplateDelta{
+			ratio:         ratio
+			lateral_ratio: lateral
+		}
+		metadata:      TemplateMetadata{
+			env: env
+		}
 	}
 }
 
@@ -63,15 +63,6 @@ fn test_single_env_is_not_causal_despite_trivial_agreement() {
 }
 
 fn observed_proposal(env int, observed_ratio f64) TemplateProposal {
-	mut delta := map[string]MetaValue{}
-	delta['ratio'] = 0.45
-	delta['lateral_ratio'] = 0.0
-	mut metadata := map[string]MetaValue{}
-	metadata['case_index'] = env
-	mut obs := map[string]f64{}
-	obs['scale_ratio'] = observed_ratio
-	obs['lateral_ratio'] = 0.0
-	metadata['observed'] = obs
 	return TemplateProposal{
 		family:        'composite_attach_x'
 		operation:     'attach'
@@ -80,8 +71,17 @@ fn observed_proposal(env int, observed_ratio f64) TemplateProposal {
 		complexity:    1.5
 		score:         100.0
 		parent_family: 'composite'
-		delta:         delta
-		metadata:      metadata
+		delta:         TemplateDelta{
+			ratio:         0.45
+			lateral_ratio: 0.0
+		}
+		metadata:      TemplateMetadata{
+			case_index: env
+			observed:   {
+				'scale_ratio':   observed_ratio
+				'lateral_ratio': 0.0
+			}
+		}
 	}
 }
 
@@ -96,11 +96,6 @@ fn test_observed_delta_overrides_grid_and_env_is_case_index() {
 
 fn test_mirror_maps_lateral_to_period_ratio() {
 	p := causal_proposal(0, 0.45, 0.6)
-	mut delta := map[string]MetaValue{}
-	delta['ratio'] = 0.45
-	delta['lateral_ratio'] = 0.6
-	mut metadata := map[string]MetaValue{}
-	metadata['env'] = 0
 	mirror := TemplateProposal{
 		family:        'composite_mirror_x'
 		operation:     'mirror'
@@ -109,8 +104,13 @@ fn test_mirror_maps_lateral_to_period_ratio() {
 		complexity:    p.complexity
 		score:         p.score
 		parent_family: 'composite'
-		delta:         delta
-		metadata:      metadata
+		delta:         TemplateDelta{
+			ratio:         0.45
+			lateral_ratio: 0.6
+		}
+		metadata:      TemplateMetadata{
+			env: 0
+		}
 	}
 	edges := learn_edges([mirror, p])
 	assert 'period_ratio' in edges

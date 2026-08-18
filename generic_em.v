@@ -39,7 +39,10 @@ pub mut:
 
 // run iterates E/M from init_params and returns the converged state + trajectory.
 pub fn (mut e EMLoop[M, O, R]) run(observation O, init_params []f64) EMResult[R] {
-	assert e.max_iters >= 1
+	// NB: explicit panic, not `assert` — V strips asserts in `-prod` builds.
+	if e.max_iters < 1 {
+		panic('EMLoop.run: max_iters must be >= 1 (got ${e.max_iters})')
+	}
 	mut params := init_params.clone()
 	mut resp := R{}
 	mut trajectory := []f64{}

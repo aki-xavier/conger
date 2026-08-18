@@ -3,6 +3,7 @@ module conger
 // mixture_spn.v — MixtureSPN: full-resolution shallow mixture SPN (sum of
 // instance-level diagonal-Gaussian blocks), V port of src/mixture_spn.py.
 import math
+import os
 import mlx
 
 pub const nc = 64 // E-step sample block rows
@@ -163,7 +164,10 @@ pub fn fit_simple(f mlx.Array, t mlx.Array, stratum mlx.Array, basis_dim int) Mi
 // expand_categories pads the category contract for new classes (logp=-inf).
 pub fn (mut m MixtureSPN) expand_categories(new_sizes []int) {
 	old := m.cat_sizes
-	assert old.len == new_sizes.len
+	// NB: explicit panic, not `assert` — V strips asserts in `-prod` builds.
+	if old.len != new_sizes.len {
+		panic('expand_categories: factor count mismatch (old ${old.len} vs new ${new_sizes.len})')
+	}
 	mut cols := []mlx.Array{}
 	mut lo := 0
 	for i, o in old {
@@ -244,7 +248,10 @@ pub fn (m MixtureSPN) save(path string) {
 }
 
 // load_mixture_spn reads a safetensors model back.
-pub fn load_mixture_spn(path string) MixtureSPN {
+pub fn load_mixture_spn(path string) !MixtureSPN {
+	if !os.exists(path) {
+		return error('MixtureSPN model file not found: ${path}')
+	}
 	// safetensors tensors are mmap-lazy; force the Load ops onto the CPU stream
 	// (a Load op cannot be evaluated on the GPU stream).
 	mlx.use_cpu()

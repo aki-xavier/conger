@@ -2,6 +2,7 @@ module conger
 
 // template_delta_learner.v — estimate child-template constraints from birth
 // proposals (V port of src/template_delta_learner.py).
+import json2
 import math
 
 pub struct TemplateDeltaLearner {
@@ -30,51 +31,10 @@ pub fn (tdl TemplateDeltaLearner) tdl_range(values []f64) []f64 {
 	return [lo - pad, hi + pad]
 }
 
-// tdl_repr serialises a MetaValue for the spec-name digest.
-pub fn tdl_repr(v MetaValue) string {
-	match v {
-		string {
-			return 's:${v}'
-		}
-		int {
-			return 'i:${v}'
-		}
-		f64 {
-			return 'f:${v}'
-		}
-		[]f64 {
-			mut parts := []string{}
-			for x in v {
-				parts << x.str()
-			}
-			return 'l:${parts.join(',')}'
-		}
-		map[string]f64 {
-			mut keys := []string{}
-			for k, _ in v {
-				keys << k
-			}
-			keys.sort()
-			mut parts := []string{}
-			for k in keys {
-				parts << '${k}:${v[k]}'
-			}
-			return 'm:${parts.join(',')}'
-		}
-	}
-}
-
-// tdl_hash returns a short deterministic digest of the constraints.
-pub fn tdl_hash(constraints map[string]MetaValue) string {
-	mut keys := []string{}
-	for k, _ in constraints {
-		keys << k
-	}
-	keys.sort()
-	mut text := ''
-	for k in keys {
-		text += k + '=' + tdl_repr(constraints[k] or { MetaValue('') }) + ';'
-	}
+// tdl_hash returns a short deterministic digest of the constraints (FNV-1a over
+// the JSON serialisation, which is deterministic in field-declaration order).
+pub fn tdl_hash(constraints TemplateConstraints) string {
+	text := json2.encode(constraints, json2.EncoderOptions{})
 	mut h := u32(2166136261)
 	for b in text.bytes() {
 		h ^= u32(b)
@@ -92,29 +52,30 @@ pub fn (tdl TemplateDeltaLearner) tdl_spec(parent string, operation string, prop
 	mut part_kinds := map[int]bool{}
 	mut part_hues := map[int]bool{}
 	for p in proposals {
-		if 'ratio' in p.delta {
-			ratios << meta_f64(p.delta, 'ratio')
+		if r := p.delta.ratio {
+			ratios << r
 		}
-		if 'lateral_ratio' in p.delta {
-			laterals << meta_f64(p.delta, 'lateral_ratio')
+		if l := p.delta.lateral_ratio {
+			laterals << l
 		}
-		if 'depth_gap' in p.delta {
-			depth_gaps << meta_f64(p.delta, 'depth_gap')
+		if d := p.delta.depth_gap {
+			depth_gaps << d
 		}
-		if 'depth_jitter' in p.delta {
-			depth_jitters << meta_list(p.delta, 'depth_jitter')
+		if p.delta.depth_jitter.len > 0 {
+			depth_jitters << p.delta.depth_jitter
 		}
-		if 'part_kind' in p.delta {
-			part_kinds[meta_int(p.delta, 'part_kind')] = true
+		if pk := p.delta.part_kind {
+			part_kinds[pk] = true
 		}
-		if 'part_hue' in p.delta {
-			part_hues[meta_int(p.delta, 'part_hue')] = true
+		if ph := p.delta.part_hue {
+			part_hues[ph] = true
 		}
 	}
-	mut constraints := map[string]MetaValue{}
-	constraints['relation'] = operation
+	mut constraints := TemplateConstraints{
+		relation: operation
+	}
 	if ratios.len > 0 {
-		constraints['scale_ratio'] = tdl.tdl_range(ratios)
+		constraints.scale_ratio = tdl.tdl_range(ratios)
 	}
 	if laterals.len > 0 {
 		if operation == 'mirror' || operation == 'repeat' {
@@ -122,13 +83,13 @@ pub fn (tdl TemplateDeltaLearner) tdl_spec(parent string, operation string, prop
 			for i, v in laterals {
 				absv[i] = math.abs(v)
 			}
-			constraints['period_ratio'] = tdl.tdl_range(absv)
+			constraints.period_ratio = tdl.tdl_range(absv)
 		} else {
-			constraints['lateral_ratio'] = tdl.tdl_range(laterals)
+			constraints.lateral_ratio = tdl.tdl_range(laterals)
 		}
 	}
 	if depth_gaps.len > 0 {
-		constraints['depth_gap'] = tdl.tdl_range(depth_gaps)
+		constraints.depth_gap = tdl.tdl_range(depth_gaps)
 	}
 	if depth_jitters.len > 0 {
 		mut lo := 1e18
@@ -141,20 +102,20 @@ pub fn (tdl TemplateDeltaLearner) tdl_spec(parent string, operation string, prop
 				hi = dj[1]
 			}
 		}
-		constraints['depth_jitter'] = [lo, hi]
+		constraints.depth_jitter = [lo, hi]
 	}
-	mut kinds := []f64{}
+	mut kinds := []int{}
 	for k, _ in part_kinds {
-		kinds << f64(k)
+		kinds << k
 	}
 	kinds.sort()
-	constraints['part_kinds'] = kinds
-	mut hues := []f64{}
+	constraints.part_kinds = kinds
+	mut hues := []int{}
 	for h, _ in part_hues {
-		hues << f64(h)
+		hues << h
 	}
 	hues.sort()
-	constraints['part_hues'] = hues
+	constraints.part_hues = hues
 
 	mut generation := 1
 	if parent in lineages {

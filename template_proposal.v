@@ -12,8 +12,8 @@ pub:
 	complexity    f64
 	score         f64
 	parent_family string
-	delta         map[string]MetaValue
-	metadata      map[string]MetaValue
+	delta         TemplateDelta
+	metadata      TemplateMetadata
 }
 
 // TemplateProposer generates scorable new-template candidates from birth evidence.

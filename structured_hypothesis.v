@@ -1,7 +1,10 @@
 module conger
 
 // structured_hypothesis.v — domain-independent structured hypothesis / posterior
-// return object (V port of src/structured_hypothesis.py).
+// return object (V port of src/structured_hypothesis.py). Generic over the
+// opaque scene payload `T` (conger-vision uses `cga.Scene`, the non-visual
+// validation domain uses `voidptr`), so the generic core never type-erases the
+// domain payload.
 import mlx
 
 pub struct HypothesisCandidate {
@@ -11,14 +14,14 @@ pub:
 	residual    f64
 }
 
-pub struct StructuredHypothesis {
+pub struct StructuredHypothesis[T] {
 pub:
-	scene                 voidptr // opaque domain payload (conger-vision stores a heap-boxed cga.Scene); 0 = none
+	scene                 T // domain payload (conger-vision: cga.Scene); zero value = none
 	params                []f64
 	spn_posterior         ?mlx.Array
 	structure_id          string = 'unknown'
 	geometry_family       string
-	template_delta        map[string]MetaValue
+	template_delta        TemplateConstraints
 	representation        ?mlx.Array
 	candidate_params      [][]f64
 	candidate_scores      ?mlx.Array
@@ -39,16 +42,16 @@ pub:
 }
 
 // new_hypothesis returns a StructuredHypothesis with the visual factor defaults.
-pub fn new_hypothesis() StructuredHypothesis {
-	return StructuredHypothesis{
+pub fn new_hypothesis[T]() StructuredHypothesis[T] {
+	return StructuredHypothesis[T]{
 		factor_sizes:   [3, 6, 3, 3]
 		factor_indices: [0, 5, 6, 7]
 	}
 }
 
 // with_structure returns a copy with the structure-id/posterior fields replaced.
-pub fn (est StructuredHypothesis) with_structure(id string, sp f64, sps map[string]f64) StructuredHypothesis {
-	return StructuredHypothesis{
+pub fn (est StructuredHypothesis[T]) with_structure(id string, sp f64, sps map[string]f64) StructuredHypothesis[T] {
+	return StructuredHypothesis[T]{
 		scene:                 est.scene
 		params:                est.params
 		spn_posterior:         est.spn_posterior
@@ -76,8 +79,8 @@ pub fn (est StructuredHypothesis) with_structure(id string, sp f64, sps map[stri
 }
 
 // with_residual_geometry returns a copy with the residual / geometry-cost fields replaced.
-pub fn (est StructuredHypothesis) with_residual_geometry(r f64, gc f64) StructuredHypothesis {
-	return StructuredHypothesis{
+pub fn (est StructuredHypothesis[T]) with_residual_geometry(r f64, gc f64) StructuredHypothesis[T] {
+	return StructuredHypothesis[T]{
 		scene:                 est.scene
 		params:                est.params
 		spn_posterior:         est.spn_posterior
@@ -105,7 +108,7 @@ pub fn (est StructuredHypothesis) with_residual_geometry(r f64, gc f64) Structur
 }
 
 // factor_marginals returns the per-factor marginal posteriors.
-pub fn (h StructuredHypothesis) factor_marginals() []mlx.Array {
+pub fn (h StructuredHypothesis[T]) factor_marginals() []mlx.Array {
 	sizes := if h.factor_sizes.len > 0 { h.factor_sizes } else { [3, 6, 3, 3] }
 	indices := if h.factor_indices.len > 0 { h.factor_indices } else { [0, 5, 6, 7] }
 	mut vals := [][]f64{len: sizes.len}

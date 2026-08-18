@@ -27,48 +27,47 @@ pub:
 
 // targets extracts scalar targets from a proposal (observed delta overrides grid).
 pub fn (l CausalDeltaLearner) targets(p TemplateProposal) map[string]f64 {
-	observed := meta_map(p.metadata, 'observed')
 	mut out := map[string]f64{}
-	if 'scale_ratio' in observed {
-		out['scale_ratio'] = observed['scale_ratio']
-	} else if v := p.delta['ratio'] {
-		out['scale_ratio'] = meta_as_f64(v)
+	if 'scale_ratio' in p.metadata.observed {
+		out['scale_ratio'] = p.metadata.observed['scale_ratio']
+	} else if v := p.delta.ratio {
+		out['scale_ratio'] = v
 	}
-	if 'period_ratio' in observed {
-		out['period_ratio'] = observed['period_ratio']
-	} else if 'lateral_ratio' in observed {
+	if 'period_ratio' in p.metadata.observed {
+		out['period_ratio'] = p.metadata.observed['period_ratio']
+	} else if 'lateral_ratio' in p.metadata.observed {
 		key := if p.operation == 'mirror' || p.operation == 'repeat' {
 			'period_ratio'
 		} else {
 			'lateral_ratio'
 		}
-		out[key] = observed['lateral_ratio']
-	} else if v := p.delta['lateral_ratio'] {
+		out[key] = p.metadata.observed['lateral_ratio']
+	} else if v := p.delta.lateral_ratio {
 		key := if p.operation == 'mirror' || p.operation == 'repeat' {
 			'period_ratio'
 		} else {
 			'lateral_ratio'
 		}
-		out[key] = meta_as_f64(v)
+		out[key] = v
 	}
-	if 'depth_gap' in observed {
-		out['depth_gap'] = observed['depth_gap']
-	} else if v := p.delta['depth_gap'] {
-		out['depth_gap'] = meta_as_f64(v)
+	if 'depth_gap' in p.metadata.observed {
+		out['depth_gap'] = p.metadata.observed['depth_gap']
+	} else if v := p.delta.depth_gap {
+		out['depth_gap'] = v
 	}
 	return out
 }
 
 // default_env_key returns env → seed → case_index → "0".
 pub fn default_env_key(p TemplateProposal) string {
-	if v := p.metadata['env'] {
-		return meta_value_str(v)
+	if v := p.metadata.env {
+		return v.str()
 	}
-	if v := p.metadata['seed'] {
-		return meta_value_str(v)
+	if v := p.metadata.seed {
+		return v.str()
 	}
-	if v := p.metadata['case_index'] {
-		return meta_value_str(v)
+	if v := p.metadata.case_index {
+		return v.str()
 	}
 	return '0'
 }
@@ -186,22 +185,4 @@ pub fn (l CausalDeltaLearner) learn(proposals []TemplateProposal) []CausalEdge {
 		return if a.target < b.target { -1 } else { 1 }
 	})
 	return edges
-}
-
-pub fn meta_as_f64(v MetaValue) f64 {
-	return match v {
-		f64 { v }
-		int { f64(v) }
-		else { 0.0 }
-	}
-}
-
-pub fn meta_value_str(v MetaValue) string {
-	match v {
-		string { return v }
-		int { return v.str() }
-		f64 { return v.str() }
-		map[string]f64 { return '' }
-		else { return '' }
-	}
 }

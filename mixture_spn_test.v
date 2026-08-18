@@ -189,7 +189,7 @@ fn test_serialization_roundtrip() {
 	tm, kp, _ := m.predict(f)
 	path := os.temp_dir() + '/m_spn_roundtrip.safetensors'
 	m.save(path)
-	loaded := load_mixture_spn(path)
+	loaded := load_mixture_spn(path) or { panic(err) }
 	tm2, kp2, _ := loaded.predict(f)
 	assert all_equal(tm, tm2)
 	assert all_equal(kp, kp2)
@@ -203,7 +203,7 @@ fn test_category_contract_expansion() {
 	m := fit_mixture_spn(f, t, stratum, 1e-2, cls, [3, 2], 0)
 	path := os.temp_dir() + '/m_spn_cat.safetensors'
 	m.save(path)
-	mut loaded := load_mixture_spn(path)
+	mut loaded := load_mixture_spn(path) or { panic(err) }
 	assert loaded.cat_sizes == [3, 2]
 	loaded.expand_categories([4, 3])
 	assert loaded.cat_sizes == [4, 3]

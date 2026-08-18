@@ -30,8 +30,9 @@ fn train_toy_expert(mechanism string, n int, seed u64) ToySeriesExpert {
 	}
 }
 
-// estimate returns a StructuredHypothesis for one observation sequence.
-fn (e ToySeriesExpert) estimate(observation mlx.Array) StructuredHypothesis {
+// estimate returns a StructuredHypothesis for one observation sequence. The
+// non-visual domain has no scene payload, hence `voidptr` as the type parameter.
+fn (e ToySeriesExpert) estimate(observation mlx.Array) StructuredHypothesis[voidptr] {
 	f := e.family.encode(observation).expand_dims(0)
 	tm, _, r := e.net.predict(f)
 	params := tm.take_axis(sel1(0), 0).squeeze_axis(0).data_f32()
@@ -50,7 +51,7 @@ fn (e ToySeriesExpert) estimate(observation mlx.Array) StructuredHypothesis {
 		resp_novelty = -math.log(max_r) / math.log(f64(k))
 	}
 	novelty := resp_novelty + math.log(1.0 + residual)
-	return StructuredHypothesis{
+	return StructuredHypothesis[voidptr]{
 		structure_id:       e.family.mechanism
 		params:             pf
 		responsibility_max: max_r

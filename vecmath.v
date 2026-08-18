@@ -61,22 +61,6 @@ pub fn (mut r Rng) normal(mu f64, sigma f64) f64 {
 	return mu + sigma * z
 }
 
-// py_round implements Python's round() (banker's rounding, half to even).
-pub fn py_round(x f64) int {
-	floor := int(math.floor(x))
-	frac := x - f64(floor)
-	if frac < 0.5 {
-		return floor
-	}
-	if frac > 0.5 {
-		return floor + 1
-	}
-	if floor % 2 == 0 {
-		return floor
-	}
-	return floor + 1
-}
-
 // linspace returns n evenly spaced values in [start, stop].
 pub fn linspace(start f64, stop f64, n int) []f64 {
 	mut out := []f64{len: n}
