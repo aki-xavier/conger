@@ -2,16 +2,18 @@
 
 SPN 逆渲染研究: 左右两张二维立体图像 → Riesz 全分辨率特征 → MixtureSPN → **完整 `cga.Scene` 重建** (kind, u, v, s, z, 图元色相, 光色, 光向)。模型为 MixtureSPN (全分辨率实例级浅混合 SPN: PCA 白化 + 逐 kind 分层, 每样本一个对角高斯块; 连续条件期望 ≡ 分层核回归, 离散场景因子 ≡ 条件后验分类; 无 EM, 确定性)。SPN 初估后, `SceneReconstructor` 覆盖全部 kind, 结构评分沿用共享几何，候选返回前再按各自 kind 的面积→尺寸代理重校准 s，并与 hue×光色×光向候选一起做左右图渲染残差联合精炼。完整机制决策见 `docs/architecture.md`。
 
-本仓库是 **V 语言移植版**: 模块 `conger` 平铺在仓库根目录 (每个 Python `src/*.py` 对应一个 `*.v`), 依赖经 `.vmodules` 符号链接到本地 [`cga`](../cga) 渲染引擎与 [`mlx-v`](../mlx-v) 绑定。
+本仓库是 **V 语言移植版**: 模块 `conger` 平铺在仓库根目录 (每个 Python `src/*.py` 对应一个 `*.v`), 依赖经默认 V 模块目录 `~/.vmodules` 解析 (符号链接到本地 [`cga`](../cga) 渲染引擎与 [`mlx-v`](../mlx-v) 绑定)。
 
 训练数据全因子覆盖设计: 单物体离散因子 (kind 3 × 图元色 6 色相 × 光色 3 × 光向 3 = 162 组合) 全笛卡尔积 × R 连续复制; `--scene-family layered` 时双图元前后层为 kind0×kind1×hue0×hue1×光色×光向 = 2916 组合, 约 70% 样本强制投影重叠。图元色与 kind 解耦; 光色/光向不再丢弃, 而是作为完整场景输出显式监督。
 
 ## 构建与测试
 
 ```bash
-make test        # 全量测试: VMODULES=$(pwd)/.vmodules v -no-memory-limit test .
+make test        # v -no-memory-limit test .
 make fmt         # v fmt -w .
 ```
+
+（等价直接命令：`v -no-memory-limit test .`，依赖经 `~/.vmodules` 解析，无需 `VMODULES` 环境变量。）
 
 38 个 V 测试文件全部通过 (单元黑盒 + Riesz 自检 + 结构几何/门控/模板闭环)。`pytest -m slow` 的完整立体集成自检 (`test_inverse.py`, 冷缓存渲染 1296×2 帧, 分钟级) 未移植为 V 测试: 其训练/推理主链路已移植为 `InverseApp.run` / `self_check`, 但阈值按 Python 引擎标定, 未在 V 引擎上重标。
 
@@ -78,4 +80,11 @@ make fmt         # v fmt -w .
 - [`cga`](../cga) — 渲染引擎 (V 端口)。
 - [`mlx-v`](../mlx-v) — MLX C API 的 V 绑定 (复数 FFT、safetensors、随机数等)。
 
-两者经仓库根目录 `.vmodules/` 符号链接解析, `Makefile` 里 `VMODULES=$(pwd)/.vmodules` 已配置。
+两者经默认 V 模块目录 `~/.vmodules` 解析。首次在机器上配置一次符号链接即可：
+
+```bash
+ln -sfn /path/to/cga    ~/.vmodules/cga
+ln -sfn /path/to/mlx-v  ~/.vmodules/mlx
+```
+
+之后 `v test .` / `make test` 均无需 `VMODULES` 环境变量。
