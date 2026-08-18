@@ -13,7 +13,7 @@ pub:
 
 pub struct StructuredHypothesis {
 pub:
-	scene                 voidptr // opaque domain payload (vision: &cga.Scene); 0 = none
+	scene                 voidptr // opaque domain payload (conger-vision stores a heap-boxed cga.Scene); 0 = none
 	params                []f64
 	spn_posterior         ?mlx.Array
 	structure_id          string = 'unknown'

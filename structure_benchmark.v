@@ -1,8 +1,8 @@
 module conger
 
 // structure_benchmark.v — cross-family structure-gate benchmark aggregation
-// (V port of src/structure_benchmark.py; the render/CLI loop is added with the
-// inverse-app integration, the summariser is standalone).
+// (V port of src/structure_benchmark.py; the render/CLI loop lives in the
+// conger-vision inverse-app integration, the summariser here is standalone).
 import math
 
 // StructureCaseResult records one ground-truth sample's gating outcome.

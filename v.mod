@@ -1,9 +1,9 @@
 Module {
 	name: 'conger'
-	description: 'SPN inverse rendering research: stereo 2D images → Riesz features → MixtureSPN → full cga.Scene reconstruction (V port).'
+	description: 'Generic SPN / structure-learning core: MixtureSPN + domain-independent structure learning, template learning, model memory and persistence (V port).'
 	version: '0.1.0'
 	license: 'MIT'
 	// Dependencies resolve from the default V module dir `~/.vmodules`
-	// (symlinks to `cga` and `mlx`), so no VMODULES env var is needed.
+	// (symlink to `mlx`), so no VMODULES env var is needed.
 	dependencies: []
 }

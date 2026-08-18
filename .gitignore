@@ -7,7 +7,7 @@ artifacts/*.jpg
 artifacts/*.json
 artifacts/*.safetensors
 
-# V dependency symlinks (cga, mlx) set up by the Makefile
+# V dependency symlink (mlx) set up once per machine
 .vmodules
 
 # Misc

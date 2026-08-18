@@ -1,7 +1,7 @@
 # V port build helper.
 #
-# `cga` and `mlx` resolve from the default V module dir `~/.vmodules`
-# (symlinks set up once per machine; see README § 依赖).
+# `mlx` resolves from the default V module dir `~/.vmodules`
+# (symlink set up once per machine; see README § 依赖).
 
 .PHONY: test fmt
 
