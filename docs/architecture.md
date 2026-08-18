@@ -133,6 +133,7 @@ JSON 持久化（`rm_save`/`rm_load`），供跨进程恢复。
 | | `generic_em.v` · `forward_model.v` | `EMLoop[M,O,R]` · `EMResult[T]` · `ForwardModel` |
 | | `kernel_graph.v` | `LikelihoodKernel` · `KernelNode` · `KernelGraph` · `KernelContext` · `SourceKernel` · `topo_order` · `run_recurrent` · `RecurrentTrace` |
 | | `likelihood_kernels.v` | `GaussianKernel` · `GaussianMixtureKernel` · `CondGaussianKernel` · `MixtureSPNKernel` |
+| | `coupled_factors.v` | `AdditiveFactorKernel` · `new_coupled_pair_graph` · `new_shared_two_factor_graph` · `pair_map` |
 | 模板学习 | `template_proposal.v` | `TemplateProposal` · `TemplateProposer` |
 | | `template_grammar.v` | `TemplateGrammar` · `TemplateRule` · `primitives`/`composites`/`rules` |
 | | `template_lineage.v` | `TemplateLineage` · `ChildTemplateSpec` · `single/layered/composite/lateral_lineage` |

@@ -17,13 +17,13 @@ make fmt         # v fmt -w .
 
 （等价直接命令：`v -gc boehm -no-memory-limit test .`，依赖经 `~/.vmodules` 解析，无需 `VMODULES` 环境变量。）
 
-13 个 V 测试文件全部通过（MixtureSPN 黑盒 / 模型内存 / 通用结构门控与出生控制 / 模板文法·提案 / 因果边 / 结构基准汇总 / 注册表清单往返 / 通用 EM·前向模型 / 模板约束学习·血缘 / 似然核网络骨架 / 内置似然核）。视觉侧的 30 个测试在 `conger-vision` 项目内运行。
+14 个 V 测试文件全部通过（MixtureSPN 黑盒 / 模型内存 / 通用结构门控与出生控制 / 模板文法·提案 / 因果边 / 结构基准汇总 / 注册表清单往返 / 通用 EM·前向模型 / 模板约束学习·血缘 / 似然核网络骨架 / 内置似然核 / 耦合因素跨核EM）。视觉侧的 30 个测试在 `conger-vision` 项目内运行。
 
 ## 模块（一文件一类）
 
 核心 SPN：`mixture_spn.v`（MixtureSPN：白化 + 实例级组装 + 条件期望 + 增量 `add` / 类别 `expand_categories` / safetensors 序列化）。
 
-通用结构学习：`structured_hypothesis.v`（泛型统一结构化假设 / 后验对象，`scene` 字段为泛型载荷 `T`，视觉层用 `cga.Scene`）/ `forward_model.v`（正向模拟协议）/ `generic_em.v`（域无关 EMLoop）/ `generic_structure_gate.v`（结构后验门控 + 两级 `decide_hierarchical`）/ `generic_expert_registry.v`（专家注册表 + 出生控制器挂接）/ `structure_birth.v`（未知结构出生队列与请求）/ `kernel_graph.v`（似然核网络骨架：`KernelNode` 声明前馈 `parents` 与反馈 `feedback` 连接，`topo_order` 确定性拓扑排序（仅前馈边，须为 DAG），`run_recurrent` 按拓扑序逐步推进、反馈边注入上一步输出，可自定义似然核之间的拓扑结构与反馈回路）/ `likelihood_kernels.v`（内置似然核：对角高斯 / 高斯混合 / 条件高斯（均值 = 前馈+反馈输入的线性读入，拓扑直接塑造条件似然）/ `MixtureSPNKernel`（MixtureSPN 白化特征混合对数似然适配器））。
+通用结构学习：`structured_hypothesis.v`（泛型统一结构化假设 / 后验对象，`scene` 字段为泛型载荷 `T`，视觉层用 `cga.Scene`）/ `forward_model.v`（正向模拟协议）/ `generic_em.v`（域无关 EMLoop）/ `generic_structure_gate.v`（结构后验门控 + 两级 `decide_hierarchical`）/ `generic_expert_registry.v`（专家注册表 + 出生控制器挂接）/ `structure_birth.v`（未知结构出生队列与请求）/ `kernel_graph.v`（似然核网络骨架：`KernelNode` 声明前馈 `parents` 与反馈 `feedback` 连接，`topo_order` 确定性拓扑排序（仅前馈边，须为 DAG），`run_recurrent` 按拓扑序逐步推进、反馈边注入上一步输出，可自定义似然核之间的拓扑结构与反馈回路）/ `likelihood_kernels.v`（内置似然核：对角高斯 / 高斯混合 / 条件高斯（均值 = 前馈+反馈输入的线性读入，拓扑直接塑造条件似然）/ `MixtureSPNKernel`（MixtureSPN 白化特征混合对数似然适配器））/ `coupled_factors.v`（耦合潜因素跨核 EM 验证域：`AdditiveFactorKernel` 加性双因素核（y = f_self + f_other + ε，几何×光照原型），反馈边=Jacobi、前馈边=Gauss-Seidel 调度，高斯先验打破尺度歧义；配对图 / 共享因素扇入图构造器 + `pair_map` 闭式 MAP）。
 
 模板学习：`template_proposal.v` / `template_lineage.v`（parent/delta 继承契约 + `ChildTemplateSpec`）/ `template_grammar.v`（有界组合文法）/ `template_delta_learner.v`（提案约束学习）/ `causal_edge.v`（结构级因果发现）。
 
@@ -35,7 +35,7 @@ make fmt         # v fmt -w .
 
 通用基准汇总：`structure_benchmark.v`（跨结构门控的 accuracy / confusion / ECE 汇总）。
 
-测试：根目录 `*_test.v`（13 个文件）。`docs/architecture.md` — 内核架构与主管线（分层架构 + 数据/控制流总图）；视觉层机制决策见 `conger-vision/docs/architecture.md`。
+测试：根目录 `*_test.v`（14 个文件）。`docs/architecture.md` — 内核架构与主管线（分层架构 + 数据/控制流总图）；视觉层机制决策见 `conger-vision/docs/architecture.md`。
 
 ## 推理接口
 
