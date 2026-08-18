@@ -240,6 +240,16 @@ pub fn fmax2(a f64, b f64) f64 {
 	return if a > b { a } else { b }
 }
 
+// min_i returns the smaller of two ints.
+pub fn min_i(a int, b int) int {
+	return if a < b { a } else { b }
+}
+
+// max_i returns the larger of two ints.
+pub fn max_i(a int, b int) int {
+	return if a > b { a } else { b }
+}
+
 // clamp01 clamps x into [0, 1].
 pub fn clamp01(x f64) f64 {
 	return fmax2(0.0, fmin2(x, 1.0))

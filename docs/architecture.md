@@ -26,11 +26,11 @@ flowchart TD
         C["generic_structure_gate.v<br/>GenericStructureGate[T]: decide / decide_hierarchical"]
         D["generic_expert_registry.v<br/>GenericExpertRegistry[T] + GenericExpert[T] 接口"]
         E["structure_birth.v<br/>StructureBirthController / StructureBirthRequest"]
-        F["generic_em.v · forward_model.v<br/>EMLoop[M,O,R] / ForwardModel 协议"]
+        F["generic_em.v<br/>EMLoop[M,O,R]"]
     end
     subgraph L3["③ 模板学习"]
         G["template_proposal.v · template_grammar.v · template_lineage.v<br/>提案 / 有界文法 / 血缘与 ChildTemplateSpec"]
-        H["template_delta_learner.v · causal_edge.v<br/>提案→约束 · delta→因果边"]
+        H["template_delta_learner.v<br/>提案→约束"]
     end
     subgraph L4["④ 模型内存与持久化"]
         I["model_memory.v · registry_manifest.v<br/>split/load/assemble/truncate/forget · RegistryManifest(JSON)"]
@@ -39,7 +39,7 @@ flowchart TD
         J["types.v (TemplateDelta/Metadata/Constraints) · vecmath.v (f64 原语+RNG) · mlxutil.v (MLX 辅助)"]
     end
     subgraph L6["⑥ 非视觉验证域"]
-        K["toy_series_family.v · toy_series_expert.v · structure_benchmark.v<br/>线性/振荡专家 · accuracy/confusion/ECE"]
+        K["toy_series_family.v · toy_series_expert.v<br/>线性/振荡专家"]
     end
     L1 --> L2 --> L3 --> L4
     L5 -.-> L1 & L2 & L3 & L4 & L6
@@ -49,9 +49,8 @@ flowchart TD
 - **依赖方向单向**：核心 SPN → 结构框架 → 模板学习 → 持久化；工具层（⑤）被其余各层复用；
   验证域（⑥）以 `ToySeries` 时间序列实例驱动核心 SPN、结构门控与出生控制，**证明整套
   通用结构学习框架可脱离视觉独立运行**（视觉路径只是它的一个领域适配器）。
-- **泛型载荷**：`StructuredHypothesis[T].scene` 为泛型载荷 `T`（视觉层用 `cga.Scene`、非视觉验证域用 `voidptr`），内核不解箱 —— 这是「内核不依赖视觉」的关键边界。`ForwardModel` 的观测参数仍为 `voidptr`（协议占位）。
+- **泛型载荷**：`StructuredHypothesis[T].scene` 为泛型载荷 `T`（视觉层用 `cga.Scene`、非视觉验证域用 `voidptr`），内核不解箱 —— 这是「内核不依赖视觉」的关键边界。
 - **接口协议**：`GenericExpert[T].estimate(observation mlx.Array) → StructuredHypothesis[T]`、
-  `ForwardModel.residual(observation voidptr, params []f64) f64`、
   `TemplateProposer.propose(cases []StructureCase) []TemplateProposal`。
 
 ### 主管线流程
@@ -78,7 +77,6 @@ flowchart LR
     subgraph TPL["D. 模板学习"]
         G6 --> D1["TemplateDeltaLearner.tdl_learn<br/>按 parent|operation 分组 → 约束范围 → ChildTemplateSpec"]
         D1 --> D2["ChildTemplateSpec.lineage → TemplateLineage"]
-        D2 --> D3["CausalDeltaLearner.learn<br/>按 env 分组 → agreement → CausalEdge"]
     end
     subgraph PER["E. 持久化"]
         TM --> P1["save / split_save<br/>safetensors + 明文 meta"]
@@ -111,9 +109,7 @@ cat_sizes, basis_dim)`：先 `whiten`（Gram 特征分解得到 `f_mean`/`basis`
 **D. 模板学习** —— `TemplateDeltaLearner.tdl_learn` 把多个出生请求的 `TemplateProposal`
 按 `parent_family|operation` 分组，估计数值约束范围（ratio/lateral/depth_gap…）与离散支持集
 （part_kind/part_hue），产出可序列化的 `ChildTemplateSpec`（哈希命名、含 evidence_count /
-residual_mean / score_mean）；`lineage()` 转成 `TemplateLineage` 血缘对象。`CausalDeltaLearner`
-再把 delta 边按环境（env/seed/case_index）分组，用跨环境一致度 `agreement` 区分稳定机制
-（因果边）与漂移伪相关。
+residual_mean / score_mean）；`lineage()` 转成 `TemplateLineage` 血缘对象。
 
 **E. 持久化** —— `MixtureSPN.save` / `split_save` 写 safetensors（参数张量 + 明文 meta
 `rel_floor`/`cat_sizes`/`n_stratum`）；`load_transform`/`load_components` 分级按需加载
@@ -130,19 +126,16 @@ JSON 持久化（`rm_save`/`rm_load`），供跨进程恢复。
 | | `generic_structure_gate.v` | `GenericStructureGate[T]` · `GenericStructureDecision[T]` · `softmax_map` · `decide` · `decide_hierarchical` |
 | | `generic_expert_registry.v` | `GenericExpert[T]` · `GenericExpertRegistry[T]` |
 | | `structure_birth.v` | `StructureCase` · `StructureBirthRequest` · `StructureBirthController` |
-| | `generic_em.v` · `forward_model.v` | `EMLoop[M,O,R]` · `EMResult[T]` · `ForwardModel` |
+| | `generic_em.v` | `EMLoop[M,O,R]` · `EMResult[T]` |
 | | `kernel_graph.v` | `LikelihoodKernel` · `KernelNode` · `KernelGraph` · `KernelContext` · `SourceKernel` · `topo_order` · `run_recurrent` · `RecurrentTrace` |
 | | `likelihood_kernels.v` | `GaussianKernel` · `GaussianMixtureKernel` · `CondGaussianKernel` · `MixtureSPNKernel` |
-| | `coupled_factors.v` | `AdditiveFactorKernel` · `new_coupled_pair_graph` · `new_shared_two_factor_graph` · `pair_map` |
 | 模板学习 | `template_proposal.v` | `TemplateProposal` · `TemplateProposer` |
 | | `template_grammar.v` | `TemplateGrammar` · `TemplateRule` · `primitives`/`composites`/`rules` |
 | | `template_lineage.v` | `TemplateLineage` · `ChildTemplateSpec` · `single/layered/composite/lateral_lineage` |
 | | `template_delta_learner.v` | `TemplateDeltaLearner` · `tdl_learn` · `tdl_spec` · `tdl_hash` |
-| | `causal_edge.v` | `CausalEdge` · `CausalDeltaLearner` · `is_causal` |
 | 内存/持久化 | `model_memory.v` | `split_save` · `load_transform` · `load_components` · `assemble_model` · `truncate_basis` · `forget_components` · `coreset` · `model_size_mb` |
 | | `registry_manifest.v` | `RegistryManifest` · `RegisteredChildTemplate` · `rm_save`/`rm_load` |
 | 工具 | `types.v` | `TemplateDelta` · `TemplateMetadata` · `TemplateConstraints` |
 | | `vecmath.v` | `Rng` · `linspace` · `solve_2x2` · `solve_n` · `lstsq_2` · `kabsch_2d` · `logsumexp` |
 | | `mlxutil.v` | `nonzero_indices` · `axis_var`/`axis_std` · `axis_logsumexp` · `eigh_cpu` · `split_keys` · `fft2`/`ifft2` |
 | 验证域 | `toy_series_family.v` · `toy_series_expert.v` | `ToySeriesFamily`(linear/sine) · `ToySeriesExpert` · `train_toy_expert` |
-| | `structure_benchmark.v` | `StructureCaseResult` · `StructureBenchmarkSummary` · `sb_summarize` · `sb_ece` |

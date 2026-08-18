@@ -6,8 +6,8 @@ import math
 import os
 import mlx
 
-pub const nc = 64 // E-step sample block rows
-pub const kc = 8 // E-step component block columns
+const nc = 64 // E-step sample block rows
+const kc = 8 // E-step component block columns
 
 pub struct MixtureSPN {
 pub:
@@ -25,7 +25,7 @@ pub mut:
 	norm      mlx.Array // (K,) feature-side normalising constant
 }
 
-pub const n_stratum_default = 3
+const n_stratum_default = 3
 
 pub fn (mut m MixtureSPN) init_norm() {
 	log2pi := math.log(2.0 * math.pi)
@@ -232,19 +232,10 @@ pub fn (m MixtureSPN) predict(f mlx.Array) (mlx.Array, mlx.Array, mlx.Array) {
 
 // save writes the model to a safetensors file.
 pub fn (m MixtureSPN) save(path string) {
-	mut tens := mlx.new_map_string_to_array()
-	tens.insert('log_w', m.log_w)
-	tens.insert('f_mu', m.f_mu)
-	tens.insert('f_var', m.f_var)
-	tens.insert('t_mu', m.t_mu)
-	tens.insert('cat_logp', m.cat_logp)
+	tens := m.spn_component_tensors()
 	tens.insert('f_mean', m.f_mean or { mlx.array_f32([f32(0)], [1]) })
 	tens.insert('basis', m.basis or { mlx.array_f32([f32(0)], [1, 1]) })
-	mut meta := mlx.new_map_string_to_string()
-	meta.insert('rel_floor', m.rel_floor.str())
-	meta.insert('cat_sizes', encode_ints(m.cat_sizes))
-	meta.insert('n_stratum', m.n_stratum.str())
-	mlx.save_safetensors(path, tens, meta)
+	mlx.save_safetensors(path, tens, m.spn_meta())
 }
 
 // load_mixture_spn reads a safetensors model back.
@@ -267,36 +258,66 @@ pub fn load_mixture_spn(path string) !MixtureSPN {
 		a.eval()
 	}
 	mlx.use_gpu()
-	rel_floor := meta.get('rel_floor').f64()
-	cat_sizes := decode_ints(meta.get('cat_sizes'))
-	n_stratum := meta.get('n_stratum').int()
+	mm := decode_spn_meta(meta)
 	mut m := MixtureSPN{
 		log_w:     log_w
 		f_mu:      f_mu
 		f_var:     f_var
 		t_mu:      t_mu
 		cat_logp:  cat_logp
-		rel_floor: rel_floor
+		rel_floor: mm.rel_floor
 		f_mean:    f_mean
 		basis:     basis
-		cat_sizes: cat_sizes
-		n_stratum: n_stratum
+		cat_sizes: mm.cat_sizes
+		n_stratum: mm.n_stratum
 	}
+	repair_spn_defaults(mut m)
+	m.init_norm()
+	return m
+}
+
+// spn_component_tensors returns the per-component tensor table shared by both
+// persistence paths (single-file save and model_memory split_save).
+fn (m MixtureSPN) spn_component_tensors() mlx.MapStringToArray {
+	mut tens := mlx.new_map_string_to_array()
+	tens.insert('log_w', m.log_w)
+	tens.insert('f_mu', m.f_mu)
+	tens.insert('f_var', m.f_var)
+	tens.insert('t_mu', m.t_mu)
+	tens.insert('cat_logp', m.cat_logp)
+	return tens
+}
+
+// spn_meta encodes the scalar metadata shared by both persistence paths.
+fn (m MixtureSPN) spn_meta() mlx.MapStringToString {
+	mut meta := mlx.new_map_string_to_string()
+	meta.insert('rel_floor', m.rel_floor.str())
+	meta.insert('cat_sizes', encode_ints(m.cat_sizes))
+	meta.insert('n_stratum', m.n_stratum.str())
+	return meta
+}
+
+// decode_spn_meta parses the scalar metadata block shared by both persistence paths.
+fn decode_spn_meta(meta mlx.MapStringToString) ModelMeta {
+	return ModelMeta{
+		rel_floor: meta.get('rel_floor').f64()
+		cat_sizes: decode_ints(meta.get('cat_sizes'))
+		n_stratum: meta.get('n_stratum').int()
+	}
+}
+
+// repair_spn_defaults fills cat_sizes / n_stratum defaults for models whose
+// safetensors metadata is missing them (legacy files).
+fn repair_spn_defaults(mut m MixtureSPN) {
 	if m.cat_sizes.len == 0 {
 		m.cat_sizes = infer_cat_sizes(m.cat_logp.dim(1))
 	}
 	if m.n_stratum == 0 {
 		m.n_stratum = m.cat_sizes[0]
 	}
-	m.init_norm()
-	return m
 }
 
-pub fn min_i(a int, b int) int {
-	return if a < b { a } else { b }
-}
-
-pub fn encode_ints(vals []int) string {
+fn encode_ints(vals []int) string {
 	mut parts := []string{cap: vals.len}
 	for v in vals {
 		parts << v.str()
@@ -304,7 +325,7 @@ pub fn encode_ints(vals []int) string {
 	return parts.join(',')
 }
 
-pub fn decode_ints(s string) []int {
+fn decode_ints(s string) []int {
 	if s == '' {
 		return []int{}
 	}

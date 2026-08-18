@@ -52,58 +52,19 @@ pub fn new_hypothesis[T]() StructuredHypothesis[T] {
 // with_structure returns a copy with the structure-id/posterior fields replaced.
 pub fn (est StructuredHypothesis[T]) with_structure(id string, sp f64, sps map[string]f64) StructuredHypothesis[T] {
 	return StructuredHypothesis[T]{
-		scene:                 est.scene
-		params:                est.params
-		spn_posterior:         est.spn_posterior
-		structure_id:          id
-		geometry_family:       est.geometry_family
-		template_delta:        est.template_delta
-		representation:        est.representation
-		candidate_params:      est.candidate_params
-		candidate_scores:      est.candidate_scores
-		candidate_posterior:   est.candidate_posterior
-		candidate_temperature: est.candidate_temperature
-		hypotheses:            est.hypotheses
-		factor_sizes:          est.factor_sizes
-		factor_indices:        est.factor_indices
-		responsibility_max:    est.responsibility_max
-		posterior_entropy:     est.posterior_entropy
-		residual:              est.residual
-		complexity:            est.complexity
-		geometry_cost:         est.geometry_cost
-		novelty_score:         est.novelty_score
-		structure_posterior:   sp
-		structure_posteriors:  sps
-		em_trajectory:         est.em_trajectory
+		...est
+		structure_id:         id
+		structure_posterior:  sp
+		structure_posteriors: sps
 	}
 }
 
 // with_residual_geometry returns a copy with the residual / geometry-cost fields replaced.
 pub fn (est StructuredHypothesis[T]) with_residual_geometry(r f64, gc f64) StructuredHypothesis[T] {
 	return StructuredHypothesis[T]{
-		scene:                 est.scene
-		params:                est.params
-		spn_posterior:         est.spn_posterior
-		structure_id:          est.structure_id
-		geometry_family:       est.geometry_family
-		template_delta:        est.template_delta
-		representation:        est.representation
-		candidate_params:      est.candidate_params
-		candidate_scores:      est.candidate_scores
-		candidate_posterior:   est.candidate_posterior
-		candidate_temperature: est.candidate_temperature
-		hypotheses:            est.hypotheses
-		factor_sizes:          est.factor_sizes
-		factor_indices:        est.factor_indices
-		responsibility_max:    est.responsibility_max
-		posterior_entropy:     est.posterior_entropy
-		residual:              r
-		complexity:            est.complexity
-		geometry_cost:         gc
-		novelty_score:         est.novelty_score
-		structure_posterior:   est.structure_posterior
-		structure_posteriors:  est.structure_posteriors
-		em_trajectory:         est.em_trajectory
+		...est
+		residual:      r
+		geometry_cost: gc
 	}
 }
 

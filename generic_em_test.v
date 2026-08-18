@@ -1,7 +1,6 @@
 module conger
 
-// generic_em_test.v — minimal end-to-end exercise of the generic EMLoop and the
-// ForwardModel protocol (both previously untested in this repo).
+// generic_em_test.v — minimal end-to-end exercise of the generic EMLoop.
 import math
 
 // --- minimal 2-component 1-D Gaussian mixture -------------------------------
@@ -91,18 +90,4 @@ fn test_emloop_converges_on_toy_gmm() {
 	for i in 1 .. res.trajectory.len {
 		assert res.trajectory[i] >= res.trajectory[i - 1] - 1e-9
 	}
-}
-
-// --- ForwardModel protocol ---------------------------------------------------
-
-struct ConstResidual {}
-
-fn (c ConstResidual) residual(observation voidptr, params []f64) f64 {
-	return params[0]
-}
-
-fn test_forward_model_protocol() {
-	fm := ForwardModel(ConstResidual{})
-	assert fm.residual(unsafe { nil }, [2.5]) == 2.5
-	assert fm.residual(unsafe { nil }, [-1.0]) == -1.0
 }

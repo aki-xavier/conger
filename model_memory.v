@@ -13,17 +13,7 @@ pub fn split_save(m MixtureSPN, path string) (string, string) {
 	tens.insert('f_mean', m.f_mean or { mlx.zeros([1], .float32) })
 	tens.insert('basis', m.basis or { mlx.zeros([1, 1], .float32) })
 	mlx.save_safetensors(t_path, tens, mlx.new_map_string_to_string())
-	mut ctens := mlx.new_map_string_to_array()
-	ctens.insert('log_w', m.log_w)
-	ctens.insert('f_mu', m.f_mu)
-	ctens.insert('f_var', m.f_var)
-	ctens.insert('t_mu', m.t_mu)
-	ctens.insert('cat_logp', m.cat_logp)
-	mut meta := mlx.new_map_string_to_string()
-	meta.insert('rel_floor', m.rel_floor.str())
-	meta.insert('cat_sizes', encode_ints(m.cat_sizes))
-	meta.insert('n_stratum', m.n_stratum.str())
-	mlx.save_safetensors(c_path, ctens, meta)
+	mlx.save_safetensors(c_path, m.spn_component_tensors(), m.spn_meta())
 	return t_path, c_path
 }
 
@@ -58,22 +48,13 @@ pub fn load_components(path string) (map[string]mlx.Array, ModelMeta) {
 		comp[key] = a
 	}
 	mlx.use_gpu()
-	out_meta := ModelMeta{
-		rel_floor: meta.get('rel_floor').f64()
-		cat_sizes: decode_ints(meta.get('cat_sizes'))
-		n_stratum: meta.get('n_stratum').int()
-	}
-	return comp, out_meta
+	return comp, decode_spn_meta(meta)
 }
 
 // assemble builds a full MixtureSPN from split files.
 pub fn assemble_model(path string) MixtureSPN {
 	f_mean, basis := load_transform(path)
 	comp, meta := load_components(path)
-	mut csizes := meta.cat_sizes.clone()
-	if csizes.len == 0 {
-		csizes = [3]
-	}
 	mut m := MixtureSPN{
 		log_w:     comp['log_w'] or { mlx.empty() }
 		f_mu:      comp['f_mu'] or { mlx.empty() }
@@ -83,9 +64,10 @@ pub fn assemble_model(path string) MixtureSPN {
 		rel_floor: meta.rel_floor
 		f_mean:    f_mean
 		basis:     basis
-		cat_sizes: csizes
+		cat_sizes: meta.cat_sizes
 		n_stratum: meta.n_stratum
 	}
+	repair_spn_defaults(mut m)
 	m.init_norm()
 	return m
 }
@@ -273,8 +255,4 @@ pub fn model_size_mb(m MixtureSPN) f64 {
 		tot += bs.size() * bs.itemsize()
 	}
 	return f64(tot) / 1e6
-}
-
-pub fn max_i(a int, b int) int {
-	return if a > b { a } else { b }
 }
