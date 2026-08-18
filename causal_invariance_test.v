@@ -1,9 +1,7 @@
 module conger
 
 // causal_invariance_test.v — held-out lighting probe + marginalisation tests.
-
 import math
-
 import mlx
 
 fn test_lighting_holdout_partitions_grid() {
@@ -84,12 +82,12 @@ fn test_summarize_fully_invariant() {
 
 fn test_invariance_probe_render_recovers_hue() {
 	holdout := lighting_holdout_split(3, 3, 2, 2)
-	cb := new_codebook(InverseConfig{scene_family: 'single'})
+	cb := new_codebook(InverseConfig{ scene_family: 'single' })
 	in_row := [0.0, 72.0, 72.0, 0.45, 3.2, 2.0, 0.0, 0.0]
 	out_row := [0.0, 80.0, 70.0, 0.5, 3.0, 4.0, 2.0, 0.0]
 	mut renderer, cam_l, cam_r := make_renderer(stereo_base)
-	report := invariance_probe_run(cb, [in_row, out_row], holdout, 'hue', mut renderer,
-		cam_l, cam_r)
+	report := invariance_probe_run(cb, [in_row, out_row], holdout, 'hue', mut renderer, cam_l,
+		cam_r)
 	assert report.n_groups == 2
 	assert report.in_support_accuracy == 1.0
 	assert report.holdout_accuracy == 1.0

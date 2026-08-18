@@ -1,7 +1,6 @@
 module conger
 
 // depth_normal_test.v — DepthNormalModel (depth↔normal) black-box test.
-
 import math
 
 fn test_depth_normal_denoises_depth() {
@@ -27,9 +26,9 @@ fn test_depth_normal_denoises_depth() {
 
 	model := new_depth_normal_model(z_obs, s_obs, 0.5, 0.02)
 	mut loop := EMLoop[DepthNormalModel, []f64, []f64]{
-		model: model
+		model:     model
 		max_iters: 30
-		tol: 1e-8
+		tol:       1e-8
 	}
 	result := loop.run([]f64{}, z_obs)
 

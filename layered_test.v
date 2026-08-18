@@ -1,13 +1,11 @@
 module conger
 
 // layered_test.v — layered occlusion scene family tests.
-
 import math
-
 import mlx
 
 fn test_layered_sampling_and_scene() {
-	cb := new_layered_codebook(InverseConfig{scene_family: 'layered'})
+	cb := new_layered_codebook(InverseConfig{ scene_family: 'layered' })
 	p := lcb_sample(1, 123, false)
 	assert p.dim(0) == n_combo_layered && p.dim(1) == 14
 	z0 := p.take_axis(sel1(4), 1).data_f32()
@@ -15,11 +13,13 @@ fn test_layered_sampling_and_scene() {
 	for i in 0 .. z0.len {
 		assert z0[i] > z1[i]
 	}
-	combos := p.take_axis(mlx.array_i32([i32(0), i32(6), i32(5), i32(11), i32(12),
-		i32(13)], [6]), 1).astype(.int32).data_i32()
+	combos := p.take_axis(mlx.array_i32([i32(0), i32(6), i32(5), i32(11), i32(12), i32(13)], [
+		6,
+	]), 1).astype(.int32).data_i32()
 	mut seen := map[string]bool{}
 	for i in 0 .. combos.len / 6 {
-		key := '${combos[i * 6]},${combos[i * 6 + 1]},${combos[i * 6 + 2]},${combos[i * 6 + 3]},${combos[i * 6 + 4]},${combos[i * 6 + 5]}'
+		key := '${combos[i * 6]},${combos[i * 6 + 1]},${combos[i * 6 + 2]},${combos[i * 6 + 3]},${combos[
+			i * 6 + 4]},${combos[i * 6 + 5]}'
 		seen[key] = true
 	}
 	assert seen.len == n_combo_layered
@@ -33,7 +33,7 @@ fn test_layered_sampling_and_scene() {
 }
 
 fn test_layered_targets_and_decoding() {
-	cb := new_layered_codebook(InverseConfig{scene_family: 'layered'})
+	cb := new_layered_codebook(InverseConfig{ scene_family: 'layered' })
 	p := lcb_sample(1, 7, false)
 	t := db_targets(p)
 	c := db_scene_classes(p)
@@ -54,12 +54,12 @@ fn test_layered_targets_and_decoding() {
 		assert math.abs(prm[i] - f64(p0[i])) < 1e-5
 	}
 	est := StructuredHypothesis{
-		scene: cb.to_scene(prm)
-		params: prm
-		spn_posterior: cat_p.take_axis(sel1(0), 0)
+		scene:            cb.to_scene(prm)
+		params:           prm
+		spn_posterior:    cat_p.take_axis(sel1(0), 0)
 		candidate_params: [prm]
-		factor_sizes: [3, 3, 6, 6, 3, 3]
-		factor_indices: [0, 6, 5, 11, 12, 13]
+		factor_sizes:     [3, 3, 6, 6, 3, 3]
+		factor_indices:   [0, 6, 5, 11, 12, 13]
 	}
 	marginals := est.factor_marginals()
 	assert marginals.len == 6
@@ -69,7 +69,7 @@ fn test_layered_targets_and_decoding() {
 }
 
 fn test_layered_residual_roundtrip() {
-	cb := new_layered_codebook(InverseConfig{scene_family: 'layered'})
+	cb := new_layered_codebook(InverseConfig{ scene_family: 'layered' })
 	p := lcb_sample(1, 11, false).take_axis(mlx.arange(0.0, 4.0, 1.0, .int32), 0)
 	t := db_targets(p)
 	c := db_scene_classes(p)
@@ -113,4 +113,3 @@ fn test_layered_residual_roundtrip() {
 		}
 	}
 }
-

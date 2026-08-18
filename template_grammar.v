@@ -37,8 +37,8 @@ fn new_template_grammar(operations []string, max_depth int, kinds []int) Templat
 	}
 	return TemplateGrammar{
 		operations: operations
-		max_depth: max_depth
-		kinds: ks
+		max_depth:  max_depth
+		kinds:      ks
 	}
 }
 
@@ -57,11 +57,11 @@ fn (g TemplateGrammar) primitives() []TemplateRule {
 	mut out := []TemplateRule{}
 	for k in g.kinds {
 		out << TemplateRule{
-			operation: 'primitive'
-			base_kind: k
-			part_kind: -1
+			operation:  'primitive'
+			base_kind:  k
+			part_kind:  -1
 			complexity: 1.0
-			depth: 1
+			depth:      1
 		}
 	}
 	return out
@@ -76,11 +76,11 @@ fn (g TemplateGrammar) composites() []TemplateRule {
 			parts := if same_kind { [base] } else { g.kinds }
 			for part in parts {
 				out << TemplateRule{
-					operation: op
-					base_kind: base
-					part_kind: part
+					operation:  op
+					base_kind:  base
+					part_kind:  part
 					complexity: complexity
-					depth: 2
+					depth:      2
 				}
 			}
 		}

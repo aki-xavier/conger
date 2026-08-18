@@ -3,33 +3,30 @@ module conger
 // child_codebook_factory.v — materialise a ChildTemplateSpec into a
 // constraint-bearing child scene family (V port of src/child_codebook_factory.py;
 // dynamic Python classes become a constraint struct + parametrised samplers).
-
 import cga
-
 import math
-
 import mlx
 
 // ChildCodebook is a constraint-bearing scene family derived from a spec.
 struct ChildCodebook {
-	cfg         InverseConfig
-	operation   string
-	scale_lo    f64
-	scale_hi    f64
-	lateral_lo  f64
-	lateral_hi  f64
+	cfg          InverseConfig
+	operation    string
+	scale_lo     f64
+	scale_hi     f64
+	lateral_lo   f64
+	lateral_hi   f64
 	depth_gap_lo f64
 	depth_gap_hi f64
-	part_kinds  []int
-	part_hues   []int
-	base_kinds  []int
-	base_hues   []int
-	spacing     f64
-	period_lo   f64
-	period_hi   f64
-	n_combo_n   int
-	lineage     TemplateLineage
-	variant     string
+	part_kinds   []int
+	part_hues    []int
+	base_kinds   []int
+	base_hues    []int
+	spacing      f64
+	period_lo    f64
+	period_hi    f64
+	n_combo_n    int
+	lineage      TemplateLineage
+	variant      string
 }
 
 // ccf_list_or returns a []f64 constraint or a default pair.
@@ -61,7 +58,8 @@ fn ccf_int_list(delta map[string]MetaValue, key string, default_n int) []int {
 // ccf_build derives the constraint fields for a spec.
 fn ccf_build(spec ChildTemplateSpec) ChildCodebook {
 	op := spec.operation
-	scale_lo, scale_hi := ccf_list_or(spec.constraints, 'scale_ratio', ccb_scale_ratio_lo, ccb_scale_ratio_hi)
+	scale_lo, scale_hi := ccf_list_or(spec.constraints, 'scale_ratio', ccb_scale_ratio_lo,
+		ccb_scale_ratio_hi)
 	part_kinds := ccf_int_list(spec.constraints, 'part_kinds', n_kind)
 	part_hues := ccf_int_list(spec.constraints, 'part_hues', n_hue)
 	mut base_kinds := [0, 1, 2]
@@ -78,8 +76,8 @@ fn ccf_build(spec ChildTemplateSpec) ChildCodebook {
 	if op == 'attach' {
 		lateral_lo, lateral_hi = ccf_list_or(spec.constraints, 'lateral_ratio', -ccb_lateral_ratio,
 			ccb_lateral_ratio)
-		depth_gap_lo, depth_gap_hi = ccf_list_or(spec.constraints, 'depth_jitter', ccb_depth_jitter_lo,
-			ccb_depth_jitter_hi)
+		depth_gap_lo, depth_gap_hi = ccf_list_or(spec.constraints, 'depth_jitter',
+			ccb_depth_jitter_lo, ccb_depth_jitter_hi)
 		n_combo_n = 3 * part_kinds.len * 6 * part_hues.len * light_colors_len * light_dirs_len
 	} else if op == 'layer' {
 		depth_gap_lo, depth_gap_hi = ccf_list_or(spec.constraints, 'depth_gap', 0.7, 1.4)
@@ -95,40 +93,41 @@ fn ccf_build(spec ChildTemplateSpec) ChildCodebook {
 			mut delta := spec.constraints.clone()
 			delta['lateral_ratio'] = [l_lo, l_hi]
 			lineage = TemplateLineage{
-				family: spec.name
+				family:        spec.name
 				parent_family: spec.parent_family
-				operation: spec.operation
-				complexity: spec.complexity
-				generation: spec.generation
-				delta: delta
+				operation:     spec.operation
+				complexity:    spec.complexity
+				generation:    spec.generation
+				delta:         delta
 			}
 		}
 	} else {
 		// mirror / repeat
 		spacing = lc_spacing_factor(op)
-		period_lo, period_hi = ccf_list_or(spec.constraints, 'period_ratio', lc_part_period_lo, lc_part_period_hi)
+		period_lo, period_hi = ccf_list_or(spec.constraints, 'period_ratio', lc_part_period_lo,
+			lc_part_period_hi)
 		base_kinds = part_kinds.clone()
 		base_hues = part_hues.clone()
 		n_combo_n = part_kinds.len * part_hues.len * light_colors_len * light_dirs_len
 	}
 	return ChildCodebook{
-		operation: op
-		scale_lo: scale_lo
-		scale_hi: scale_hi
-		lateral_lo: lateral_lo
-		lateral_hi: lateral_hi
+		operation:    op
+		scale_lo:     scale_lo
+		scale_hi:     scale_hi
+		lateral_lo:   lateral_lo
+		lateral_hi:   lateral_hi
 		depth_gap_lo: depth_gap_lo
 		depth_gap_hi: depth_gap_hi
-		part_kinds: part_kinds
-		part_hues: part_hues
-		base_kinds: base_kinds
-		base_hues: base_hues
-		spacing: spacing
-		period_lo: period_lo
-		period_hi: period_hi
-		n_combo_n: n_combo_n
-		lineage: lineage
-		variant: spec.name
+		part_kinds:   part_kinds
+		part_hues:    part_hues
+		base_kinds:   base_kinds
+		base_hues:    base_hues
+		spacing:      spacing
+		period_lo:    period_lo
+		period_hi:    period_hi
+		n_combo_n:    n_combo_n
+		lineage:      lineage
+		variant:      spec.name
 	}
 }
 
@@ -157,8 +156,8 @@ fn ccf_sample_composite(mut rng Rng, cb ChildCodebook) []f64 {
 		x1 := x0 + dx
 		y1 := y0 + s0 + s1 - overlap
 		zc1 := cam_z - z1
-		u1 := f64(img_w-1)/2.0 + x1 * fx / zc1
-		v1 := f64(img_h-1)/2.0 - y1 * fy / zc1
+		u1 := f64(img_w - 1) / 2.0 + x1 * fx / zc1
+		v1 := f64(img_h - 1) / 2.0 - y1 * fy / zc1
 		if lcb_inside(u0, v0, s0, z0) && lcb_inside(u1, v1, s1, z1) {
 			return [u0, v0, s0, z0, u1, v1, s1, z1]
 		}
@@ -200,8 +199,8 @@ fn ccf_sample_lateral(mut rng Rng, cb ChildCodebook) []f64 {
 		period := rng.uniform(cb.period_lo, cb.period_hi)
 		x1 := x0 + period * cb.spacing * (s0 + s1)
 		zc1 := cam_z - z1
-		u1 := f64(img_w-1)/2.0 + x1 * fx / zc1
-		v1 := f64(img_h-1)/2.0 - y0 * fy / zc1
+		u1 := f64(img_w - 1) / 2.0 + x1 * fx / zc1
+		v1 := f64(img_h - 1) / 2.0 - y0 * fy / zc1
 		if lcb_inside(u0, v0, s0, z0) && lcb_inside(u1, v1, s1, z1) {
 			return [u0, v0, s0, z0, u1, v1, s1, z1]
 		}

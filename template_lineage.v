@@ -43,12 +43,12 @@ fn (c ChildTemplateSpec) lineage() TemplateLineage {
 		delta[k] = v
 	}
 	return TemplateLineage{
-		family: c.name
+		family:        c.name
 		parent_family: c.parent_family
-		operation: c.operation
-		complexity: c.complexity
-		generation: c.generation
-		delta: delta
+		operation:     c.operation
+		complexity:    c.complexity
+		generation:    c.generation
+		delta:         delta
 	}
 }
 
@@ -56,11 +56,11 @@ fn (c ChildTemplateSpec) lineage() TemplateLineage {
 
 fn single_lineage() TemplateLineage {
 	return TemplateLineage{
-		family: 'single'
+		family:        'single'
 		parent_family: ''
-		operation: 'primitive'
-		complexity: 1.0
-		generation: 0
+		operation:     'primitive'
+		complexity:    1.0
+		generation:    0
 	}
 }
 
@@ -69,12 +69,12 @@ fn layered_lineage() TemplateLineage {
 	delta['relation'] = 'independent_front_back'
 	delta['n_objects'] = 2
 	return TemplateLineage{
-		family: 'layered'
+		family:        'layered'
 		parent_family: 'single'
-		operation: 'layer'
-		complexity: 2.0
-		generation: 1
-		delta: delta
+		operation:     'layer'
+		complexity:    2.0
+		generation:    1
+		delta:         delta
 	}
 }
 
@@ -82,12 +82,12 @@ fn composite_lineage() TemplateLineage {
 	mut delta := map[string]MetaValue{}
 	delta['relation'] = 'attached_on_top'
 	return TemplateLineage{
-		family: 'composite'
+		family:        'composite'
 		parent_family: 'layered'
-		operation: 'attach'
-		complexity: 1.5
-		generation: 2
-		delta: delta
+		operation:     'attach'
+		complexity:    1.5
+		generation:    2
+		delta:         delta
 	}
 }
 
@@ -95,11 +95,11 @@ fn lateral_lineage() TemplateLineage {
 	mut delta := map[string]MetaValue{}
 	delta['relation'] = 'mirror'
 	return TemplateLineage{
-		family: 'lateral'
+		family:        'lateral'
 		parent_family: 'composite'
-		operation: 'mirror'
-		complexity: 1.4
-		generation: 3
-		delta: delta
+		operation:     'mirror'
+		complexity:    1.4
+		generation:    3
+		delta:         delta
 	}
 }

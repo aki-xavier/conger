@@ -1,7 +1,6 @@
 module conger
 
 // motion_layers_test.v — MotionLayersModel (motion segmentation↔optical flow) test.
-
 import math
 
 fn test_motion_layers_recovers_velocities() {
@@ -10,9 +9,9 @@ fn test_motion_layers_recovers_velocities() {
 	obs := model.sample(gt, 0)
 
 	mut loop := EMLoop[MotionLayersModel, []f64, [][]f64]{
-		model: model
+		model:     model
 		max_iters: 30
-		tol: 1e-10
+		tol:       1e-10
 	}
 	result := loop.run(obs, [0.3, 0.7])
 

@@ -1,11 +1,8 @@
 module conger
 
 // scene_reconstructor_test.v — full cga.Scene reconstructor tests.
-
 import math
-
 import cga
-
 import mlx
 
 fn test_scene_param_decoding() {
@@ -76,8 +73,7 @@ fn test_render_residual_recovers_appearance() {
 	scene := cb.to_scene(gt)
 	fl := renderer.render(scene, cam_l)
 	fr := renderer.render(scene, cam_r)
-	pred, score, scores := sr_refine_appearance(cb, wrong, fl, fr, mut renderer,
-		cam_l, cam_r)
+	pred, score, scores := sr_refine_appearance(cb, wrong, fl, fr, mut renderer, cam_l, cam_r)
 	assert pred == gt
 	assert score < 1e-6
 	assert scores.dim(0) == 54
@@ -96,8 +92,8 @@ fn test_topk_structure_refinement_and_marginals() {
 	wrong_s := f64(sr_s_proxy(0, stats).item_f32()) + s_resid
 	wrong := [0.0, gt[1], gt[2], wrong_s, gt[4], 0.0, 0.0, 0.0]
 	kind_p := arr32([0.4, 0.1, 0.5], [3])
-	pred, candidates, scores, posterior, temperature := sr_refine_scene(cb, wrong,
-		kind_p, stats, fl, fr, 2, mut renderer, cam_l, cam_r)
+	pred, candidates, scores, posterior, temperature := sr_refine_scene(cb, wrong, kind_p, stats,
+		fl, fr, 2, mut renderer, cam_l, cam_r)
 	assert pred[0] == gt[0] && pred[1] == gt[1] && pred[2] == gt[2]
 	assert math.abs(pred[3] - gt[3]) < 1e-6
 	assert pred[4] == gt[4] && pred[5] == gt[5] && pred[6] == gt[6] && pred[7] == gt[7]
@@ -106,15 +102,15 @@ fn test_topk_structure_refinement_and_marginals() {
 	assert temperature > 0.0
 	assert math.abs(f64(posterior.sum().item_f32()) - 1.0) < 1e-5
 	estimate := StructuredHypothesis{
-		scene: cb.to_scene(pred)
-		params: pred
-		spn_posterior: mlx.zeros([15], .float32)
-		candidate_params: candidates
-		candidate_scores: scores
-		candidate_posterior: posterior
+		scene:                 cb.to_scene(pred)
+		params:                pred
+		spn_posterior:         mlx.zeros([15], .float32)
+		candidate_params:      candidates
+		candidate_scores:      scores
+		candidate_posterior:   posterior
 		candidate_temperature: temperature
-		factor_sizes: [3, 6, 3, 3]
-		factor_indices: [0, 5, 6, 7]
+		factor_sizes:          [3, 6, 3, 3]
+		factor_indices:        [0, 5, 6, 7]
 	}
 	marg := estimate.factor_marginals()
 	assert f64(marg[0].data_f32()[2]) > 0.9
@@ -140,11 +136,11 @@ fn test_novelty_metrics_contract() {
 }
 
 fn test_evaluator_full_scene_contract() {
-	p_gt := arr32([0.0, 10.0, 20.0, 0.4, 3.0, 1.0, 0.0, 2.0, 2.0, 30.0, 40.0,
-		0.5, 3.5, 5.0, 2.0, 1.0], [2, 8])
+	p_gt := arr32([0.0, 10.0, 20.0, 0.4, 3.0, 1.0, 0.0, 2.0, 2.0, 30.0, 40.0, 0.5, 3.5, 5.0, 2.0,
+		1.0], [2, 8])
 	t_pred := p_gt.take_axis(mlx.arange(1.0, 5.0, 1.0, .int32), 1)
-	scene_pred := [[0.0, 10.0, 20.0, 0.4, 3.0, 1.0, 0.0, 2.0], [2.0, 30.0, 40.0,
-		0.5, 3.5, 5.0, 2.0, 1.0]]
+	scene_pred := [[0.0, 10.0, 20.0, 0.4, 3.0, 1.0, 0.0, 2.0],
+		[2.0, 30.0, 40.0, 0.5, 3.5, 5.0, 2.0, 1.0]]
 	out := Evaluator{}.report('合成', p_gt, t_pred, scene_pred, p_gt)
 	assert out['kind'] == 1.0
 	assert out['hue'] == 1.0

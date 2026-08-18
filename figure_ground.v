@@ -7,7 +7,6 @@ module conger
 // assignment; θ = (c, r, f, b). E step: soft assignment (soft pose prior ×
 // intensity likelihood); M step: intensities via weighted averaging, pose via
 // coordinate search minimising the negative mixture log likelihood.
-
 import math
 
 struct FigureGroundModel {
@@ -21,12 +20,12 @@ struct FigureGroundModel {
 
 fn new_figure_ground_model(n int, sigma f64, delta_c f64, delta_r f64, boundary f64) FigureGroundModel {
 	return FigureGroundModel{
-		n: n
-		sigma: sigma
-		delta_c: delta_c
-		delta_r: delta_r
+		n:        n
+		sigma:    sigma
+		delta_c:  delta_c
+		delta_r:  delta_r
 		boundary: boundary
-		x: linspace(0.0, 1.0, n)
+		x:        linspace(0.0, 1.0, n)
 	}
 }
 
@@ -50,8 +49,10 @@ fn (m FigureGroundModel) mixture_ll(c f64, r f64, f f64, b f64, observation []f6
 	prior := m.fg_prior(c, r)
 	mut s := 0.0
 	for i in 0 .. m.n {
-		p := prior[i] * math.exp(-0.5 * ((observation[i] - f) / m.sigma) * ((observation[i] - f) / m.sigma)) +
-			(1.0 - prior[i]) * math.exp(-0.5 * ((observation[i] - b) / m.sigma) * ((observation[i] - b) / m.sigma))
+		p :=
+			prior[i] * math.exp(-0.5 * ((observation[i] - f) / m.sigma) * ((observation[i] - f) / m.sigma)) +
+			(1.0 - prior[i]) * math.exp(-0.5 * ((observation[i] - b) / m.sigma) * ((observation[i] -
+			b) / m.sigma))
 		s += math.log(p + 1e-12)
 	}
 	return s

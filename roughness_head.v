@@ -2,7 +2,6 @@ module conger
 
 // roughness_head.v — shape-descriptor → roughness 1-NN kernel regression head
 // (V port of src/roughness_head.py; numpy replaced with pure-V f64 arrays).
-
 import math
 
 const roughness_default = 0.55

@@ -15,7 +15,9 @@ struct ChildTemplateWorkflow {
 
 fn new_child_template_workflow() ChildTemplateWorkflow {
 	return ChildTemplateWorkflow{
-		learner: TemplateDeltaLearner{min_evidence: 2}
+		learner: TemplateDeltaLearner{
+			min_evidence: 2
+		}
 	}
 }
 

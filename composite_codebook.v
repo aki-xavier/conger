@@ -2,9 +2,7 @@ module conger
 
 // composite_codebook.v — explicit attached composite template (base + attached
 // part), V port of src/composite_codebook.py.
-
 import cga
-
 import mlx
 
 const ccb_scale_ratio_lo = 0.35
@@ -50,8 +48,8 @@ fn ccb_sample_composite(mut rng Rng, extrap bool) []f64 {
 		x1 := x0 + dx
 		y1 := y0 + s0 + s1 - overlap
 		zc1 := cam_z - z1
-		u1 := f64(img_w-1)/2.0 + x1 * fx / zc1
-		v1 := f64(img_h-1)/2.0 - y1 * fy / zc1
+		u1 := f64(img_w - 1) / 2.0 + x1 * fx / zc1
+		v1 := f64(img_h - 1) / 2.0 - y1 * fy / zc1
 		if lcb_inside(u0, v0, s0, z0) && lcb_inside(u1, v1, s1, z1) {
 			return [u0, v0, s0, z0, u1, v1, s1, z1]
 		}
@@ -131,8 +129,7 @@ fn (cb CompositeCodebook) to_scene(params []f64) cga.Scene {
 	lcol := int(params[12])
 	ldir := int(params[13])
 	dirs := codebook_light_dirs()
-	sc.add_light(cga.directional_light(cga.color_hex(light_colors[lcol]), 0.7,
-		dirs[ldir]))
+	sc.add_light(cga.directional_light(cga.color_hex(light_colors[lcol]), 0.7, dirs[ldir]))
 	for off in [0, 6] {
 		kind := int(params[off])
 		u := params[off + 1]
@@ -141,10 +138,10 @@ fn (cb CompositeCodebook) to_scene(params []f64) cga.Scene {
 		z := params[off + 4]
 		hue := int(params[off + 5])
 		x, y := unproject(u, v, z)
-		mat := cga.standard_material(cga.color_hex(obj_color(hue)), 0.55, 0.0,
-			cga.color_hex(0), 1.0, 1.5, 0.0)
-		sc.add_mesh(cga.mesh(codebook_geometry(kind, s), mat, [x, y, z]!,
-			[0.0, 0.0, 0.0]!, 0.0, none))
+		mat := cga.standard_material(cga.color_hex(obj_color(hue)), 0.55, 0.0, cga.color_hex(0),
+			1.0, 1.5, 0.0)
+		sc.add_mesh(cga.mesh(codebook_geometry(kind, s), mat, [x, y, z]!, [0.0, 0.0, 0.0]!, 0.0,
+			none))
 	}
 	return sc
 }

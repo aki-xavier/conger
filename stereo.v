@@ -2,7 +2,6 @@ module conger
 
 // stereo.v — binocular disparity → depth (parallel camera rig), V port of
 // src/stereo.py.
-
 import mlx
 
 struct StereoDepth {

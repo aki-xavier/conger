@@ -6,7 +6,6 @@ module conger
 // correspondence (which source point generated it); θ = rigid transform
 // (rotation θ + translation t). E step: soft correspondence; M step: expected
 // source → Kabsch rigid fit.
-
 import math
 
 struct SoftICPModel {
@@ -19,8 +18,8 @@ fn new_soft_icp_model(source [][]f64, sigma f64) SoftICPModel {
 	assert source.len > 0 && source[0].len == 2
 	return SoftICPModel{
 		source: source
-		sigma: sigma
-		n: source.len
+		sigma:  sigma
+		n:      source.len
 	}
 }
 

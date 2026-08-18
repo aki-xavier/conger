@@ -1,7 +1,6 @@
 module conger
 
 // structure_benchmark_test.v — V port of tests/test_structure_benchmark.py.
-
 import math
 
 fn sb_test_result(true_fam string, pred string, p f64) StructureCaseResult {
@@ -15,11 +14,11 @@ fn sb_test_result(true_fam string, pred string, p f64) StructureCaseResult {
 		scores[k] = 1.0
 	}
 	return StructureCaseResult{
-		true_family: true_fam
-		predicted: pred
-		posterior: posterior
-		residuals: residuals
-		scores: scores
+		true_family:         true_fam
+		predicted:           pred
+		posterior:           posterior
+		residuals:           residuals
+		scores:              scores
 		needs_new_structure: false
 	}
 }

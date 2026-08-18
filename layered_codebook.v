@@ -2,11 +2,8 @@ module conger
 
 // layered_codebook.v — two-object occlusion front/back scene family
 // (V port of src/layered_codebook.py).
-
 import cga
-
 import math
-
 import mlx
 
 const lcb_target_idx = [1, 2, 3, 4, 7, 8, 9, 10]
@@ -149,8 +146,7 @@ fn (cb LayeredCodebook) to_scene(params []f64) cga.Scene {
 	lcol := int(params[12])
 	ldir := int(params[13])
 	dirs := codebook_light_dirs()
-	sc.add_light(cga.directional_light(cga.color_hex(light_colors[lcol]), 0.7,
-		dirs[ldir]))
+	sc.add_light(cga.directional_light(cga.color_hex(light_colors[lcol]), 0.7, dirs[ldir]))
 	for off in [0, 6] {
 		kind := int(params[off])
 		u := params[off + 1]
@@ -159,24 +155,33 @@ fn (cb LayeredCodebook) to_scene(params []f64) cga.Scene {
 		z := params[off + 4]
 		hue := int(params[off + 5])
 		x, y := unproject(u, v, z)
-		mat := cga.standard_material(cga.color_hex(obj_color(hue)), 0.55, 0.0,
-			cga.color_hex(0), 1.0, 1.5, 0.0)
-		sc.add_mesh(cga.mesh(codebook_geometry(kind, s), mat, [x, y, z]!,
-			[0.0, 0.0, 0.0]!, 0.0, none))
+		mat := cga.standard_material(cga.color_hex(obj_color(hue)), 0.55, 0.0, cga.color_hex(0),
+			1.0, 1.5, 0.0)
+		sc.add_mesh(cga.mesh(codebook_geometry(kind, s), mat, [x, y, z]!, [0.0, 0.0, 0.0]!, 0.0,
+			none))
 	}
 	return sc
 }
 
 // lcb_targets returns the continuous targets [u0,v0,s0,z0,u1,v1,s1,z1].
 fn lcb_targets(p mlx.Array) mlx.Array {
-	return p.take_axis(mlx.arange(0.0, 8.0, 1.0, .int32), 0).take_axis(mlx.array_i32([i32(1),
-		i32(2), i32(3), i32(4), i32(7), i32(8), i32(9), i32(10)], [8]), 1)
+	return p.take_axis(mlx.arange(0.0, 8.0, 1.0, .int32), 0).take_axis(mlx.array_i32([
+		i32(1),
+		i32(2),
+		i32(3),
+		i32(4),
+		i32(7),
+		i32(8),
+		i32(9),
+		i32(10),
+	], [8]), 1)
 }
 
 // lcb_scene_classes returns the discrete factors [k0,k1,h0,h1,lcol,ldir].
 fn lcb_scene_classes(p mlx.Array) mlx.Array {
-	return p.take_axis(mlx.array_i32([i32(0), i32(6), i32(5), i32(11), i32(12),
-		i32(13)], [6]), 1).astype(.int32)
+	return p.take_axis(mlx.array_i32([i32(0), i32(6), i32(5), i32(11), i32(12), i32(13)], [
+		6,
+	]), 1).astype(.int32)
 }
 
 fn math_min_f64(a f64, b f64) f64 {

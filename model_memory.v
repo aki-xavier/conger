@@ -2,9 +2,7 @@ module conger
 
 // model_memory.v — model memory / on-demand load + dynamic forgetting
 // (V port of src/model_memory.py).
-
 import math
-
 import mlx
 
 // split_save writes the whitening transform and component table to separate files.
@@ -76,14 +74,14 @@ fn assemble_model(path string) MixtureSPN {
 		csizes = [3]
 	}
 	mut m := MixtureSPN{
-		log_w: comp['log_w']
-		f_mu: comp['f_mu']
-		f_var: comp['f_var']
-		t_mu: comp['t_mu']
-		cat_logp: comp['cat_logp']
+		log_w:     comp['log_w']
+		f_mu:      comp['f_mu']
+		f_var:     comp['f_var']
+		t_mu:      comp['t_mu']
+		cat_logp:  comp['cat_logp']
 		rel_floor: meta.rel_floor
-		f_mean: f_mean
-		basis: basis
+		f_mean:    f_mean
+		basis:     basis
 		cat_sizes: csizes
 		n_stratum: meta.n_stratum
 	}
@@ -101,14 +99,14 @@ fn truncate_basis(m MixtureSPN, d_max int) MixtureSPN {
 	basis := m.basis or { panic('missing basis') }
 	sel := mlx.arange(f64(d - dm), f64(d), 1.0, .int32)
 	mut out := MixtureSPN{
-		log_w: m.log_w
-		f_mu: m.f_mu.take_axis(sel, 1)
-		f_var: m.f_var.take_axis(sel, 1)
-		t_mu: m.t_mu
-		cat_logp: m.cat_logp
+		log_w:     m.log_w
+		f_mu:      m.f_mu.take_axis(sel, 1)
+		f_var:     m.f_var.take_axis(sel, 1)
+		t_mu:      m.t_mu
+		cat_logp:  m.cat_logp
 		rel_floor: m.rel_floor
-		f_mean: m.f_mean
-		basis: basis.take_axis(sel, 1)
+		f_mean:    m.f_mean
+		basis:     basis.take_axis(sel, 1)
 		cat_sizes: m.cat_sizes
 		n_stratum: m.n_stratum
 	}
@@ -122,8 +120,7 @@ fn coreset(z mlx.Array, k int, rng mlx.Array) mlx.Array {
 	if k >= n {
 		return mlx.arange(0.0, f64(n), 1.0, .int32)
 	}
-	start := mlx.random_randint(mlx.int_scalar(0), mlx.int_scalar(n), [1], .int32,
-		rng).data_i32()[0]
+	start := mlx.random_randint(mlx.int_scalar(0), mlx.int_scalar(n), [1], .int32, rng).data_i32()[0]
 	mut sel := [start]
 	zstart := z.take_axis(sel1(start), 0) // (1,D)
 	mut d2 := z.subtract(zstart).square().sum_axis(1, false)
@@ -147,8 +144,8 @@ fn forget_components(m MixtureSPN, k_max int, policy string, seed u64) MixtureSP
 	if km >= k {
 		return m
 	}
-	stratum := m.cat_logp.take_axis(mlx.arange(0.0, f64(m.n_stratum), 1.0, .int32),
-		1).argmax_axis(1, false)
+	stratum := m.cat_logp.take_axis(mlx.arange(0.0, f64(m.n_stratum), 1.0, .int32), 1).argmax_axis(1,
+		false)
 	rng := mlx.random_key(seed)
 	mut kept := []int{}
 	for j in 0 .. m.n_stratum {
@@ -158,8 +155,7 @@ fn forget_components(m MixtureSPN, k_max int, policy string, seed u64) MixtureSP
 		kj = min_i(kj, nj)
 		mut pick := mlx.Array{}
 		if policy == 'random' {
-			pick = mlx.random_permutation(sel, 0, rng).take(mlx.arange(0.0, f64(kj),
-				1.0, .int32))
+			pick = mlx.random_permutation(sel, 0, rng).take(mlx.arange(0.0, f64(kj), 1.0, .int32))
 		} else {
 			pick = sel.take(coreset(m.f_mu.take_axis(sel, 0), kj, rng))
 		}
@@ -178,14 +174,14 @@ fn forget_components(m MixtureSPN, k_max int, policy string, seed u64) MixtureSP
 	f_var := gvar.take_axis(s_kept, 0)
 	log_w := mlx.full_value([kept.len], f32(-math.log(f64(kept.len))), .float32)
 	mut out := MixtureSPN{
-		log_w: log_w
-		f_mu: m.f_mu.take_axis(idx, 0)
-		f_var: f_var
-		t_mu: m.t_mu.take_axis(idx, 0)
-		cat_logp: m.cat_logp.take_axis(idx, 0)
+		log_w:     log_w
+		f_mu:      m.f_mu.take_axis(idx, 0)
+		f_var:     f_var
+		t_mu:      m.t_mu.take_axis(idx, 0)
+		cat_logp:  m.cat_logp.take_axis(idx, 0)
 		rel_floor: m.rel_floor
-		f_mean: m.f_mean
-		basis: m.basis
+		f_mean:    m.f_mean
+		basis:     m.basis
 		cat_sizes: m.cat_sizes
 		n_stratum: m.n_stratum
 	}

@@ -7,7 +7,6 @@ module conger
 // constant velocity v_k. Latent = per-pixel layer assignment; θ = (v_1,…,v_K).
 // E step computes soft assignments + spatial smoothing; M step re-estimates
 // each layer velocity by weighted averaging.
-
 import math
 
 struct MotionLayersModel {
@@ -24,11 +23,11 @@ fn new_motion_layers_model(k int, n int, sigma f64, smooth int) MotionLayersMode
 		x[i] = x[i] / f64(max_int(n - 1, 1))
 	}
 	return MotionLayersModel{
-		k: k
-		n: n
-		sigma: sigma
+		k:      k
+		n:      n
+		sigma:  sigma
 		smooth: smooth
-		x: x
+		x:      x
 	}
 }
 

@@ -3,7 +3,6 @@ module conger
 // generic_structure_gate.v — domain-independent structural-posterior gate
 // (V port of src/generic_structure_gate.py). Pure-f64 softmax (the score arrays
 // are tiny; no MLX needed).
-
 import math
 
 struct GenericStructureDecision {
@@ -87,7 +86,8 @@ fn (g GenericStructureGate) scores_map(estimates map[string]StructuredHypothesis
 	mut scores := map[string]f64{}
 	for name, est in estimates {
 		residuals[name] = est.residual
-		scores[name] = est.residual + g.complexity_weight * est.complexity + g.geometry_weight * est.geometry_cost
+		scores[name] = est.residual + g.complexity_weight * est.complexity +
+			g.geometry_weight * est.geometry_cost
 	}
 	return residuals, scores
 }
@@ -101,13 +101,13 @@ fn (g GenericStructureGate) decide(estimates map[string]StructuredHypothesis) Ge
 	posterior := softmax_map(scores, temperature, g.priors)
 	best_name := argmin_of(scores)
 	best := estimates[best_name].with_structure(best_name, posterior[best_name], posterior)
-	needs_new := best_raw > g.birth_residual && (g.posterior_floor < 0.0
-		|| posterior[best_name] < g.posterior_floor)
+	needs_new := best_raw > g.birth_residual
+		&& (g.posterior_floor < 0.0 || posterior[best_name] < g.posterior_floor)
 	return GenericStructureDecision{
-		estimate: best
-		posterior: posterior
-		residuals: residuals
-		scores: scores
+		estimate:            best
+		posterior:           posterior
+		residuals:           residuals
+		scores:              scores
 		needs_new_structure: needs_new
 	}
 }
@@ -149,15 +149,15 @@ fn (g GenericStructureGate) decide_hierarchical(estimates map[string]StructuredH
 	}
 	best_name := argmin_of(scores)
 	best := estimates[best_name].with_structure(best_name, posterior[best_name], posterior)
-	needs_new := best_raw > g.birth_residual && (g.posterior_floor < 0.0
-		|| posterior[best_name] < g.posterior_floor)
+	needs_new := best_raw > g.birth_residual
+		&& (g.posterior_floor < 0.0 || posterior[best_name] < g.posterior_floor)
 	return GenericStructureDecision{
-		estimate: best
-		posterior: posterior
-		residuals: residuals
-		scores: scores
+		estimate:            best
+		posterior:           posterior
+		residuals:           residuals
+		scores:              scores
 		needs_new_structure: needs_new
-		family_posterior: family_posterior
-		family_conditional: family_conditional
+		family_posterior:    family_posterior
+		family_conditional:  family_conditional
 	}
 }

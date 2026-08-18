@@ -1,19 +1,15 @@
 module conger
 
 // model_memory_test.v — model memory/forgetting mechanism black-box tests.
-
 import math
-
 import os
-
 import mlx
 
 fn tiny_model(n int, v int, seed u64) MixtureSPN {
 	rng := mlx.random_key(seed)
 	f := mlx.random_normal([n, v], .float32, 0.0, 1.0, rng)
 	t := mlx.random_normal([n, 3], .float32, 0.0, 1.0, rng)
-	stratum := mlx.random_randint(mlx.int_scalar(0), mlx.int_scalar(3), [n], .int32,
-		rng)
+	stratum := mlx.random_randint(mlx.int_scalar(0), mlx.int_scalar(3), [n], .int32, rng)
 	scene := stratum.expand_dims(1).astype(.int32)
 	return fit_mixture_spn(f, t, stratum, 1e-2, scene, [3], 0)
 }
@@ -67,8 +63,7 @@ fn test_forget_components_bounds_k_and_uniform_weights() {
 	m2 := forget_components(m, 30, 'coreset', 0)
 	assert m2.f_mu.dim(0) == 30
 	assert math.abs(m2.log_w.exp().sum().item_f32() - 1.0) < 1e-4
-	strat := m2.cat_logp.take_axis(mlx.arange(0.0, 3.0, 1.0, .int32), 1).argmax_axis(1,
-		false)
+	strat := m2.cat_logp.take_axis(mlx.arange(0.0, 3.0, 1.0, .int32), 1).argmax_axis(1, false)
 	mut seen := map[int]bool{}
 	for v in strat.data_i32() {
 		seen[v] = true

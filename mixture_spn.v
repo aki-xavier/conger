@@ -2,9 +2,7 @@ module conger
 
 // mixture_spn.v — MixtureSPN: full-resolution shallow mixture SPN (sum of
 // instance-level diagonal-Gaussian blocks), V port of src/mixture_spn.py.
-
 import math
-
 import mlx
 
 const nc = 64 // E-step sample block rows
@@ -29,8 +27,8 @@ const n_stratum_default = 3
 
 fn (mut m MixtureSPN) init_norm() {
 	log2pi := math.log(2.0 * math.pi)
-	m.norm = m.log_w.subtract(m.f_var.log().add(mlx.f32_scalar(f32(log2pi))).sum_axis(1,
-		false).multiply(mlx.f32_scalar(0.5)))
+	m.norm =
+		m.log_w.subtract(m.f_var.log().add(mlx.f32_scalar(f32(log2pi))).sum_axis(1, false).multiply(mlx.f32_scalar(0.5)))
 }
 
 // z projects raw features into whitened coordinates (N,D).
@@ -75,7 +73,8 @@ fn tied_vars(z mlx.Array, stratum mlx.Array, rel_floor f64, n_stratum int) mlx.A
 		}
 		zj := z.take_axis(sel, 0)
 		vr := axis_var(zj, 0)
-		fl := axis_std(zj, 0).multiply(mlx.f32_scalar(f32(rel_floor))).square().add(mlx.f32_scalar(1e-8))
+		fl :=
+			axis_std(zj, 0).multiply(mlx.f32_scalar(f32(rel_floor))).square().add(mlx.f32_scalar(1e-8))
 		out << vr.maximum(fl)
 	}
 	return mlx.concatenate(out, 0)
@@ -138,14 +137,14 @@ fn fit_mixture_spn(f mlx.Array, t mlx.Array, stratum mlx.Array, rel_floor f64, s
 		clps << cat_logp(scj, cat_sizes)
 	}
 	mut m := MixtureSPN{
-		log_w: mlx.concatenate(ws, 0)
-		f_mu: mlx.concatenate(mus, 0)
-		f_var: mlx.concatenate(vars_, 0)
-		t_mu: mlx.concatenate(tmus, 0)
-		cat_logp: mlx.concatenate(clps, 0)
+		log_w:     mlx.concatenate(ws, 0)
+		f_mu:      mlx.concatenate(mus, 0)
+		f_var:     mlx.concatenate(vars_, 0)
+		t_mu:      mlx.concatenate(tmus, 0)
+		cat_logp:  mlx.concatenate(clps, 0)
 		rel_floor: rel_floor
-		f_mean: f_mean
-		basis: basis
+		f_mean:    f_mean
+		basis:     basis
 		cat_sizes: cat_sizes
 		n_stratum: n_stratum
 	}
@@ -264,14 +263,14 @@ fn load_mixture_spn(path string) MixtureSPN {
 	cat_sizes := decode_ints(meta.get('cat_sizes'))
 	n_stratum := meta.get('n_stratum').int()
 	mut m := MixtureSPN{
-		log_w: log_w
-		f_mu: f_mu
-		f_var: f_var
-		t_mu: t_mu
-		cat_logp: cat_logp
+		log_w:     log_w
+		f_mu:      f_mu
+		f_var:     f_var
+		t_mu:      t_mu
+		cat_logp:  cat_logp
 		rel_floor: rel_floor
-		f_mean: f_mean
-		basis: basis
+		f_mean:    f_mean
+		basis:     basis
 		cat_sizes: cat_sizes
 		n_stratum: n_stratum
 	}

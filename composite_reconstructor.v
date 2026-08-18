@@ -2,14 +2,19 @@ module conger
 
 // composite_reconstructor.v — part-aware attached-composite parameter decoding
 // (V port of src/composite_reconstructor.py).
-
 import mlx
 
 const cr_residual_scale = [1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0]
 
 // cr_topk returns the top-k indices of a 1-D posterior.
 fn cr_topk(p mlx.Array, k int) []int {
-	kk := if k < 1 { 1 } else if k > p.dim(0) { p.dim(0) } else { k }
+	kk := if k < 1 {
+		1
+	} else if k > p.dim(0) {
+		p.dim(0)
+	} else {
+		k
+	}
 	return p.negative().argsort().take(mlx.arange(0.0, f64(kk), 1.0, .int32)).data_i32()
 }
 
@@ -40,9 +45,9 @@ fn cr_refine_scene(codebook CompositeCodebook, base_params []f64, cat_p mlx.Arra
 				for h1 in tops[3] {
 					for lc in tops[4] {
 						for ld in tops[5] {
-							prm := [f64(k0), base_params[1], base_params[2], base_params[3],
-								base_params[4], f64(h0), f64(k1), base_params[7], base_params[8],
-								base_params[9], base_params[10], f64(h1), f64(lc), f64(ld)]
+							prm := [f64(k0), base_params[1], base_params[2], base_params[3], base_params[4],
+								f64(h0), f64(k1), base_params[7], base_params[8], base_params[9],
+								base_params[10], f64(h1), f64(lc), f64(ld)]
 							scene := codebook.to_scene(prm)
 							cl := renderer.render(scene, cam_l)
 							cr := renderer.render(scene, cam_r)
@@ -77,14 +82,13 @@ fn cr_from_frames(app InverseApp, net MixtureSPN, fl mlx.Array, fr mlx.Array, rw
 	mut posterior := ?mlx.Array(none)
 	mut temperature := f64(0)
 	mut hypotheses := [HypothesisCandidate{
-		params: prm
+		params:      prm
 		probability: 1.0
 	}]
 	mut residual := ?f64(none)
 	if refine {
 		cb := app.codebook as CompositeCodebook
-		prm2, cands, sc, post, temp := cr_refine_scene(cb, prm, cat_p0, fl, fr, 2, 1,
-			1)
+		prm2, cands, sc, post, temp := cr_refine_scene(cb, prm, cat_p0, fl, fr, 2, 1, 1)
 		prm = prm2.clone()
 		candidates = cands.clone()
 		scores = sc
@@ -95,31 +99,31 @@ fn cr_from_frames(app InverseApp, net MixtureSPN, fl mlx.Array, fr mlx.Array, rw
 		hypotheses = []
 		for i in order {
 			hypotheses << HypothesisCandidate{
-				params: candidates[i]
+				params:      candidates[i]
 				probability: f64(post.take(sel1(i)).item_f32())
-				residual: f64(sc.take(sel1(i)).item_f32())
+				residual:    f64(sc.take(sel1(i)).item_f32())
 			}
 		}
 		residual = f64(sc.min().item_f32())
 	}
 	_, ent, novelty := sr_novelty_metrics_sized(cat_p0, r, residual, lcb_cat_sizes)
 	return StructuredHypothesis{
-		scene: app.codebook.to_scene(prm)
-		params: prm
-		spn_posterior: cat_p0
-		geometry_family: app.codebook.geometry_family()
-		template_delta: lin.delta
-		candidate_params: candidates
-		candidate_scores: scores
-		candidate_posterior: posterior
+		scene:                 app.codebook.to_scene(prm)
+		params:                prm
+		spn_posterior:         cat_p0
+		geometry_family:       app.codebook.geometry_family()
+		template_delta:        lin.delta
+		candidate_params:      candidates
+		candidate_scores:      scores
+		candidate_posterior:   posterior
 		candidate_temperature: temperature
-		hypotheses: hypotheses
-		factor_sizes: lcb_cat_sizes
-		factor_indices: [0, 6, 5, 11, 12, 13]
-		responsibility_max: f64(r.max().item_f32())
-		posterior_entropy: ent
-		residual: residual or { 0.0 }
-		complexity: lin.complexity
-		novelty_score: novelty
+		hypotheses:            hypotheses
+		factor_sizes:          lcb_cat_sizes
+		factor_indices:        [0, 6, 5, 11, 12, 13]
+		responsibility_max:    f64(r.max().item_f32())
+		posterior_entropy:     ent
+		residual:              residual or { 0.0 }
+		complexity:            lin.complexity
+		novelty_score:         novelty
 	}
 }

@@ -1,17 +1,17 @@
 module conger
 
 // joint_layer_optimizer_test.v — joint template/occlusion/disparity test.
-
 import math
-
 import mlx
 
 fn test_joint_layer_optimization() {
 	h := 144
 	w := 144
 	yy, xx := meshgrid_ij(h, w)
-	front := xx.subtract(mlx.f32_scalar(87.0)).square().add(yy.subtract(mlx.f32_scalar(90.0)).square()).less_equal(mlx.f32_scalar(24.0 * 24.0))
-	back_full := xx.subtract(mlx.f32_scalar(60.0)).abs().less_equal(mlx.f32_scalar(27.0)).logical_and(yy.subtract(mlx.f32_scalar(63.0)).abs().less_equal(mlx.f32_scalar(27.0)))
+	front :=
+		xx.subtract(mlx.f32_scalar(87.0)).square().add(yy.subtract(mlx.f32_scalar(90.0)).square()).less_equal(mlx.f32_scalar(24.0 * 24.0))
+	back_full :=
+		xx.subtract(mlx.f32_scalar(60.0)).abs().less_equal(mlx.f32_scalar(27.0)).logical_and(yy.subtract(mlx.f32_scalar(63.0)).abs().less_equal(mlx.f32_scalar(27.0)))
 	back := back_full.logical_and(front.logical_not())
 	fg := front.logical_or(back)
 	mut disp := mlx.zeros([h, w], .float32)

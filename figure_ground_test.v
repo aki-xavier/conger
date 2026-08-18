@@ -1,7 +1,6 @@
 module conger
 
 // figure_ground_test.v — FigureGroundModel (segmentation↔pose) black-box test.
-
 import math
 
 fn test_figure_ground_recovers_pose_and_intensities() {
@@ -11,9 +10,9 @@ fn test_figure_ground_recovers_pose_and_intensities() {
 
 	init := [0.35, 0.3, 1.0, 1.0]
 	mut loop := EMLoop[FigureGroundModel, []f64, []f64]{
-		model: model
+		model:     model
 		max_iters: 30
-		tol: 1e-10
+		tol:       1e-10
 	}
 	result := loop.run(obs, init)
 	for i in 0 .. 4 {

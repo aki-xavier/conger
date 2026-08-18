@@ -5,19 +5,18 @@ module conger
 // L1 occupies [0,b], L2 occupies [a,1], overlap [a,b] (a<b). Latent D ∈ {0,1}
 // is the depth order (0 = L1 in front); params θ = (a0,a1,b0,b1) are the two
 // linear layer coefficients.
-
 import math
 
 struct OcclusionLayerModel {
-	n             int
-	a             f64
-	b             f64
-	sigma         f64
-	x             []f64
-	xm            [][]f64 // (n,2) [1, x]
-	mask_1_only   []bool
-	mask_2_only   []bool
-	mask_overlap  []bool
+	n            int
+	a            f64
+	b            f64
+	sigma        f64
+	x            []f64
+	xm           [][]f64 // (n,2) [1, x]
+	mask_1_only  []bool
+	mask_2_only  []bool
+	mask_overlap []bool
 }
 
 fn new_occlusion_layer_model(n int, a f64, b f64, sigma f64) OcclusionLayerModel {
@@ -35,14 +34,14 @@ fn new_occlusion_layer_model(n int, a f64, b f64, sigma f64) OcclusionLayerModel
 		mo[i] = x[i] >= a && x[i] <= b
 	}
 	return OcclusionLayerModel{
-		n: n
-		a: a
-		b: b
-		sigma: sigma
-		x: x
-		xm: xm
-		mask_1_only: m1
-		mask_2_only: m2
+		n:            n
+		a:            a
+		b:            b
+		sigma:        sigma
+		x:            x
+		xm:           xm
+		mask_1_only:  m1
+		mask_2_only:  m2
 		mask_overlap: mo
 	}
 }

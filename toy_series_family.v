@@ -2,9 +2,7 @@ module conger
 
 // toy_series_family.v — non-visual time-series mechanism family (linear / sine),
 // V port of src/toy_series_family.py.
-
 import math
-
 import mlx
 
 // toy_x returns the shared fixed grid X ∈ [-1, 1] (32 points).
@@ -38,13 +36,18 @@ fn (f ToySeriesFamily) sample(n int, seed u64) mlx.Array {
 	lo := mlx.f32_scalar(0.0)
 	hi := mlx.f32_scalar(1.0)
 	if f.mechanism == 'linear' {
-		a := mlx.random_uniform(lo, hi, [n], .float32, k1).multiply(mlx.f32_scalar(4.0)).add(mlx.f32_scalar(-2.0))
-		b := mlx.random_uniform(lo, hi, [n], .float32, k2).multiply(mlx.f32_scalar(2.0)).add(mlx.f32_scalar(-1.0))
+		a :=
+			mlx.random_uniform(lo, hi, [n], .float32, k1).multiply(mlx.f32_scalar(4.0)).add(mlx.f32_scalar(-2.0))
+		b :=
+			mlx.random_uniform(lo, hi, [n], .float32, k2).multiply(mlx.f32_scalar(2.0)).add(mlx.f32_scalar(-1.0))
 		return mlx.stack([a, b], 1)
 	}
-	amp := mlx.random_uniform(lo, hi, [n], .float32, k1).multiply(mlx.f32_scalar(1.5)).add(mlx.f32_scalar(0.5))
-	freq := mlx.random_uniform(lo, hi, [n], .float32, k2).multiply(mlx.f32_scalar(3.0)).add(mlx.f32_scalar(2.0))
-	phase := mlx.random_uniform(lo, hi, [n], .float32, k3).multiply(mlx.f32_scalar(2.0 * math.pi)).add(mlx.f32_scalar(-math.pi))
+	amp :=
+		mlx.random_uniform(lo, hi, [n], .float32, k1).multiply(mlx.f32_scalar(1.5)).add(mlx.f32_scalar(0.5))
+	freq :=
+		mlx.random_uniform(lo, hi, [n], .float32, k2).multiply(mlx.f32_scalar(3.0)).add(mlx.f32_scalar(2.0))
+	phase :=
+		mlx.random_uniform(lo, hi, [n], .float32, k3).multiply(mlx.f32_scalar(2.0 * math.pi)).add(mlx.f32_scalar(-math.pi))
 	return mlx.stack([amp, freq, phase], 1)
 }
 

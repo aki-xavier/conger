@@ -8,7 +8,6 @@ module conger
 // smooth (linear). This is coordinate ascent (no latent variable); mapped onto
 // GenericEM by treating lighting (l0,l1) as θ and albedo log A as the E-step
 // "responsibilities".
-
 import math
 
 struct RetinexModel {
@@ -39,11 +38,11 @@ fn new_retinex_model(segments []int, sigma f64) RetinexModel {
 	}
 	return RetinexModel{
 		segments: segments
-		sigma: sigma
-		n: n
-		k: k
-		x: x
-		xm: xm
+		sigma:    sigma
+		n:        n
+		k:        k
+		x:        x
+		xm:       xm
 	}
 }
 

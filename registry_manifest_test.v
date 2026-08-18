@@ -1,7 +1,6 @@
 module conger
 
 // registry_manifest_test.v — V port of tests/test_registry_manifest.py.
-
 import os
 
 fn rm_test_spec(name string) ChildTemplateSpec {
@@ -12,16 +11,16 @@ fn rm_test_spec(name string) ChildTemplateSpec {
 	constraints['part_kinds'] = [1.0]
 	constraints['part_hues'] = [2.0]
 	return ChildTemplateSpec{
-		name: name
-		family: 'composite'
-		parent_family: 'layered'
-		operation: 'attach'
-		constraints: constraints
-		complexity: 1.5
-		generation: 2
+		name:           name
+		family:         'composite'
+		parent_family:  'layered'
+		operation:      'attach'
+		constraints:    constraints
+		complexity:     1.5
+		generation:     2
 		evidence_count: 2
-		residual_mean: 10.0
-		score_mean: 11.5
+		residual_mean:  10.0
+		score_mean:     11.5
 	}
 }
 
@@ -30,11 +29,13 @@ fn test_registry_manifest_roundtrip() {
 	pending := rm_test_spec('pending_child')
 	path := os.join_path(os.temp_dir(), 'conger_registry_manifest_test.json')
 	rm_save(RegistryManifest{
-		children: [RegisteredChildTemplate{
-			spec: registered
-			model_path: 'child.safetensors'
-		}]
-		pending: [pending]
+		children: [
+			RegisteredChildTemplate{
+				spec:       registered
+				model_path: 'child.safetensors'
+			},
+		]
+		pending:  [pending]
 	}, path)
 	out := rm_load(path)
 	assert out.children.len == 1
@@ -49,14 +50,16 @@ fn test_registry_manifest_roundtrip() {
 fn rm_parent_expert() SceneExpert {
 	return SceneExpert{
 		name: 'layered'
-		app: new_inverse_app(InverseConfig{scene_family: 'layered'})
+		app:  new_inverse_app(InverseConfig{ scene_family: 'layered' })
 	}
 }
 
 fn test_registry_manifest_restores_child_expert() {
 	spec := rm_test_spec('restored_spec')
 	child_cls := ccf_build(spec)
-	cfg := InverseConfig{scene_family: 'composite'}
+	cfg := InverseConfig{
+		scene_family: 'composite'
+	}
 	dir := os.join_path(os.temp_dir(), 'conger_manifest_dir')
 	os.mkdir_all(dir, os.MkdirParams{}) or {}
 	model_path := new_inverse_app_cb(cfg, child_cls).default_model_path(dir)
@@ -86,10 +89,12 @@ fn test_registry_manifest_missing_model_policy() {
 	os.mkdir_all(dir, os.MkdirParams{}) or {}
 	path := os.join_path(dir, 'manifest.json')
 	rm_save(RegistryManifest{
-		children: [RegisteredChildTemplate{
-			spec: spec
-			model_path: os.join_path(dir, 'none.safetensors')
-		}]
+		children: [
+			RegisteredChildTemplate{
+				spec:       spec
+				model_path: os.join_path(dir, 'none.safetensors')
+			},
+		]
 	}, path)
 	mut registry := new_expert_registry({
 		'layered': rm_parent_expert()

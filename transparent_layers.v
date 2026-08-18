@@ -5,7 +5,6 @@ module conger
 // Soft-assignment mixture: Z(x) ∈ {1,2} latent, P(Z=1|x) = α(x), with
 // I(x)|Z(x)=k ~ N(c_k, σ²). E step computes per-pixel soft assignment; M step
 // re-estimates the two uniform layer intensities by weighted averaging.
-
 import math
 
 struct TransparentLayerModel {
@@ -23,7 +22,7 @@ fn new_transparent_layer_model(alpha []f64, sigma f64) TransparentLayerModel {
 	return TransparentLayerModel{
 		alpha: alpha
 		sigma: sigma
-		n: alpha.len
+		n:     alpha.len
 	}
 }
 

@@ -3,7 +3,6 @@ module conger
 // structure_benchmark.v — cross-family structure-gate benchmark aggregation
 // (V port of src/structure_benchmark.py; the render/CLI loop is added with the
 // inverse-app integration, the summariser is standalone).
-
 import math
 
 // StructureCaseResult records one ground-truth sample's gating outcome.
@@ -80,10 +79,10 @@ fn sb_summarize(results []StructureCaseResult) StructureBenchmarkSummary {
 		posterior_mean[k] = v / f64(n)
 	}
 	return StructureBenchmarkSummary{
-		n: n
-		accuracy: f64(correct) / f64(n)
-		confusion: confusion
+		n:              n
+		accuracy:       f64(correct) / f64(n)
+		confusion:      confusion
 		posterior_mean: posterior_mean
-		ece: sb_ece(results)
+		ece:            sb_ece(results)
 	}
 }

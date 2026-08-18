@@ -2,7 +2,6 @@ module conger
 
 // registry_manifest.v — JSON persistence for dynamic child templates and the
 // expert registry (V port of src/registry_manifest.py).
-
 import json2
 import os
 
@@ -22,9 +21,15 @@ struct RegistryManifest {
 // rm_meta_to_any converts a MetaValue to a json2.Any tree node.
 fn rm_meta_to_any(v MetaValue) json2.Any {
 	match v {
-		string { return json2.Any(v) }
-		int { return json2.Any(i64(v)) }
-		f64 { return json2.Any(v) }
+		string {
+			return json2.Any(v)
+		}
+		int {
+			return json2.Any(i64(v))
+		}
+		f64 {
+			return json2.Any(v)
+		}
 		[]f64 {
 			mut arr := []json2.Any{}
 			for x in v {
@@ -71,16 +76,16 @@ fn rm_spec_to_any(s ChildTemplateSpec) map[string]json2.Any {
 		c[k] = rm_meta_to_any(v)
 	}
 	return {
-		'name':            json2.Any(s.name)
-		'family':          json2.Any(s.family)
-		'parent_family':   json2.Any(s.parent_family)
-		'operation':       json2.Any(s.operation)
-		'constraints':     json2.Any(c)
-		'complexity':      json2.Any(s.complexity)
-		'generation':      json2.Any(i64(s.generation))
-		'evidence_count':  json2.Any(i64(s.evidence_count))
-		'residual_mean':   json2.Any(s.residual_mean)
-		'score_mean':      json2.Any(s.score_mean)
+		'name':           json2.Any(s.name)
+		'family':         json2.Any(s.family)
+		'parent_family':  json2.Any(s.parent_family)
+		'operation':      json2.Any(s.operation)
+		'constraints':    json2.Any(c)
+		'complexity':     json2.Any(s.complexity)
+		'generation':     json2.Any(i64(s.generation))
+		'evidence_count': json2.Any(i64(s.evidence_count))
+		'residual_mean':  json2.Any(s.residual_mean)
+		'score_mean':     json2.Any(s.score_mean)
 	}
 }
 
@@ -92,16 +97,16 @@ fn rm_spec_from_any(m map[string]json2.Any) ChildTemplateSpec {
 		constraints[k] = rm_meta_from_any(v)
 	}
 	return ChildTemplateSpec{
-		name: (m['name'] or { json2.Any('') }).str()
-		family: (m['family'] or { json2.Any('') }).str()
-		parent_family: (m['parent_family'] or { json2.Any('') }).str()
-		operation: (m['operation'] or { json2.Any('') }).str()
-		constraints: constraints
-		complexity: (m['complexity'] or { json2.Any(f64(0)) }).f64()
-		generation: (m['generation'] or { json2.Any(i64(0)) }).int()
+		name:           (m['name'] or { json2.Any('') }).str()
+		family:         (m['family'] or { json2.Any('') }).str()
+		parent_family:  (m['parent_family'] or { json2.Any('') }).str()
+		operation:      (m['operation'] or { json2.Any('') }).str()
+		constraints:    constraints
+		complexity:     (m['complexity'] or { json2.Any(f64(0)) }).f64()
+		generation:     (m['generation'] or { json2.Any(i64(0)) }).int()
 		evidence_count: (m['evidence_count'] or { json2.Any(i64(0)) }).int()
-		residual_mean: (m['residual_mean'] or { json2.Any(f64(0)) }).f64()
-		score_mean: (m['score_mean'] or { json2.Any(f64(0)) }).f64()
+		residual_mean:  (m['residual_mean'] or { json2.Any(f64(0)) }).f64()
+		score_mean:     (m['score_mean'] or { json2.Any(f64(0)) }).f64()
 	}
 }
 
@@ -133,7 +138,7 @@ fn rm_manifest_from_any(m map[string]json2.Any) RegistryManifest {
 		cm := child.as_map()
 		model_path := (cm['model_path'] or { json2.Any('') }).str()
 		children << RegisteredChildTemplate{
-			spec: rm_spec_from_any((cm['spec'] or { json2.Any(map[string]json2.Any{}) }).as_map())
+			spec:       rm_spec_from_any((cm['spec'] or { json2.Any(map[string]json2.Any{}) }).as_map())
 			model_path: model_path
 		}
 	}
@@ -144,8 +149,8 @@ fn rm_manifest_from_any(m map[string]json2.Any) RegistryManifest {
 	}
 	return RegistryManifest{
 		children: children
-		pending: pending
-		version: (m['version'] or { json2.Any(i64(1)) }).int()
+		pending:  pending
+		version:  (m['version'] or { json2.Any(i64(1)) }).int()
 	}
 }
 

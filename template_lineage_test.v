@@ -17,15 +17,15 @@ fn test_registry_lineage_tree() {
 	mut experts := map[string]SceneExpert{}
 	experts['single'] = SceneExpert{
 		name: 'single'
-		app: new_inverse_app(InverseConfig{scene_family: 'single'})
+		app:  new_inverse_app(InverseConfig{ scene_family: 'single' })
 	}
 	experts['layered'] = SceneExpert{
 		name: 'layered'
-		app: new_inverse_app(InverseConfig{scene_family: 'layered'})
+		app:  new_inverse_app(InverseConfig{ scene_family: 'layered' })
 	}
 	experts['composite'] = SceneExpert{
 		name: 'composite'
-		app: new_inverse_app(InverseConfig{scene_family: 'composite'})
+		app:  new_inverse_app(InverseConfig{ scene_family: 'composite' })
 	}
 	registry := new_expert_registry(experts)
 	lineages := registry.lineages()

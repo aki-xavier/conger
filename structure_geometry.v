@@ -2,9 +2,7 @@ module conger
 
 // structure_geometry.v — observation-level geometric compatibility evidence
 // for the structure gate (V port of src/structure_geometry.py).
-
 import math
-
 import mlx
 
 // sg_iou_cost returns 1 − IoU(template, fg).
@@ -235,9 +233,9 @@ fn sg_costs(fl mlx.Array, fr mlx.Array) map[string]f64 {
 		lateral -= 0.2
 	}
 	return {
-		'single': single
-		'layered': layered
+		'single':    single
+		'layered':   layered
 		'composite': composite
-		'lateral': lateral
+		'lateral':   lateral
 	}
 }

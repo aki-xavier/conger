@@ -2,9 +2,7 @@ module conger
 
 // joint_layer_optimizer.v — occluded two-layer template/disparity/assignment
 // joint optimisation (V port of src/joint_layer_optimizer.py).
-
 import math
-
 import mlx
 
 const jlo_down = 12
@@ -56,10 +54,10 @@ fn jlo_bbox_template(mask mlx.Array, d f64, occluder ?mlx.Array) LayerTemplate {
 	if idx.dim(0) == 0 {
 		return LayerTemplate{
 			shape: 0
-			cx: f64(w - 1) / 2.0
-			cy: f64(h - 1) / 2.0
-			r: 4.0
-			d: d
+			cx:    f64(w - 1) / 2.0
+			cy:    f64(h - 1) / 2.0
+			r:     4.0
+			d:     d
 		}
 	}
 	xs := idx.remainder(mlx.f32_scalar(f32(w)))
@@ -87,10 +85,10 @@ fn jlo_bbox_template(mask mlx.Array, d f64, occluder ?mlx.Array) LayerTemplate {
 	}
 	return LayerTemplate{
 		shape: best_shape
-		cx: cx
-		cy: cy
-		r: fmax2(r, 1.5)
-		d: d
+		cx:    cx
+		cy:    cy
+		r:     fmax2(r, 1.5)
+		d:     d
 	}
 }
 
@@ -109,8 +107,7 @@ fn jlo_score(front LayerTemplate, back LayerTemplate, fg mlx.Array, disp mlx.Arr
 	inter := pred.logical_and(fg).astype(.float32).sum().item_f32()
 	un := pred.logical_or(fg).astype(.float32).sum().item_f32()
 	mask_cost := 1.0 - f64(inter) / fmax2(f64(un), 1.0)
-	ratio := f64(vb.astype(.float32).sum().item_f32()) / fmax2(f64(tb.astype(.float32).sum().item_f32()),
-		1.0)
+	ratio := f64(vb.astype(.float32).sum().item_f32()) / fmax2(f64(tb.astype(.float32).sum().item_f32()), 1.0)
 	occlusion_penalty := fmax2(0.0, 0.25 - ratio) * 4.0
 	mut d_cost := 0.0
 	mf := valid.logical_and(vf)
@@ -140,10 +137,10 @@ fn jlo_optimize_layer(which int, front LayerTemplate, back LayerTemplate, fg mlx
 		for dd in jlo_d_steps {
 			candidates << LayerTemplate{
 				shape: cur.shape
-				cx: cur.cx
-				cy: cur.cy
-				r: fmax2(cur.r * sm, 1.5)
-				d: cur.d + dd
+				cx:    cur.cx
+				cy:    cur.cy
+				r:     fmax2(cur.r * sm, 1.5)
+				d:     cur.d + dd
 			}
 		}
 	}

@@ -2,7 +2,6 @@ module conger
 
 // structure_gate.v — visual structure-expert gate (render-residual fusion),
 // V port of src/structure_gate.py on top of the generic gate.
-
 import mlx
 
 struct StructureGate {
@@ -14,10 +13,10 @@ struct StructureGate {
 fn new_structure_gate() StructureGate {
 	return StructureGate{
 		gate: GenericStructureGate{
-			birth_residual: 10000.0
-			posterior_floor: 0.6
+			birth_residual:    10000.0
+			posterior_floor:   0.6
 			complexity_weight: 1.0
-			geometry_weight: 5000.0
+			geometry_weight:   5000.0
 			temperature_scale: 1.0
 		}
 	}

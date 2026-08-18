@@ -2,7 +2,6 @@ module conger
 
 // scm_proxy.v — appearance-mechanism proxy (multiplicative decomposition of the
 // renderer appearance subgraph), V port of src/scm_proxy.py.
-
 import mlx
 
 struct AppearanceMechanism {
@@ -27,7 +26,8 @@ fn (mut m AppearanceMechanism) fit(rgb mlx.Array) AppearanceMechanism {
 		g_exp := g_new.expand_dims(0)
 		den_a := g_exp.square().sum_axes([1, 2], false).maximum(mlx.f32_scalar(1e-12))
 		a_new := rgb.multiply(g_exp).sum_axes([1, 2], false).divide(den_a)
-		change := a_new.subtract(a).abs().max().item_f32() + g_new.subtract(g).abs().max().item_f32()
+		change := a_new.subtract(a).abs().max().item_f32() +
+			g_new.subtract(g).abs().max().item_f32()
 		a = a_new
 		g = g_new
 		if f64(change) < m.tol {
@@ -45,8 +45,8 @@ fn (m AppearanceMechanism) predict(hue int, lcol int, ldir int) mlx.Array {
 	albedo := m.albedo or { panic('fit() before query') }
 	lighting := m.lighting or { panic('fit() before query') }
 	a_row := albedo.take_axis(sel1(hue), 0).squeeze_axis(0)
-	l_row := lighting.take_axis(sel1(lcol), 0).squeeze_axis(0).take_axis(sel1(ldir),
-		0).squeeze_axis(0)
+	l_row :=
+		lighting.take_axis(sel1(lcol), 0).squeeze_axis(0).take_axis(sel1(ldir), 0).squeeze_axis(0)
 	return a_row.multiply(l_row)
 }
 

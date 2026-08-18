@@ -2,9 +2,7 @@ module conger
 
 // scene_em_refiner.v — single-object geometry↔lighting ECM refinement
 // (V port of src/scene_em_refiner.py, a GenericEM instance).
-
 import cga
-
 import mlx
 
 // FramePair is the observation (left/right rendered frames).
@@ -24,12 +22,12 @@ struct SceneEMRefiner {
 	wl              mlx.Array
 	wr              mlx.Array
 mut:
-	appearances     [][3]int
-	target          []f64
-	use_quadratic   bool
-	renderer cga.Renderer
-	cam_l    cga.PerspectiveCamera
-	cam_r    cga.PerspectiveCamera
+	appearances   [][3]int
+	target        []f64
+	use_quadratic bool
+	renderer      cga.Renderer
+	cam_l         cga.PerspectiveCamera
+	cam_r         cga.PerspectiveCamera
 }
 
 // new_scene_em_refiner builds the rendering-backed refiner.
@@ -44,19 +42,19 @@ fn new_scene_em_refiner(codebook Codebook, kind int, fl mlx.Array, fr mlx.Array,
 		}
 	}
 	return SceneEMRefiner{
-		codebook: codebook
-		kind: kind
-		fl: fl
-		fr: fr
+		codebook:        codebook
+		kind:            kind
+		fl:              fl
+		fr:              fr
 		appearance_topk: appearance_topk
-		deltas: [2.0, 2.0, 0.05, 0.1]
-		freeze: freeze
-		wl: foreground_weights(fl)
-		wr: foreground_weights(fr)
-		appearances: apps
-		renderer: renderer
-		cam_l: cam_l
-		cam_r: cam_r
+		deltas:          [2.0, 2.0, 0.05, 0.1]
+		freeze:          freeze
+		wl:              foreground_weights(fl)
+		wr:              foreground_weights(fr)
+		appearances:     apps
+		renderer:        renderer
+		cam_l:           cam_l
+		cam_r:           cam_r
 	}
 }
 
@@ -74,8 +72,7 @@ fn (mut r SceneEMRefiner) residual(geometry []f64, appearance [3]int) f64 {
 	v := geometry[1]
 	s_ := geometry[2]
 	z := geometry[3]
-	prm := [f64(r.kind), u, v, s_, z, f64(appearance[0]), f64(appearance[1]),
-		f64(appearance[2])]
+	prm := [f64(r.kind), u, v, s_, z, f64(appearance[0]), f64(appearance[1]), f64(appearance[2])]
 	sc := r.codebook.to_scene(prm)
 	cl := r.renderer.render(sc, r.cam_l)
 	cr := r.renderer.render(sc, r.cam_r)

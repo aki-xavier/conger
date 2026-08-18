@@ -2,9 +2,7 @@ module conger
 
 // toy_series_expert.v — MixtureSPN-wrapped non-visual structure expert
 // (V port of src/toy_series_expert.py).
-
 import math
-
 import mlx
 
 struct ToySeriesExpert {
@@ -28,7 +26,7 @@ fn train_toy_expert(mechanism string, n int, seed u64) ToySeriesExpert {
 	net := fit_mixture_spn(f, p, zeros, 1e-3, classes, [1], 0)
 	return ToySeriesExpert{
 		family: family
-		net: net
+		net:    net
 	}
 }
 
@@ -45,12 +43,12 @@ fn (e ToySeriesExpert) estimate(observation mlx.Array) StructuredHypothesis {
 	max_r := f64(r.max().item_f32()) + 1e-12
 	novelty := -math.log(max_r) / math.log(f64(r.dim(1))) + math.log(1.0 + residual)
 	return StructuredHypothesis{
-		structure_id: e.family.mechanism
-		params: pf
+		structure_id:       e.family.mechanism
+		params:             pf
 		responsibility_max: max_r
-		posterior_entropy: 0.0
-		residual: residual
-		complexity: f64(e.family.n_params())
-		novelty_score: novelty
+		posterior_entropy:  0.0
+		residual:           residual
+		complexity:         f64(e.family.n_params())
+		novelty_score:      novelty
 	}
 }

@@ -1,16 +1,14 @@
 module conger
 
 // data_builder.v — data construction (V port of src/data_builder.py).
-
 import os
-
 import mlx
 
 // db_targets returns the continuous targets (4-d single / 8-d layered).
 fn db_targets(p mlx.Array) mlx.Array {
 	if p.dim(1) == 14 {
-		return p.take_axis(mlx.array_i32([i32(1), i32(2), i32(3), i32(4), i32(7),
-			i32(8), i32(9), i32(10)], [8]), 1)
+		return p.take_axis(mlx.array_i32([i32(1), i32(2), i32(3), i32(4), i32(7), i32(8), i32(9),
+			i32(10)], [8]), 1)
 	}
 	return p.take_axis(mlx.arange(1.0, 5.0, 1.0, .int32), 1)
 }
@@ -18,11 +16,11 @@ fn db_targets(p mlx.Array) mlx.Array {
 // db_scene_classes returns the discrete scene factors.
 fn db_scene_classes(p mlx.Array) mlx.Array {
 	if p.dim(1) == 14 {
-		return p.take_axis(mlx.array_i32([i32(0), i32(6), i32(5), i32(11), i32(12),
-			i32(13)], [6]), 1).astype(.int32)
+		return p.take_axis(mlx.array_i32([i32(0), i32(6), i32(5), i32(11), i32(12), i32(13)], [
+			6,
+		]), 1).astype(.int32)
 	}
-	return p.take_axis(mlx.array_i32([i32(0), i32(5), i32(6), i32(7)], [4]),
-		1).astype(.int32)
+	return p.take_axis(mlx.array_i32([i32(0), i32(5), i32(6), i32(7)], [4]), 1).astype(.int32)
 }
 
 // DataBuilder holds the config/codebook/extractor wiring (cache tag + data
@@ -50,9 +48,9 @@ fn (d DataBuilder) db_feats_of(params mlx.Array) (mlx.Array, mlx.Array) {
 	pf := params.data_f32()
 	mut renderer, cam_l, cam_r := make_renderer(stereo_base)
 	app := InverseApp{
-		cfg: d.cfg
-		codebook: d.codebook
-		data: d
+		cfg:       d.cfg
+		codebook:  d.codebook
+		data:      d
 		extractor: d.extractor
 	}
 	mut out := []mlx.Array{}

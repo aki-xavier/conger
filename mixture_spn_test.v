@@ -2,30 +2,25 @@ module conger
 
 // mixture_spn_test.v — MixtureSPN black-box tests (axioms / instance regression /
 // whitening pathology / serialisation).
-
 import math
-
 import os
-
 import mlx
 
 fn manual_model() (MixtureSPN, mlx.Array) {
-	f_mu := arr32([0.0, 0.0, 0.0, 0.0, 10.0, 0.0, 0.0, 0.0, 0.0, 10.0,
-		0.0, 0.0], [3, 4])
+	f_mu := arr32([0.0, 0.0, 0.0, 0.0, 10.0, 0.0, 0.0, 0.0, 0.0, 10.0, 0.0, 0.0], [3, 4])
 	f_var := mlx.full_value([3, 4], 0.01, .float32)
 	t_mu := arr32([1.0, 2.0, 3.0, 4.0, 5.0, 6.0], [3, 2])
-	cat_logp := arr32([1.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 1.0, 0.0],
-		[3, 3]).log()
+	cat_logp := arr32([1.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 1.0, 0.0], [3, 3]).log()
 	log_w := mlx.full_value([3], f32(-math.log(3.0)), .float32)
 	mut m := MixtureSPN{
-		log_w: log_w
-		f_mu: f_mu
-		f_var: f_var
-		t_mu: t_mu
-		cat_logp: cat_logp
+		log_w:     log_w
+		f_mu:      f_mu
+		f_var:     f_var
+		t_mu:      t_mu
+		cat_logp:  cat_logp
 		rel_floor: 0.1
-		f_mean: mlx.zeros([4], .float32)
-		basis: mlx.eye(4, 4, 0, .float32)
+		f_mean:    mlx.zeros([4], .float32)
+		basis:     mlx.eye(4, 4, 0, .float32)
 		cat_sizes: [3]
 		n_stratum: 3
 	}
@@ -75,14 +70,14 @@ fn test_axioms() {
 	assert kp.data_f32()[1 * 3 + 0] > 0.999
 
 	mut m1 := MixtureSPN{
-		log_w: mlx.zeros([1], .float32)
-		f_mu: slice_rows(m.f_mu, 0, 1)
-		f_var: slice_rows(m.f_var, 0, 1)
-		t_mu: slice_rows(t_mu, 0, 1)
-		cat_logp: slice_rows(m.cat_logp, 0, 1)
+		log_w:     mlx.zeros([1], .float32)
+		f_mu:      slice_rows(m.f_mu, 0, 1)
+		f_var:     slice_rows(m.f_var, 0, 1)
+		t_mu:      slice_rows(t_mu, 0, 1)
+		cat_logp:  slice_rows(m.cat_logp, 0, 1)
 		rel_floor: 0.1
-		f_mean: mlx.zeros([4], .float32)
-		basis: mlx.eye(4, 4, 0, .float32)
+		f_mean:    mlx.zeros([4], .float32)
+		basis:     mlx.eye(4, 4, 0, .float32)
 		cat_sizes: [3]
 		n_stratum: 3
 	}
@@ -130,8 +125,7 @@ fn test_incremental_add() {
 	f, t, k := separable_data()
 	even := mlx.arange(0.0, 600.0, 2.0, .int32)
 	odd := mlx.arange(1.0, 600.0, 2.0, .int32)
-	mut m := fit_simple(f.take_axis(even, 0), t.take_axis(even, 0), k.take_axis(even,
-		0), 0)
+	mut m := fit_simple(f.take_axis(even, 0), t.take_axis(even, 0), k.take_axis(even, 0), 0)
 	f_odd := f.take_axis(odd, 0)
 	t_odd := t.take_axis(odd, 0)
 	k_odd := k.take_axis(odd, 0)
@@ -176,14 +170,16 @@ fn test_correlation_pathology() {
 	lo := mlx.random_normal([n, 1], .float32, 0.0, 1.0, k_a).multiply(mlx.f32_scalar(3.0))
 	pe := mlx.random_normal([n, 1], .float32, 0.0, 1.0, k_b).multiply(mlx.f32_scalar(0.1))
 	ar := mlx.arange(0.0, f64(n), 1.0, .float32)
-	off := mlx.where(ar.less(mlx.f32_scalar(f32(n / 2))), mlx.f32_scalar(0.0),
-		mlx.f32_scalar(0.6)).expand_dims(1)
-	f := lo.multiply(direction.expand_dims(0)).add(pe.multiply(perp.expand_dims(0))).add(off.multiply(perp.expand_dims(0)))
+	off :=
+		mlx.where(ar.less(mlx.f32_scalar(f32(n / 2))), mlx.f32_scalar(0.0), mlx.f32_scalar(0.6)).expand_dims(1)
+	f :=
+		lo.multiply(direction.expand_dims(0)).add(pe.multiply(perp.expand_dims(0))).add(off.multiply(perp.expand_dims(0)))
 	k := ar.greater_equal(mlx.f32_scalar(f32(n / 2))).astype(.int32)
 	t := mlx.zeros([n, 1], .float32)
 	m := fit_simple(f, t, k, 0)
 	_, kp, _ := m.predict(f)
-	acc := kp.argmax_axis(1, false).astype(.float32).equal(k.astype(.float32)).astype(.float32).mean().item_f32()
+	acc :=
+		kp.argmax_axis(1, false).astype(.float32).equal(k.astype(.float32)).astype(.float32).mean().item_f32()
 	assert acc > 0.95
 }
 
@@ -221,8 +217,6 @@ fn test_category_contract_expansion() {
 	c_new := mlx.array_i32([i32(3), 2], [1, 2])
 	loaded.add(f_new, mlx.zeros([1, 1], .float32), col(c_new, 0), c_new)
 	_, cp_new, _ := loaded.predict(f_new)
-	assert cp_new.take_axis(mlx.arange(0.0, 4.0, 1.0, .int32), 1).argmax_axis(1,
-		false).item_i32() == 3
-	assert cp_new.take_axis(mlx.arange(4.0, 7.0, 1.0, .int32), 1).argmax_axis(1,
-		false).item_i32() == 2
+	assert cp_new.take_axis(mlx.arange(0.0, 4.0, 1.0, .int32), 1).argmax_axis(1, false).item_i32() == 3
+	assert cp_new.take_axis(mlx.arange(4.0, 7.0, 1.0, .int32), 1).argmax_axis(1, false).item_i32() == 2
 }

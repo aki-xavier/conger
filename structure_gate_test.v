@@ -1,13 +1,12 @@
 module conger
 
 // structure_gate_test.v — V port of tests/test_structure_gate.py.
-
 import mlx
 
 fn sg_estimate(params []f64, cb Codebook) StructuredHypothesis {
 	return StructuredHypothesis{
-		scene: cb.to_scene(params)
-		params: params
+		scene:         cb.to_scene(params)
+		params:        params
 		spn_posterior: mlx.zeros([15], .float32)
 	}
 }
@@ -26,7 +25,7 @@ fn test_structure_gate_posterior_and_birth() {
 	bad := sg_estimate(bad_a, cb)
 	out := gate.decide({
 		'good': good
-		'bad': bad
+		'bad':  bad
 	}, fl, fr)
 	assert out.estimate.structure_id == 'good'
 	assert out.posterior['good'] > 0.99

@@ -3,9 +3,7 @@ module conger
 // lateral_composite_geometry.v — mirror/repeat lateral composite part anchors
 // (V port of src/lateral_composite_geometry.py). Shares the composite area /
 // part-depth machinery but searches for a VERTICAL split line.
-
 import math
-
 import mlx
 
 const lgc_near_cap_delta = [0.0, 1.1, 1.0]
@@ -75,7 +73,11 @@ fn lgc_split_score(fg mlx.Array) ?SplitResult {
 	if !found {
 		return none
 	}
-	return SplitResult{score: best_score, base: best_base, part: best_part}
+	return SplitResult{
+		score: best_score
+		base:  best_base
+		part:  best_part
+	}
 }
 
 // lgc_corrected_gap returns the kind-aware near-cap-corrected world-normalised
@@ -132,6 +134,6 @@ fn lgc_estimate(fl mlx.Array, fr mlx.Array) []f64 {
 	part := s.part
 	z0 := cg_part_depth(wl, wr, base, d_global)
 	z1 := cg_part_depth(wl, wr, part, d_global)
-	return [base.cx * q, base.cy * q, z0, cg_area(base), part.cx * q, part.cy * q,
-		z1, cg_area(part)]
+	return [base.cx * q, base.cy * q, z0, cg_area(base), part.cx * q, part.cy * q, z1,
+		cg_area(part)]
 }

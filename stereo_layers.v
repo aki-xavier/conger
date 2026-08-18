@@ -2,7 +2,6 @@ module conger
 
 // stereo_layers.v — occlusion-aware per-layer binocular geometry
 // (V port of src/stereo_layers.py).
-
 import mlx
 
 const sl_d_range_lo = 5
@@ -50,8 +49,10 @@ fn sl_features(rgb mlx.Array, frame mlx.Array) mlx.Array {
 
 // sl_disparity_map returns (disp, conf, valid) per-pixel block matching.
 fn sl_disparity_map(fl mlx.Array, fr mlx.Array) (mlx.Array, mlx.Array, mlx.Array) {
-	rgb_l := fl.take_axis(mlx.arange(0.0, 3.0, 1.0, .int32), -1).astype(.float32).divide(mlx.f32_scalar(255.0))
-	rgb_r := fr.take_axis(mlx.arange(0.0, 3.0, 1.0, .int32), -1).astype(.float32).divide(mlx.f32_scalar(255.0))
+	rgb_l :=
+		fl.take_axis(mlx.arange(0.0, 3.0, 1.0, .int32), -1).astype(.float32).divide(mlx.f32_scalar(255.0))
+	rgb_r :=
+		fr.take_axis(mlx.arange(0.0, 3.0, 1.0, .int32), -1).astype(.float32).divide(mlx.f32_scalar(255.0))
 	fl_f := sl_features(rgb_l, fl)
 	fr_f := sl_features(rgb_r, fr)
 	h := fl_f.dim(0)
@@ -68,8 +69,10 @@ fn sl_disparity_map(fl mlx.Array, fr mlx.Array) (mlx.Array, mlx.Array, mlx.Array
 		mut c := mlx.zeros([ih, iw], .float32)
 		for dy in 0 .. 2 * r + 1 {
 			for dx in 0 .. 2 * r + 1 {
-				lp := fl_f.take_axis(mlx.arange(f64(dy), f64(ih + dy), 1.0, .int32), 0).take_axis(mlx.arange(f64(x0 - r + dx), f64(x1 - r + dx), 1.0, .int32), 1)
-				rp := fr_f.take_axis(mlx.arange(f64(dy), f64(ih + dy), 1.0, .int32), 0).take_axis(mlx.arange(f64(x0 - r - d + dx), f64(x1 - r - d + dx), 1.0, .int32), 1)
+				lp := fl_f.take_axis(mlx.arange(f64(dy), f64(ih + dy), 1.0, .int32), 0).take_axis(mlx.arange(f64(
+					x0 - r + dx), f64(x1 - r + dx), 1.0, .int32), 1)
+				rp := fr_f.take_axis(mlx.arange(f64(dy), f64(ih + dy), 1.0, .int32), 0).take_axis(mlx.arange(f64(
+					x0 - r - d + dx), f64(x1 - r - d + dx), 1.0, .int32), 1)
 				c = c.add(lp.subtract(rp).square().sum_axis(2, false))
 			}
 		}
@@ -111,8 +114,10 @@ fn sl_cluster_layers(disp mlx.Array, fw mlx.Array, valid mlx.Array) ?SLCluster {
 	mut c_lo := [cx, cy, d_lo]!
 	mut c_hi := [cx, cy, d_hi]!
 	for _ in 0 .. 16 {
-		dl := xs.subtract(mlx.f32_scalar(f32(c_lo[0]))).divide(mlx.f32_scalar(40.0)).square().add(ys.subtract(mlx.f32_scalar(f32(c_lo[1]))).divide(mlx.f32_scalar(40.0)).square()).add(ds.subtract(mlx.f32_scalar(f32(c_lo[2]))).divide(mlx.f32_scalar(4.0)).square())
-		dh := xs.subtract(mlx.f32_scalar(f32(c_hi[0]))).divide(mlx.f32_scalar(40.0)).square().add(ys.subtract(mlx.f32_scalar(f32(c_hi[1]))).divide(mlx.f32_scalar(40.0)).square()).add(ds.subtract(mlx.f32_scalar(f32(c_hi[2]))).divide(mlx.f32_scalar(4.0)).square())
+		dl :=
+			xs.subtract(mlx.f32_scalar(f32(c_lo[0]))).divide(mlx.f32_scalar(40.0)).square().add(ys.subtract(mlx.f32_scalar(f32(c_lo[1]))).divide(mlx.f32_scalar(40.0)).square()).add(ds.subtract(mlx.f32_scalar(f32(c_lo[2]))).divide(mlx.f32_scalar(4.0)).square())
+		dh :=
+			xs.subtract(mlx.f32_scalar(f32(c_hi[0]))).divide(mlx.f32_scalar(40.0)).square().add(ys.subtract(mlx.f32_scalar(f32(c_hi[1]))).divide(mlx.f32_scalar(40.0)).square()).add(ds.subtract(mlx.f32_scalar(f32(c_hi[2]))).divide(mlx.f32_scalar(4.0)).square())
 		near_hi := dh.less(dl)
 		// assign to c_lo (far layer) with mask ~near_hi
 		{
@@ -139,13 +144,15 @@ fn sl_cluster_layers(disp mlx.Array, fw mlx.Array, valid mlx.Array) ?SLCluster {
 		return none
 	}
 	yy, xx := meshgrid_ij(h, w)
-	dl := xx.subtract(mlx.f32_scalar(f32(c_lo[0]))).divide(mlx.f32_scalar(40.0)).square().add(yy.subtract(mlx.f32_scalar(f32(c_lo[1]))).divide(mlx.f32_scalar(40.0)).square()).add(disp.subtract(mlx.f32_scalar(f32(c_lo[2]))).divide(mlx.f32_scalar(4.0)).square())
-	dh := xx.subtract(mlx.f32_scalar(f32(c_hi[0]))).divide(mlx.f32_scalar(40.0)).square().add(yy.subtract(mlx.f32_scalar(f32(c_hi[1]))).divide(mlx.f32_scalar(40.0)).square()).add(disp.subtract(mlx.f32_scalar(f32(c_hi[2]))).divide(mlx.f32_scalar(4.0)).square())
+	dl :=
+		xx.subtract(mlx.f32_scalar(f32(c_lo[0]))).divide(mlx.f32_scalar(40.0)).square().add(yy.subtract(mlx.f32_scalar(f32(c_lo[1]))).divide(mlx.f32_scalar(40.0)).square()).add(disp.subtract(mlx.f32_scalar(f32(c_lo[2]))).divide(mlx.f32_scalar(4.0)).square())
+	dh :=
+		xx.subtract(mlx.f32_scalar(f32(c_hi[0]))).divide(mlx.f32_scalar(40.0)).square().add(yy.subtract(mlx.f32_scalar(f32(c_hi[1]))).divide(mlx.f32_scalar(40.0)).square()).add(disp.subtract(mlx.f32_scalar(f32(c_hi[2]))).divide(mlx.f32_scalar(4.0)).square())
 	front := valid.logical_and(dh.less(dl))
 	return SLCluster{
-		front: front
+		front:   front
 		front_c: c_hi
-		back_c: c_lo
+		back_c:  c_lo
 	}
 }
 

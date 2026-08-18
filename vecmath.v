@@ -11,7 +11,6 @@ module conger
 // Exact RNG stream parity with numpy is intentionally NOT required: the test
 // suite checks statistical convergence within tolerances, not bit-identical
 // noise realisations.
-
 import math
 
 // Rng is a deterministic xorshift64* generator (statistical stand-in for
@@ -28,7 +27,9 @@ fn new_rng(seed u64) Rng {
 	if s == 0 {
 		s = 0x9e3779b97f4a7c15
 	}
-	return Rng{state: s}
+	return Rng{
+		state: s
+	}
 }
 
 @[inline]

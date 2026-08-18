@@ -2,30 +2,27 @@ module conger
 
 // composite_template_proposer.v — residual-driven bounded template proposals
 // (V port of src/composite_template_proposer.py).
-
 import cga
-
 import math
-
 import mlx
 
 struct CompositeTemplateProposer {
-	complexity_weight f64      = 1.0
-	ratios            []f64    = [0.45, 0.60]
-	lateral_ratios    []f64    = [-0.20, 0.0, 0.20]
-	part_kinds        []int    = [0, 1, 2]
-	part_hues         []int    = [0, 1, 2, 3, 4, 5]
+	complexity_weight f64   = 1.0
+	ratios            []f64 = [0.45, 0.60]
+	lateral_ratios    []f64 = [-0.20, 0.0, 0.20]
+	part_kinds        []int = [0, 1, 2]
+	part_hues         []int = [0, 1, 2, 3, 4, 5]
 	grammar           TemplateGrammar
-	max_cases         int      = 4
-	max_proposals     int      = 5
+	max_cases         int = 4
+	max_proposals     int = 5
 	codebook          CompositeCodebook
 }
 
 // new_composite_template_proposer builds the default proposer.
 fn new_composite_template_proposer() CompositeTemplateProposer {
 	return CompositeTemplateProposer{
-		grammar: new_template_grammar(['attach'], 2, [0, 1, 2])
-		codebook: new_composite_codebook(InverseConfig{scene_family: 'composite'})
+		grammar:  new_template_grammar(['attach'], 2, [0, 1, 2])
+		codebook: new_composite_codebook(InverseConfig{ scene_family: 'composite' })
 	}
 }
 
@@ -64,8 +61,7 @@ fn ctp_base_from_params(params []f64) ?[]f64 {
 		return params.clone()
 	}
 	if params.len == 14 {
-		return [params[0], params[1], params[2], params[3], params[4], params[5],
-			params[12], params[13]]
+		return [params[0], params[1], params[2], params[3], params[4], params[5], params[12], params[13]]
 	}
 	return none
 }
@@ -86,10 +82,9 @@ fn ctp_attach(base []f64, part_kind int, part_hue int, ratio f64, lateral_ratio 
 	x1 := x0 + lateral_ratio * (s0 + s1)
 	y1 := y0 + s0 + s1 - 0.05 * math_min_f64(s0, s1)
 	zc1 := cam_z - z1
-	u1 := f64(img_w-1)/2.0 + x1 * fx / zc1
-	v1 := f64(img_h-1)/2.0 - y1 * fy / zc1
-	return [k0, u0, v0, s0, z0, h0, f64(part_kind), u1, v1, s1, z1, f64(part_hue),
-		lcol, ldir]
+	u1 := f64(img_w - 1) / 2.0 + x1 * fx / zc1
+	v1 := f64(img_h - 1) / 2.0 - y1 * fy / zc1
+	return [k0, u0, v0, s0, z0, h0, f64(part_kind), u1, v1, s1, z1, f64(part_hue), lcol, ldir]
 }
 
 // ctp_layer builds a 14-dim layered (part behind base).
@@ -107,10 +102,9 @@ fn ctp_layer(base []f64, part_kind int, part_hue int, ratio f64, lateral_ratio f
 	x0, y0 := unproject(u0, v0, z0)
 	x1 := x0 + lateral_ratio * (s0 + s1)
 	zc1 := cam_z - z1
-	u1 := f64(img_w-1)/2.0 + x1 * fx / zc1
-	v1 := f64(img_h-1)/2.0 - y0 * fy / zc1
-	return [k0, u0, v0, s0, z0, h0, f64(part_kind), u1, v1, s1, z1, f64(part_hue),
-		lcol, ldir]
+	u1 := f64(img_w - 1) / 2.0 + x1 * fx / zc1
+	v1 := f64(img_h - 1) / 2.0 - y0 * fy / zc1
+	return [k0, u0, v0, s0, z0, h0, f64(part_kind), u1, v1, s1, z1, f64(part_hue), lcol, ldir]
 }
 
 // ctp_lateral builds a 14-dim mirror/repeat composite (same kind/hue).
@@ -129,15 +123,14 @@ fn ctp_lateral(base []f64, operation string, ratio f64, lateral_ratio f64) []f64
 	scale := lc_spacing_factor(operation)
 	x1 := x0 + lateral_ratio * scale * (s0 + s1)
 	zc1 := cam_z - z1
-	u1 := f64(img_w-1)/2.0 + x1 * fx / zc1
-	v1 := f64(img_h-1)/2.0 - y0 * fy / zc1
+	u1 := f64(img_w - 1) / 2.0 + x1 * fx / zc1
+	v1 := f64(img_h - 1) / 2.0 - y0 * fy / zc1
 	return [k0, u0, v0, s0, z0, h0, k0, u1, v1, s1, z1, h0, lcol, ldir]
 }
 
 // ctp_params_for_rule builds candidate params for a grammar rule.
 fn (p CompositeTemplateProposer) ctp_params_for_rule(base []f64, rule TemplateRule, part_hue int, ratio f64, lateral f64) []f64 {
-	rule_base := [f64(rule.base_kind), base[1], base[2], base[3], base[4], base[5],
-		base[6], base[7]]
+	rule_base := [f64(rule.base_kind), base[1], base[2], base[3], base[4], base[5], base[6], base[7]]
 	if rule.operation == 'attach' {
 		return ctp_attach(rule_base, rule.part_kind, part_hue, ratio, lateral)
 	}
@@ -174,7 +167,7 @@ fn (p CompositeTemplateProposer) ctp_propose_case(case StructureCase, case_index
 		mut hues := p.part_hues.clone()
 		if rule.operation == 'mirror' || rule.operation == 'repeat' {
 			hues = [int(b[5])]
-		} else if !(rule.part_kind in p.part_kinds) {
+		} else if rule.part_kind !in p.part_kinds {
 			continue
 		}
 		for part_hue in hues {
@@ -185,16 +178,19 @@ fn (p CompositeTemplateProposer) ctp_propose_case(case StructureCase, case_index
 						continue
 					}
 					params := p.ctp_params_for_rule(b, rule, part_hue, ratio, lateral)
-					if !(lcb_inside(params[1], params[2], params[3], params[4]) && lcb_inside(params[7],
-						params[8], params[9], params[10])) {
+					if !(lcb_inside(params[1], params[2], params[3], params[4])
+						&& lcb_inside(params[7], params[8], params[9], params[10])) {
 						continue
 					}
-					residual := p.ctp_render_residual(params, fl, fr, mut renderer, cam_l,
-						cam_r)
+					residual := p.ctp_render_residual(params, fl, fr, mut renderer, cam_l, cam_r)
 					score := residual + p.complexity_weight * rule.complexity
 					family := if rule.operation == 'layer' { 'layered' } else { 'composite' }
 					default_parent := if rule.operation == 'attach' { 'layered' } else { 'single' }
-					parent_family := if case.structure_id != 'unknown' { case.structure_id } else { default_parent }
+					parent_family := if case.structure_id != 'unknown' {
+						case.structure_id
+					} else {
+						default_parent
+					}
 					mut delta := map[string]MetaValue{}
 					delta['relation'] = rule.operation
 					delta['base_kind'] = rule.base_kind
@@ -216,15 +212,15 @@ fn (p CompositeTemplateProposer) ctp_propose_case(case StructureCase, case_index
 					metadata['case_index'] = case_index
 					metadata['residual_gain'] = baseline - residual
 					out << TemplateProposal{
-						family: family
-						operation: rule.operation
-						params: params
-						residual: residual
-						complexity: rule.complexity
-						score: score
+						family:        family
+						operation:     rule.operation
+						params:        params
+						residual:      residual
+						complexity:    rule.complexity
+						score:         score
 						parent_family: parent_family
-						delta: delta
-						metadata: metadata
+						delta:         delta
+						metadata:      metadata
 					}
 				}
 			}

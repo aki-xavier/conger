@@ -2,7 +2,6 @@ module conger
 
 // evaluator.v — continuous regression metrics + discrete scene-factor accuracy
 // (V port of src/evaluator.py; single / layered-composite / textured).
-
 import mlx
 
 struct Evaluator {}
@@ -16,10 +15,14 @@ struct FactorSpec {
 // evaluator_cols returns the target/factor layouts for a param width.
 fn evaluator_cols(width int) ([]int, []string, []FactorSpec) {
 	if width == 14 {
-		return [1, 2, 3, 4, 7, 8, 9, 10], ['u0', 'v0', 's0', 'z0', 'u1', 'v1',
-			's1', 'z1'], [FactorSpec{'kind0', 0}, FactorSpec{'kind1', 6},
-			FactorSpec{'hue0', 5}, FactorSpec{'hue1', 11}, FactorSpec{'lcol', 12},
-			FactorSpec{'ldir', 13}]
+		return [1, 2, 3, 4, 7, 8, 9, 10], ['u0', 'v0', 's0', 'z0', 'u1', 'v1', 's1', 'z1'], [
+			FactorSpec{'kind0', 0},
+			FactorSpec{'kind1', 6},
+			FactorSpec{'hue0', 5},
+			FactorSpec{'hue1', 11},
+			FactorSpec{'lcol', 12},
+			FactorSpec{'ldir', 13},
+		]
 	}
 	if width == 10 {
 		return [1, 2, 3, 4], ['u', 'v', 's', 'z'], [FactorSpec{'kind', 0},
@@ -34,13 +37,13 @@ fn evaluator_cols(width int) ([]int, []string, []FactorSpec) {
 fn (e Evaluator) report(name string, p_gt mlx.Array, t_pred mlx.Array, scene_pred [][]f64, p_train mlx.Array) map[string]f64 {
 	cols, targets, factors := evaluator_cols(p_gt.dim(1))
 	gt := p_gt.take_axis(mlx.array_i32(ints32(cols), [cols.len]), 1)
-	base := p_train.take_axis(mlx.array_i32(ints32(cols), [cols.len]), 1).mean_axis(0,
-		true)
+	base := p_train.take_axis(mlx.array_i32(ints32(cols), [cols.len]), 1).mean_axis(0, true)
 	ss_base := gt.subtract(base).square().sum_axis(0, false)
 	tp := t_pred.take_axis(mlx.arange(0.0, f64(cols.len), 1.0, .int32), 1)
 	ss_res := gt.subtract(tp).square().sum_axis(0, false)
 	rmse := gt.subtract(tp).square().mean_axis(0, false).sqrt()
-	r2 := mlx.ones([cols.len], .float32).subtract(ss_res.divide(ss_base.maximum(mlx.f32_scalar(1e-12))))
+	r2 :=
+		mlx.ones([cols.len], .float32).subtract(ss_res.divide(ss_base.maximum(mlx.f32_scalar(1e-12))))
 	mut pred_flat := []f32{}
 	for r in scene_pred {
 		for v in r {
@@ -50,7 +53,8 @@ fn (e Evaluator) report(name string, p_gt mlx.Array, t_pred mlx.Array, scene_pre
 	pred := mlx.array_f32(pred_flat, [scene_pred.len, scene_pred[0].len])
 	mut out := map[string]f64{}
 	for f in factors {
-		acc := pred.take_axis(sel1(f.col), 1).equal(p_gt.take_axis(sel1(f.col), 1)).astype(.float32).mean().item_f32()
+		acc :=
+			pred.take_axis(sel1(f.col), 1).equal(p_gt.take_axis(sel1(f.col), 1)).astype(.float32).mean().item_f32()
 		out[f.name] = f64(acc)
 	}
 	rmse_vals := rmse.data_f32()

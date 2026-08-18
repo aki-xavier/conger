@@ -54,5 +54,9 @@ fn feat_spec_list() []FeatSpec {
 // n_feat returns the full-resolution feature width (Riesz + stereo stats).
 fn (c InverseConfig) n_feat() int {
 	n := feat_spec_list().len * img_h * img_w
-	return n + (if c.family() == 'single' { 2 } else { 8 })
+	return n + (if c.family() == 'single' {
+		2
+	} else {
+		8
+	})
 }

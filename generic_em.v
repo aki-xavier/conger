@@ -15,21 +15,21 @@ module conger
 
 // EMResult captures one EM run.
 struct EMResult[T] {
-	params          []f64
+	params           []f64
 	responsibilities T
-	log_likelihood  f64
-	iterations      int
-	trajectory      []f64
+	log_likelihood   f64
+	iterations       int
+	trajectory       []f64
 }
 
 // EMLoop iterates E/M to convergence. M is the model struct, O the observation
 // type, R the responsibility type (both inferred from the concrete model's
 // method signatures at each instantiation).
 struct EMLoop[M, O, R] {
-	max_iters   int  = 50
-	tol         f64  = 1e-6
-	temperature f64  = 1.0
-	damping     f64  = 0.0
+	max_iters   int = 50
+	tol         f64 = 1e-6
+	temperature f64 = 1.0
+	damping     f64 = 0.0
 mut:
 	model M
 }
@@ -52,10 +52,10 @@ fn (mut e EMLoop[M, O, R]) run(observation O, init_params []f64) EMResult[R] {
 		prev_ll = ll
 	}
 	return EMResult[R]{
-		params: params
+		params:           params
 		responsibilities: resp
-		log_likelihood: trajectory[trajectory.len - 1]
-		iterations: trajectory.len
-		trajectory: trajectory
+		log_likelihood:   trajectory[trajectory.len - 1]
+		iterations:       trajectory.len
+		trajectory:       trajectory
 	}
 }

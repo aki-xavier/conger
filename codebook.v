@@ -2,9 +2,7 @@ module conger
 
 // codebook.v — continuous scene params ⇄ cga Scene + domain constants
 // (V port of src/codebook.py).
-
 import cga
-
 import mlx
 
 // Codebook holds the scene-domain config (rendering integration).
@@ -80,10 +78,9 @@ fn (cb Codebook) to_scene(params []f64) cga.Scene {
 	mut sc := cga.scene(cga.color_hex(cb.cfg.bg_color))
 	sc.add_light(cga.ambient_light(cga.color_hex(0xFFFFFF), 0.5))
 	dirs := codebook_light_dirs()
-	sc.add_light(cga.directional_light(cga.color_hex(light_colors[lcol]), 0.7,
-		dirs[ldir]))
-	mat := cga.standard_material(cga.color_hex(obj_color(hue)), 0.55, 0.0,
-		cga.color_hex(0), 1.0, 1.5, 0.0)
+	sc.add_light(cga.directional_light(cga.color_hex(light_colors[lcol]), 0.7, dirs[ldir]))
+	mat := cga.standard_material(cga.color_hex(obj_color(hue)), 0.55, 0.0, cga.color_hex(0), 1.0,
+		1.5, 0.0)
 	sc.add_mesh(cga.mesh(geom, mat, [x, y, z]!, [0.0, 0.0, 0.0]!, 0.0, none))
 	return sc
 }
@@ -92,11 +89,17 @@ fn (cb Codebook) to_scene(params []f64) cga.Scene {
 fn make_renderer(baseline f64) (cga.Renderer, cga.PerspectiveCamera, cga.PerspectiveCamera) {
 	mut r := cga.renderer(img_w, img_h, 1, 3)
 	fv := codebook_fov()
-	mut cam_l := cga.perspective_camera(fv, 1.0, 0.1, 50.0, [-baseline / 2.0, 0.0,
-		cam_z]!, [-baseline / 2.0, 0.0, 0.0]!, [0.0, 1.0, 0.0]!)
+	mut cam_l := cga.perspective_camera(fv, 1.0, 0.1, 50.0, [-baseline / 2.0, 0.0, cam_z]!, [
+		-baseline / 2.0,
+		0.0,
+		0.0,
+	]!, [0.0, 1.0, 0.0]!)
 	cam_l.look_at([-baseline / 2.0, 0.0, 0.0]!, none)
-	mut cam_r := cga.perspective_camera(fv, 1.0, 0.1, 50.0, [baseline / 2.0, 0.0,
-		cam_z]!, [baseline / 2.0, 0.0, 0.0]!, [0.0, 1.0, 0.0]!)
+	mut cam_r := cga.perspective_camera(fv, 1.0, 0.1, 50.0, [baseline / 2.0, 0.0, cam_z]!, [
+		baseline / 2.0,
+		0.0,
+		0.0,
+	]!, [0.0, 1.0, 0.0]!)
 	cam_r.look_at([baseline / 2.0, 0.0, 0.0]!, none)
 	return r, cam_l, cam_r
 }

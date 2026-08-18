@@ -2,9 +2,7 @@ module conger
 
 // composite_geometry.v — part-aware binocular geometry anchors for attached
 // composites (V port of src/composite_geometry.py).
-
 import math
-
 import mlx
 
 const cg_down = 3
@@ -39,7 +37,11 @@ fn cg_centroid(weights mlx.Array) (f64, f64, f64) {
 
 // cg_area returns the physical area of a template.
 fn cg_area(t LayerTemplate) f64 {
-	return (if t.shape == 2 { 4.0 } else { math.pi }) * (t.r * f64(cg_down)) * (t.r * f64(cg_down))
+	return (if t.shape == 2 {
+		4.0
+	} else {
+		math.pi
+	}) * (t.r * f64(cg_down)) * (t.r * f64(cg_down))
 }
 
 // cg_count returns the number of true pixels in a bool mask.
@@ -56,7 +58,8 @@ fn cg_disk_fit(fg mlx.Array, tmpl LayerTemplate, q int) ?[]f64 {
 	rad := tmpl.r * f64(q) * 1.15
 	ys := mlx.arange(0.0, f64(h), 1.0, .float32).expand_dims(1).broadcast_to([h, w])
 	xs := mlx.arange(0.0, f64(w), 1.0, .float32).expand_dims(0).broadcast_to([h, w])
-	fp := xs.subtract(mlx.f32_scalar(f32(cx))).square().add(ys.subtract(mlx.f32_scalar(f32(cy))).square()).less_equal(mlx.f32_scalar(f32(rad * rad)))
+	fp :=
+		xs.subtract(mlx.f32_scalar(f32(cx))).square().add(ys.subtract(mlx.f32_scalar(f32(cy))).square()).less_equal(mlx.f32_scalar(f32(rad * rad)))
 	m := fg.logical_and(fp)
 	tot := m.astype(.float32).sum().item_f32()
 	if tot < 1e-6 {
@@ -139,7 +142,11 @@ fn cg_split_score(fg mlx.Array) ?SplitResult {
 	if !found {
 		return none
 	}
-	return SplitResult{score: best_score, base: best_base, part: best_part}
+	return SplitResult{
+		score: best_score
+		base:  best_base
+		part:  best_part
+	}
 }
 
 // cg_window_centroid returns the local-window centroid (x, y).
@@ -169,10 +176,14 @@ fn cg_window_centroid(weights mlx.Array, cx f64, cy f64, r f64) ?[]f64 {
 	if total <= 1e-8 {
 		return none
 	}
-	ys := mlx.arange(f64(y0), f64(y1), 1.0, .float32).expand_dims(1).broadcast_to([y1 - y0,
-		x1 - x0])
-	xs := mlx.arange(f64(x0), f64(x1), 1.0, .float32).expand_dims(0).broadcast_to([y1 - y0,
-		x1 - x0])
+	ys := mlx.arange(f64(y0), f64(y1), 1.0, .float32).expand_dims(1).broadcast_to([
+		y1 - y0,
+		x1 - x0,
+	])
+	xs := mlx.arange(f64(x0), f64(x1), 1.0, .float32).expand_dims(0).broadcast_to([
+		y1 - y0,
+		x1 - x0,
+	])
 	ux := win.multiply(xs).sum().item_f32() / total
 	uy := win.multiply(ys).sum().item_f32() / total
 	return [f64(ux), f64(uy)]
@@ -242,6 +253,6 @@ fn cg_estimate(fl mlx.Array, fr mlx.Array) []f64 {
 	part := s.part
 	z0 := cg_part_depth(wl, wr, base, d_global)
 	z1 := cg_part_depth(wl, wr, part, d_global)
-	return [base.cx * q, base.cy * q, z0, cg_area(base), part.cx * q, part.cy * q,
-		z1, cg_area(part)]
+	return [base.cx * q, base.cy * q, z0, cg_area(base), part.cx * q, part.cy * q, z1,
+		cg_area(part)]
 }

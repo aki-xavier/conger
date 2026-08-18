@@ -9,15 +9,15 @@ fn causal_proposal(env int, ratio f64, lateral f64) TemplateProposal {
 	mut metadata := map[string]MetaValue{}
 	metadata['env'] = env
 	return TemplateProposal{
-		family: 'composite_attach_xyz'
-		operation: 'attach'
-		params: [0.0, 70.0, 70.0, 0.4, 3.0, 1.0, 0.0, 1.0]
-		residual: 100.0
-		complexity: 1.5
-		score: 100.0
+		family:        'composite_attach_xyz'
+		operation:     'attach'
+		params:        [0.0, 70.0, 70.0, 0.4, 3.0, 1.0, 0.0, 1.0]
+		residual:      100.0
+		complexity:    1.5
+		score:         100.0
 		parent_family: 'composite'
-		delta: delta
-		metadata: metadata
+		delta:         delta
+		metadata:      metadata
 	}
 }
 
@@ -73,21 +73,21 @@ fn observed_proposal(env int, observed_ratio f64) TemplateProposal {
 	obs['lateral_ratio'] = 0.0
 	metadata['observed'] = obs
 	return TemplateProposal{
-		family: 'composite_attach_x'
-		operation: 'attach'
-		params: [0.0, 70.0, 70.0, 0.4, 3.0, 1.0, 0.0, 1.0]
-		residual: 100.0
-		complexity: 1.5
-		score: 100.0
+		family:        'composite_attach_x'
+		operation:     'attach'
+		params:        [0.0, 70.0, 70.0, 0.4, 3.0, 1.0, 0.0, 1.0]
+		residual:      100.0
+		complexity:    1.5
+		score:         100.0
 		parent_family: 'composite'
-		delta: delta
-		metadata: metadata
+		delta:         delta
+		metadata:      metadata
 	}
 }
 
 fn test_observed_delta_overrides_grid_and_env_is_case_index() {
-	proposals := [observed_proposal(0, 0.4), observed_proposal(1, 0.5), observed_proposal(2,
-		0.6)]
+	proposals := [observed_proposal(0, 0.4), observed_proposal(1, 0.5),
+		observed_proposal(2, 0.6)]
 	edges := learn_edges(proposals)
 	assert edges['scale_ratio'].agreement < 0.5
 	assert edges['scale_ratio'].n_envs == 3
@@ -102,15 +102,15 @@ fn test_mirror_maps_lateral_to_period_ratio() {
 	mut metadata := map[string]MetaValue{}
 	metadata['env'] = 0
 	mirror := TemplateProposal{
-		family: 'composite_mirror_x'
-		operation: 'mirror'
-		params: p.params
-		residual: p.residual
-		complexity: p.complexity
-		score: p.score
+		family:        'composite_mirror_x'
+		operation:     'mirror'
+		params:        p.params
+		residual:      p.residual
+		complexity:    p.complexity
+		score:         p.score
 		parent_family: 'composite'
-		delta: delta
-		metadata: metadata
+		delta:         delta
+		metadata:      metadata
 	}
 	edges := learn_edges([mirror, p])
 	assert 'period_ratio' in edges

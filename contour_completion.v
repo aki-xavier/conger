@@ -2,9 +2,7 @@ module conger
 
 // contour_completion.v — visible back-layer contour → full shape template
 // (V port of src/contour_completion.py).
-
 import math
-
 import mlx
 
 const cc_down = 3

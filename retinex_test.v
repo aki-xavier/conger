@@ -1,7 +1,6 @@
 module conger
 
 // retinex_test.v — RetinexModel (albedo↔lighting) black-box test.
-
 import math
 
 fn test_retinex_decomposes_albedo_and_light() {
@@ -18,9 +17,9 @@ fn test_retinex_decomposes_albedo_and_light() {
 	obs := model.render(true_log_a, true_l, 0)
 
 	mut loop := EMLoop[RetinexModel, []f64, []f64]{
-		model: model
+		model:     model
 		max_iters: 20
-		tol: 1e-10
+		tol:       1e-10
 	}
 	result := loop.run(obs, [0.0, 0.0])
 

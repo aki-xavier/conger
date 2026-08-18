@@ -1,9 +1,7 @@
 module conger
 
 // composite_test.v — explicit attached composite template tests (tractable parts).
-
 import math
-
 import mlx
 
 const crc_scale = [1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0]
@@ -25,11 +23,13 @@ fn test_composite_sampling_and_scene() {
 		assert r >= 0.35 - 1e-6 && r <= 0.75 + 1e-6
 		assert math.abs(f64(z1[i]) - f64(z0[i])) <= 0.060001
 	}
-	combos := p.take_axis(mlx.array_i32([i32(0), i32(6), i32(5), i32(11), i32(12),
-		i32(13)], [6]), 1).astype(.int32).data_i32()
+	combos := p.take_axis(mlx.array_i32([i32(0), i32(6), i32(5), i32(11), i32(12), i32(13)], [
+		6,
+	]), 1).astype(.int32).data_i32()
 	mut seen := map[string]bool{}
 	for i in 0 .. combos.len / 6 {
-		key := '${combos[i * 6]},${combos[i * 6 + 1]},${combos[i * 6 + 2]},${combos[i * 6 + 3]},${combos[i * 6 + 4]},${combos[i * 6 + 5]}'
+		key := '${combos[i * 6]},${combos[i * 6 + 1]},${combos[i * 6 + 2]},${combos[i * 6 + 3]},${combos[
+			i * 6 + 4]},${combos[i * 6 + 5]}'
 		seen[key] = true
 	}
 	assert seen.len == n_combo_layered
@@ -67,18 +67,18 @@ fn test_composite_decoding_roundtrip() {
 		assert math.abs(prm[i] - f64(p0[i])) < 1e-5
 	}
 	est := StructuredHypothesis{
-		scene: new_composite_codebook(InverseConfig{}).to_scene(prm)
-		params: prm
-		spn_posterior: cat_p.take_axis(sel1(0), 0)
+		scene:            new_composite_codebook(InverseConfig{}).to_scene(prm)
+		params:           prm
+		spn_posterior:    cat_p.take_axis(sel1(0), 0)
 		candidate_params: [prm]
-		factor_sizes: [3, 3, 6, 6, 3, 3]
-		factor_indices: [0, 6, 5, 11, 12, 13]
+		factor_sizes:     [3, 3, 6, 6, 3, 3]
+		factor_indices:   [0, 6, 5, 11, 12, 13]
 	}
 	assert est.factor_marginals().len == 6
 }
 
 fn test_composite_geometry_recovers_parts() {
-	cb := new_composite_codebook(InverseConfig{scene_family: 'composite'})
+	cb := new_composite_codebook(InverseConfig{ scene_family: 'composite' })
 	p := ccb_sample(1, 123, false)
 	mut prm := []f64{len: 14}
 	pd := p.data_f32()

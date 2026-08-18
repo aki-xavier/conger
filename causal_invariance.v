@@ -2,9 +2,7 @@ module conger
 
 // causal_invariance.v — held-out lighting probe + marginal estimation +
 // invariance scoring (V port of src/causal_invariance.py).
-
 import cga
-
 import mlx
 
 struct LightingHoldout {
@@ -28,10 +26,10 @@ fn lighting_holdout_split(n_colors int, n_dirs int, holdout_color int, holdout_d
 		}
 	}
 	return LightingHoldout{
-		train_colors: tc
-		train_dirs: td
+		train_colors:   tc
+		train_dirs:     td
 		holdout_colors: [holdout_color]
-		holdout_dirs: [holdout_dir]
+		holdout_dirs:   [holdout_dir]
 	}
 }
 
@@ -99,13 +97,13 @@ fn summarize_invariance(groups map[string][][2]int, factor string, holdout Light
 		}
 	}
 	return InvarianceReport{
-		factor: factor
+		factor:              factor
 		in_support_accuracy: in_acc
-		holdout_accuracy: out_acc
-		invariance_score: min_acc
-		gap: in_acc - out_acc
-		per_group_accuracy: per_group
-		n_groups: per_group.len
+		holdout_accuracy:    out_acc
+		invariance_score:    min_acc
+		gap:                 in_acc - out_acc
+		per_group_accuracy:  per_group
+		n_groups:            per_group.len
 	}
 }
 
@@ -129,8 +127,7 @@ fn invariance_probe_run(codebook Codebook, scenes [][]f64, holdout LightingHoldo
 		fl := renderer.render(scene, cam_l)
 		fr := renderer.render(scene, cam_r)
 		base := [row[0], row[1], row[2], row[3], row[4]]
-		_, _, score_arr := sr_refine_appearance(codebook, base, fl, fr, mut renderer,
-			cam_l, cam_r)
+		_, _, score_arr := sr_refine_appearance(codebook, base, fl, fr, mut renderer, cam_l, cam_r)
 		temperature := fmax2(2.0 * f64(score_arr.min().item_f32()), 1.0)
 		logp := score_arr.negative().divide(mlx.f32_scalar(f32(temperature)))
 		posterior := logp.subtract(logp.logsumexp()).exp()

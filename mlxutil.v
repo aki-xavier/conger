@@ -6,7 +6,6 @@ module conger
 // uses the `mlx-v` bindings (module `mlx`). This file centralises the few
 // idioms that mlx-v does not expose ergonomically: boolean-mask indexing,
 // axis-wise variance/std, axis-wise logsumexp and CPU-only eigendecomposition.
-
 import mlx
 
 // nonzero_indices returns the flat int32 indices where a boolean array is true.
@@ -15,8 +14,8 @@ fn nonzero_indices(sel mlx.Array) mlx.Array {
 	n := int(sel.size())
 	flat := sel.reshape([n])
 	k := int(flat.astype(.float32).sum().item_f32())
-	key := mlx.where(flat, mlx.arange(0.0, f64(n), 1.0, .float32),
-		mlx.full_value([n], f32(n), .float32))
+	key := mlx.where(flat, mlx.arange(0.0, f64(n), 1.0, .float32), mlx.full_value([n], f32(n),
+		.float32))
 	return key.argsort().take(mlx.arange(0.0, f64(k), 1.0, .int32))
 }
 

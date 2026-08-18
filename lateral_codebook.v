@@ -2,9 +2,7 @@ module conger
 
 // lateral_codebook.v — mirror/repeat lateral same-kind composite template
 // (V port of src/lateral_codebook.py; param order stays 14-compatible).
-
 import cga
-
 import mlx
 
 const lc_part_period_lo = 0.15
@@ -48,8 +46,8 @@ fn lc_sample_composite(mut rng Rng, extrap bool) []f64 {
 		period := rng.uniform(lc_part_period_lo, lc_part_period_hi)
 		x1 := x0 + period * lc_spacing_mirror * (s0 + s1)
 		zc1 := cam_z - z1
-		u1 := f64(img_w-1)/2.0 + x1 * fx / zc1
-		v1 := f64(img_h-1)/2.0 - y0 * fy / zc1
+		u1 := f64(img_w - 1) / 2.0 + x1 * fx / zc1
+		v1 := f64(img_h - 1) / 2.0 - y0 * fy / zc1
 		if lcb_inside(u0, v0, s0, z0) && lcb_inside(u1, v1, s1, z1) {
 			return [u0, v0, s0, z0, u1, v1, s1, z1]
 		}

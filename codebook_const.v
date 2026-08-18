@@ -1,7 +1,6 @@
 module conger
 
 // codebook_const.v — shared scene-domain constants from the Codebook class.
-
 import math
 
 const n_kind = 3

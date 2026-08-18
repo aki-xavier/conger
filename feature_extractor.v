@@ -2,14 +2,13 @@ module conger
 
 // feature_extractor.v — rendered frame → full-resolution features
 // (V port of src/feature_extractor.py; the Riesz frontend is added separately).
-
 import math
-
 import mlx
 
 // frame_lum returns the Rec601 luminance (H,W) float32 in [0,1].
 fn frame_lum(frame mlx.Array) mlx.Array {
-	rgb := frame.take_axis(mlx.arange(0.0, 3.0, 1.0, .int32), -1).astype(.float32).divide(mlx.f32_scalar(255.0))
+	rgb :=
+		frame.take_axis(mlx.arange(0.0, 3.0, 1.0, .int32), -1).astype(.float32).divide(mlx.f32_scalar(255.0))
 	r := rgb.take_axis(sel1(0), -1).squeeze_axis(-1)
 	g := rgb.take_axis(sel1(1), -1).squeeze_axis(-1)
 	b := rgb.take_axis(sel1(2), -1).squeeze_axis(-1)
@@ -18,7 +17,8 @@ fn frame_lum(frame mlx.Array) mlx.Array {
 
 // frame_hs returns the (hue, saturation) maps, each [0,1).
 fn frame_hs(frame mlx.Array) (mlx.Array, mlx.Array) {
-	rgb := frame.take_axis(mlx.arange(0.0, 3.0, 1.0, .int32), -1).astype(.float32).divide(mlx.f32_scalar(255.0))
+	rgb :=
+		frame.take_axis(mlx.arange(0.0, 3.0, 1.0, .int32), -1).astype(.float32).divide(mlx.f32_scalar(255.0))
 	r := rgb.take_axis(sel1(0), -1).squeeze_axis(-1)
 	g := rgb.take_axis(sel1(1), -1).squeeze_axis(-1)
 	b := rgb.take_axis(sel1(2), -1).squeeze_axis(-1)
@@ -31,12 +31,13 @@ fn frame_hs(frame mlx.Array) (mlx.Array, mlx.Array) {
 	max_g := g.equal(mxv)
 	mut h6 := mlx.where(max_r, g.subtract(b).divide(d.maximum(mlx.f32_scalar(1e-9))),
 		mlx.f32_scalar(0.0))
-	h6 = mlx.where(max_g, b.subtract(r).divide(d.maximum(mlx.f32_scalar(1e-9))).add(mlx.f32_scalar(2.0)),
-		h6)
+	h6 = mlx.where(max_g,
+		b.subtract(r).divide(d.maximum(mlx.f32_scalar(1e-9))).add(mlx.f32_scalar(2.0)), h6)
 	not_rg := max_r.logical_not().logical_and(max_g.logical_not())
-	h6 = mlx.where(not_rg, r.subtract(g).divide(d.maximum(mlx.f32_scalar(1e-9))).add(mlx.f32_scalar(4.0)),
-		h6)
-	h := mlx.where(d.less(mlx.f32_scalar(1e-6)), mlx.f32_scalar(0.0), h6.divide(mlx.f32_scalar(6.0)))
+	h6 = mlx.where(not_rg,
+		r.subtract(g).divide(d.maximum(mlx.f32_scalar(1e-9))).add(mlx.f32_scalar(4.0)), h6)
+	h := mlx.where(d.less(mlx.f32_scalar(1e-6)), mlx.f32_scalar(0.0),
+		h6.divide(mlx.f32_scalar(6.0)))
 	return h, s
 }
 

@@ -2,9 +2,7 @@ module conger
 
 // expert_registry.v — structure-expert registry + render-residual gating
 // (V port of src/expert_registry.py).
-
 import os
-
 import mlx
 
 // SceneExpert is a fixed scene family + MixtureSPN + inverse app.
@@ -23,8 +21,8 @@ fn scene_expert_from_config(name string, cfg InverseConfig, artifacts string) !S
 	}
 	return SceneExpert{
 		name: name
-		app: app
-		net: load_mixture_spn(path)
+		app:  app
+		net:  load_mixture_spn(path)
 	}
 }
 
@@ -55,11 +53,11 @@ mut:
 // new_expert_registry builds a registry over the given experts.
 fn new_expert_registry(experts map[string]SceneExpert) ExpertRegistry {
 	return ExpertRegistry{
-		experts: experts
-		gate: new_structure_gate()
+		experts:             experts
+		gate:                new_structure_gate()
 		pending_child_specs: map[string]ChildTemplateSpec{}
-		child_specs: map[string]ChildTemplateSpec{}
-		child_model_paths: map[string]string{}
+		child_specs:         map[string]ChildTemplateSpec{}
+		child_model_paths:   map[string]string{}
 	}
 }
 
@@ -70,11 +68,11 @@ fn default_expert_registry() ExpertRegistry {
 		repl := if name == 'single' { 8 } else { 1 }
 		cfg := InverseConfig{
 			scene_family: name
-			replicates: repl
+			replicates:   repl
 		}
 		experts[name] = SceneExpert{
 			name: name
-			app: new_inverse_app(cfg)
+			app:  new_inverse_app(cfg)
 		}
 	}
 	return new_expert_registry(experts)
@@ -121,7 +119,7 @@ fn (mut r ExpertRegistry) save_manifest(path string) string {
 	mut children := []RegisteredChildTemplate{}
 	for name, spec in r.child_specs {
 		children << RegisteredChildTemplate{
-			spec: spec
+			spec:       spec
 			model_path: r.child_model_paths[name]
 		}
 	}
@@ -131,7 +129,7 @@ fn (mut r ExpertRegistry) save_manifest(path string) string {
 	}
 	rm_save(RegistryManifest{
 		children: children
-		pending: pending
+		pending:  pending
 	}, out)
 	r.manifest_path = out
 	return out
@@ -153,7 +151,11 @@ fn (mut r ExpertRegistry) load_manifest(path string, artifacts string, missing_o
 			scene_family: spec.family
 		}
 		app := new_inverse_app_cb(cfg, cb)
-		model_path := if child.model_path != '' { child.model_path } else { app.default_model_path(artifacts) }
+		model_path := if child.model_path != '' {
+			child.model_path
+		} else {
+			app.default_model_path(artifacts)
+		}
 		if !os.exists(model_path) {
 			if missing_ok {
 				continue
@@ -162,8 +164,8 @@ fn (mut r ExpertRegistry) load_manifest(path string, artifacts string, missing_o
 		}
 		r.experts[spec.name] = SceneExpert{
 			name: spec.name
-			app: app
-			net: MixtureSPN{}
+			app:  app
+			net:  MixtureSPN{}
 		}
 		r.child_specs[spec.name] = spec
 		r.child_model_paths[spec.name] = model_path
@@ -203,8 +205,8 @@ fn (mut r ExpertRegistry) train_and_register(name string, cfg InverseConfig, art
 		app := new_inverse_app_cb(cfg, cb)
 		e := SceneExpert{
 			name: name
-			app: app
-			net: MixtureSPN{}
+			app:  app
+			net:  MixtureSPN{}
 		}
 		r.experts[name] = e
 		return e
@@ -212,8 +214,8 @@ fn (mut r ExpertRegistry) train_and_register(name string, cfg InverseConfig, art
 	app := new_inverse_app(cfg)
 	e := SceneExpert{
 		name: name
-		app: app
-		net: MixtureSPN{}
+		app:  app
+		net:  MixtureSPN{}
 	}
 	r.experts[name] = e
 	return e
@@ -237,9 +239,9 @@ fn (mut r ExpertRegistry) confirm_child_template(name string, artifacts string) 
 	r.child_specs[name] = spec
 	r.child_model_paths[name] = expert.app.default_model_path(artifacts)
 	return ChildTemplateRegistration{
-		spec: spec
+		spec:         spec
 		codebook_cls: cb
-		expert: expert
+		expert:       expert
 	}
 }
 

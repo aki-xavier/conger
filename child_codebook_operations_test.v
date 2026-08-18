@@ -1,9 +1,7 @@
 module conger
 
 // child_codebook_operations_test.v — V port of tests/test_child_codebook_operations.py.
-
 import math
-
 import mlx
 
 fn ccf_test_spec(operation string, name string) ChildTemplateSpec {
@@ -20,16 +18,16 @@ fn ccf_test_spec(operation string, name string) ChildTemplateSpec {
 		constraints['period_ratio'] = [0.18, 0.22]
 	}
 	return ChildTemplateSpec{
-		name: name
-		family: family
-		parent_family: 'composite'
-		operation: operation
-		constraints: constraints
-		complexity: 1.5
-		generation: 3
+		name:           name
+		family:         family
+		parent_family:  'composite'
+		operation:      operation
+		constraints:    constraints
+		complexity:     1.5
+		generation:     3
 		evidence_count: 2
-		residual_mean: 1.0
-		score_mean: 2.5
+		residual_mean:  1.0
+		score_mean:     2.5
 	}
 }
 
@@ -37,7 +35,7 @@ fn test_layer_child_codebook_constraints() {
 	cb := ccf_build(ccf_test_spec('layer', 'layer_child'))
 	assert cb.operation == 'layer'
 	assert cb.n_combo() == 3 * 1 * 6 * 1 * 3 * 3
-	app := new_inverse_app_cb(InverseConfig{scene_family: 'layered'}, cb)
+	app := new_inverse_app_cb(InverseConfig{ scene_family: 'layered' }, cb)
 	assert app.layered_reconstructor() == 'constrained'
 	assert cb.lateral_lo == 0.35 && cb.lateral_hi == 0.7
 	assert meta_list(cb.lineage.delta, 'lateral_ratio')[0] == 0.35
@@ -84,22 +82,24 @@ fn test_delta_learner_feeds_all_child_factories() {
 			params[i] = f64(i)
 		}
 		proposal := TemplateProposal{
-			family: if op == 'layer' { 'layered' } else { 'composite' }
-			operation: op
-			params: params
-			residual: 1.0
-			complexity: 1.5
-			score: 2.5
+			family:        if op == 'layer' { 'layered' } else { 'composite' }
+			operation:     op
+			params:        params
+			residual:      1.0
+			complexity:    1.5
+			score:         2.5
 			parent_family: 'composite'
-			delta: delta
+			delta:         delta
 		}
 		req := StructureBirthRequest{
-			residual_mean: 1.0
+			residual_mean:       1.0
 			best_posterior_mean: 0.5
-			reason: 'test'
-			proposals: [proposal, proposal]
+			reason:              'test'
+			proposals:           [proposal, proposal]
 		}
-		specs := TemplateDeltaLearner{min_evidence: 2}.tdl_learn([req], map[string]TemplateLineage{})
+		specs := TemplateDeltaLearner{
+			min_evidence: 2
+		}.tdl_learn([req], map[string]TemplateLineage{})
 		assert specs.len == 1
 		cb := ccf_build(specs[0])
 		assert cb.lineage.operation == op
@@ -108,7 +108,9 @@ fn test_delta_learner_feeds_all_child_factories() {
 
 fn test_lateral_geometry_and_frame_features() {
 	cb := ccf_build(ccf_test_spec('mirror', 'mirror_geom'))
-	cfg := InverseConfig{scene_family: 'composite'}
+	cfg := InverseConfig{
+		scene_family: 'composite'
+	}
 	app := new_inverse_app_cb(cfg, cb)
 	prm := cb.sample(1, 7, false).take_axis(sel1(0), 0).data_f32()
 	mut prm_f := []f64{len: 14}

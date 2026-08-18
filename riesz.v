@@ -2,9 +2,7 @@ module conger
 
 // riesz.v — Riesz (monogenic) wavelet feature frontend
 // (V port of src/riesz.py; the visualise helpers are omitted).
-
 import math
-
 import mlx
 
 // rz_fftfreq returns numpy-style sample frequencies (Nyquist = 0.5).
@@ -36,8 +34,8 @@ fn rz_box_mean(m mlx.Array, k int) mlx.Array {
 	wp := m2.dim(1)
 	cs0 := m2.cumsum(0, false, true)
 	c0 := mlx.concatenate([mlx.zeros([1, wp], .float32), cs0], 0)
-	m3 := c0.take_axis(mlx.arange(f64(k), f64(hp + 1), 1.0, .int32), 0).subtract(c0.take_axis(mlx.arange(f64(0),
-		f64(hp + 1 - k), 1.0, .int32), 0)).divide(mlx.f32_scalar(f32(k)))
+	m3 := c0.take_axis(mlx.arange(f64(k), f64(hp + 1), 1.0, .int32), 0).subtract(c0.take_axis(mlx.arange(f64(0), f64(
+		hp + 1 - k), 1.0, .int32), 0)).divide(mlx.f32_scalar(f32(k)))
 	cs1 := m3.cumsum(1, false, true)
 	c1 := mlx.concatenate([mlx.zeros([m3.dim(0), 1], .float32), cs1], 1)
 	return c1.take_axis(mlx.arange(f64(k), f64(c1.dim(1)), 1.0, .int32), 1).subtract(c1.take_axis(mlx.arange(f64(0),
@@ -100,7 +98,8 @@ fn new_riesz_wavelet(img mlx.Array, lam_min f64, scale_size int, bandwidth f64) 
 	for lam in lams {
 		f0 := 1.0 / lam
 		sf := sigma_f_rel * f0
-		kernel := radius.sqrt().subtract(mlx.f32_scalar(f32(f0))).square().divide(mlx.f32_scalar(f32(2.0 * sf * sf))).negative().exp()
+		kernel :=
+			radius.sqrt().subtract(mlx.f32_scalar(f32(f0))).square().divide(mlx.f32_scalar(f32(2.0 * sf * sf))).negative().exp()
 		kernels << kernel
 	}
 	mut k2s := []mlx.Array{}
@@ -113,23 +112,23 @@ fn new_riesz_wavelet(img mlx.Array, lam_min f64, scale_size int, bandwidth f64) 
 	m1 := complex_from(zero, xgrid.divide(safe_r).negative())
 	m2 := complex_from(zero, ygrid.divide(safe_r).negative())
 	mut rw := RieszWavelet{
-		lam_min: lam_min
-		bandwidth: bandwidth
-		height: h
-		width: w
+		lam_min:    lam_min
+		bandwidth:  bandwidth
+		height:     h
+		width:      w
 		scale_size: ssize
-		pad: pad
-		xgrid: xgrid
-		ygrid: ygrid
-		radius: radius
-		safe_r: safe_r
-		m1: m1
-		m2: m2
-		dc_kernel: dc_kernel
-		lams: lams
-		kernels: kernels
-		n_freq: n_freq
-		k2: k2
+		pad:        pad
+		xgrid:      xgrid
+		ygrid:      ygrid
+		radius:     radius
+		safe_r:     safe_r
+		m1:         m1
+		m2:         m2
+		dc_kernel:  dc_kernel
+		lams:       lams
+		kernels:    kernels
+		n_freq:     n_freq
+		k2:         k2
 	}
 	rw.rz_update(img)
 	return rw
@@ -183,10 +182,13 @@ fn (rw RieszWavelet) rz_features(gain_control bool, retinex_k int) FeatureMaps {
 		b0f_med := rz_median_all(b0f)
 		mad := rz_median_all(b0f.subtract(mlx.f32_scalar(b0f_med)).abs())
 		k2_last := rw.k2.take(sel1(rw.k2.dim(0) - 1)).item_f32()
-		sig2 := mlx.f32_scalar(mad).multiply(mlx.f32_scalar(1.4826)).square().multiply(mlx.f32_scalar(f32(rw.n_freq))).divide(mlx.f32_scalar(k2_last))
-		floor := sig2.multiply(mlx.f32_scalar(3.0)).multiply(rw.k2).divide(mlx.f32_scalar(f32(rw.n_freq)))
+		sig2 :=
+			mlx.f32_scalar(mad).multiply(mlx.f32_scalar(1.4826)).square().multiply(mlx.f32_scalar(f32(rw.n_freq))).divide(mlx.f32_scalar(k2_last))
+		floor :=
+			sig2.multiply(mlx.f32_scalar(3.0)).multiply(rw.k2).divide(mlx.f32_scalar(f32(rw.n_freq)))
 		denom := e.add(floor)
-		e = mlx.where(denom.greater(mlx.f32_scalar(0.0)), e.multiply(e).divide(denom), mlx.f32_scalar(0.0))
+		e = mlx.where(denom.greater(mlx.f32_scalar(0.0)), e.multiply(e).divide(denom),
+			mlx.f32_scalar(0.0))
 	}
 
 	total := e.sum_axis(-1, false)
@@ -231,8 +233,10 @@ fn (rw RieszWavelet) rz_features(gain_control bool, retinex_k int) FeatureMaps {
 	sd := vari.maximum(mlx.f32_scalar(1e-12)).sqrt()
 	centroid := mu
 	spread := sd
-	skew := p.multiply(d.multiply(d).multiply(d)).sum_axis(-1, false).divide(sd.multiply(sd).multiply(sd))
-	kurt := p.multiply(d.multiply(d).multiply(d).multiply(d)).sum_axis(-1, false).divide(sd.multiply(sd).multiply(sd).multiply(sd))
+	skew :=
+		p.multiply(d.multiply(d).multiply(d)).sum_axis(-1, false).divide(sd.multiply(sd).multiply(sd))
+	kurt :=
+		p.multiply(d.multiply(d).multiply(d).multiply(d)).sum_axis(-1, false).divide(sd.multiply(sd).multiply(sd).multiply(sd))
 
 	mut ori_arrs := []mlx.Array{}
 	for s in rw.scales {
@@ -259,26 +263,27 @@ fn (rw RieszWavelet) rz_features(gain_control bool, retinex_k int) FeatureMaps {
 	mut phase_coh := p_re.multiply(p_re).add(p_im.multiply(p_im)).sqrt().divide(a_sum)
 
 	if gain_control {
-		r_fl, p_fl := rz_coherence_floor(rw.height, rw.width, rw.lam_min, rw.scale_size, rw.bandwidth)
-		ori_r = ori_r.subtract(mlx.f32_scalar(f32(r_fl))).maximum(mlx.f32_scalar(0.0)).divide(mlx.f32_scalar(f32(fmax2(1.0 - r_fl,
-			1e-3))))
-		phase_coh = phase_coh.subtract(mlx.f32_scalar(f32(p_fl))).maximum(mlx.f32_scalar(0.0)).divide(mlx.f32_scalar(f32(fmax2(1.0 - p_fl,
-			1e-3))))
+		r_fl, p_fl := rz_coherence_floor(rw.height, rw.width, rw.lam_min, rw.scale_size,
+			rw.bandwidth)
+		ori_r =
+			ori_r.subtract(mlx.f32_scalar(f32(r_fl))).maximum(mlx.f32_scalar(0.0)).divide(mlx.f32_scalar(f32(fmax2(1.0 - r_fl, 1e-3))))
+		phase_coh =
+			phase_coh.subtract(mlx.f32_scalar(f32(p_fl))).maximum(mlx.f32_scalar(0.0)).divide(mlx.f32_scalar(f32(fmax2(1.0 - p_fl, 1e-3))))
 	}
 
 	return FeatureMaps{
-		log_mag: log_mag
-		slope: slope
-		residual: residual
-		bump: bump
-		centroid: centroid
-		spread: spread
-		skew: skew
-		kurt: kurt
-		ori_r: ori_r
-		mean_ori: mean_ori
+		log_mag:   log_mag
+		slope:     slope
+		residual:  residual
+		bump:      bump
+		centroid:  centroid
+		spread:    spread
+		skew:      skew
+		kurt:      kurt
+		ori_r:     ori_r
+		mean_ori:  mean_ori
 		phase_coh: phase_coh
-		log_e: log_e
+		log_e:     log_e
 	}
 }
 

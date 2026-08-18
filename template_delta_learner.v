@@ -2,12 +2,11 @@ module conger
 
 // template_delta_learner.v — estimate child-template constraints from birth
 // proposals (V port of src/template_delta_learner.py).
-
 import math
 
 struct TemplateDeltaLearner {
-	min_evidence int   = 2
-	range_margin f64  = 0.10
+	min_evidence int = 2
+	range_margin f64 = 0.10
 }
 
 fn tdl_isfinite(v f64) bool {
@@ -33,9 +32,15 @@ fn (tdl TemplateDeltaLearner) tdl_range(values []f64) []f64 {
 // tdl_repr serialises a MetaValue for the spec-name digest.
 fn tdl_repr(v MetaValue) string {
 	match v {
-		string { return 's:${v}' }
-		int { return 'i:${v}' }
-		f64 { return 'f:${v}' }
+		string {
+			return 's:${v}'
+		}
+		int {
+			return 'i:${v}'
+		}
+		f64 {
+			return 'f:${v}'
+		}
 		[]f64 {
 			mut parts := []string{}
 			for x in v {
@@ -43,7 +48,9 @@ fn tdl_repr(v MetaValue) string {
 			}
 			return 'l:${parts.join(',')}'
 		}
-		else { return 'o' }
+		else {
+			return 'o'
+		}
 	}
 }
 
@@ -153,16 +160,16 @@ fn (tdl TemplateDeltaLearner) tdl_spec(parent string, operation string, proposal
 	}
 	n := f64(proposals.len)
 	return ChildTemplateSpec{
-		name: '${parent}_${operation}_${tdl_hash(constraints)}'
-		family: proposals[0].family
-		parent_family: parent
-		operation: operation
-		constraints: constraints
-		complexity: complexity_sum / n
-		generation: generation
+		name:           '${parent}_${operation}_${tdl_hash(constraints)}'
+		family:         proposals[0].family
+		parent_family:  parent
+		operation:      operation
+		constraints:    constraints
+		complexity:     complexity_sum / n
+		generation:     generation
 		evidence_count: proposals.len
-		residual_mean: residual_sum / n
-		score_mean: score_sum / n
+		residual_mean:  residual_sum / n
+		score_mean:     score_sum / n
 	}
 }
 

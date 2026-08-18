@@ -2,20 +2,22 @@ module conger
 
 // generic_framework_test.v — non-visual validation of the generic structure
 // framework (time-series mechanism experts).
-
 import math
-
 import mlx
 
 fn generic_registry() GenericExpertRegistry {
 	mut experts := map[string]GenericExpert{}
 	experts['linear'] = train_toy_expert('linear', 192, 1)
 	experts['sine'] = train_toy_expert('sine', 192, 2)
-	gate := GenericStructureGate{birth_residual: 0.30}
-	birth := &StructureBirthController{min_cases: 2}
+	gate := GenericStructureGate{
+		birth_residual: 0.30
+	}
+	birth := &StructureBirthController{
+		min_cases: 2
+	}
 	return GenericExpertRegistry{
-		experts: experts
-		gate: gate
+		experts:          experts
+		gate:             gate
 		birth_controller: birth
 	}
 }
@@ -24,7 +26,8 @@ fn test_nonvisual_structure_gating() {
 	mut registry := generic_registry()
 	x := toy_x()
 	linear_y := x.multiply(mlx.f32_scalar(1.2)).add(mlx.f32_scalar(-0.3))
-	sine_y := x.multiply(mlx.f32_scalar(3.3)).add(mlx.f32_scalar(0.4)).sin().multiply(mlx.f32_scalar(1.1))
+	sine_y :=
+		x.multiply(mlx.f32_scalar(3.3)).add(mlx.f32_scalar(0.4)).sin().multiply(mlx.f32_scalar(1.1))
 	out_l := registry.decide(linear_y)
 	out_s := registry.decide(sine_y)
 	assert out_l.estimate.structure_id == 'linear'
@@ -42,15 +45,15 @@ fn test_nonvisual_structure_gating() {
 fn test_template_complexity_penalty() {
 	simple := StructuredHypothesis{
 		structure_id: 'simple'
-		params: [0.0]
-		residual: 0.20
-		complexity: 1.0
+		params:       [0.0]
+		residual:     0.20
+		complexity:   1.0
 	}
 	complex_ := StructuredHypothesis{
 		structure_id: 'complex'
-		params: [0.0]
-		residual: 0.19
-		complexity: 10.0
+		params:       [0.0]
+		residual:     0.19
+		complexity:   10.0
 	}
 	mut estimates := map[string]StructuredHypothesis{}
 	estimates['simple'] = simple
@@ -58,7 +61,10 @@ fn test_template_complexity_penalty() {
 	raw := GenericStructureGate{}.decide(estimates)
 	assert raw.estimate.structure_id == 'complex'
 
-	gate := GenericStructureGate{birth_residual: 0.15, complexity_weight: 0.1}
+	gate := GenericStructureGate{
+		birth_residual:    0.15
+		complexity_weight: 0.1
+	}
 	out := gate.decide(estimates)
 	assert out.estimate.structure_id == 'simple'
 	assert math.abs(out.scores['simple'] - 0.3) < 1e-12

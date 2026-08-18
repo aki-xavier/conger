@@ -2,7 +2,6 @@ module conger
 
 // layered_reconstructor.v — two-object occlusion scene parameter decoding
 // (V port of src/layered_reconstructor.py).
-
 import mlx
 
 const lrc_residual_scale = [1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 0.0, 0.0]
@@ -98,9 +97,8 @@ fn lrc_params(t_pred mlx.Array, cat_p mlx.Array, stats mlx.Array, scale []f64) [
 		if z1 > z_max {
 			z1 = z_max
 		}
-		rows[i] = [f64(k0), r[0] + st[0], r[1] + st[1], s0, z0, f64(h0),
-			f64(k1), r[4] + st[4], r[5] + st[5], s1, z1, f64(h1), f64(lcol),
-			f64(ldir)]
+		rows[i] = [f64(k0), r[0] + st[0], r[1] + st[1], s0, z0, f64(h0), f64(k1), r[4] + st[4],
+			r[5] + st[5], s1, z1, f64(h1), f64(lcol), f64(ldir)]
 	}
 	return rows
 }
@@ -122,10 +120,10 @@ fn lrc_params_raw(t_pred mlx.Array, cat_p mlx.Array) [][]f64 {
 		h1 := pvals[3][i]
 		lcol := pvals[4][i]
 		ldir := pvals[5][i]
-		rows[i] = [f64(k0), f64(tv[i * 8 + 0]), f64(tv[i * 8 + 1]), f64(tv[i * 8 +
-			2]), f64(tv[i * 8 + 3]), f64(h0), f64(k1), f64(tv[i * 8 + 4]),
-			f64(tv[i * 8 + 5]), f64(tv[i * 8 + 6]), f64(tv[i * 8 + 7]), f64(h1),
-			f64(lcol), f64(ldir)]
+		rows[i] = [f64(k0), f64(tv[i * 8 + 0]), f64(tv[i * 8 + 1]), f64(tv[i * 8 + 2]),
+			f64(tv[i * 8 + 3]), f64(h0), f64(k1), f64(tv[i * 8 + 4]), f64(tv[i * 8 + 5]),
+			f64(tv[
+				i * 8 + 6]), f64(tv[i * 8 + 7]), f64(h1), f64(lcol), f64(ldir)]
 	}
 	return rows
 }
@@ -152,22 +150,24 @@ fn lrc_from_frames(app InverseApp, net MixtureSPN, fl mlx.Array, fr mlx.Array, r
 	lin := app.codebook.template_lineage()
 	_, ent, novelty := sr_novelty_metrics_sized(cat_p0, r, none, lcb_cat_sizes)
 	return StructuredHypothesis{
-		scene: app.codebook.to_scene(prm)
-		params: prm
-		spn_posterior: cat_p0
-		geometry_family: app.codebook.geometry_family()
-		template_delta: lin.delta
-		candidate_params: [prm]
-		hypotheses: [HypothesisCandidate{
-			params: prm
-			probability: 1.0
-		}]
-		factor_sizes: lcb_cat_sizes
-		factor_indices: [0, 6, 5, 11, 12, 13]
+		scene:              app.codebook.to_scene(prm)
+		params:             prm
+		spn_posterior:      cat_p0
+		geometry_family:    app.codebook.geometry_family()
+		template_delta:     lin.delta
+		candidate_params:   [prm]
+		hypotheses:         [
+			HypothesisCandidate{
+				params:      prm
+				probability: 1.0
+			},
+		]
+		factor_sizes:       lcb_cat_sizes
+		factor_indices:     [0, 6, 5, 11, 12, 13]
 		responsibility_max: f64(r.max().item_f32())
-		posterior_entropy: ent
-		complexity: lin.complexity
-		novelty_score: novelty
+		posterior_entropy:  ent
+		complexity:         lin.complexity
+		novelty_score:      novelty
 	}
 }
 

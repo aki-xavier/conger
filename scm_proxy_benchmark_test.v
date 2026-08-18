@@ -2,11 +2,10 @@ module conger
 
 // scm_proxy_benchmark_test.v — rendering-backed appearance-mechanism calibration
 // (V port of the core of src/scm_proxy_benchmark.py).
-
 import mlx
 
 fn test_rendered_appearance_mechanism_is_modular() {
-	cb := new_codebook(InverseConfig{scene_family: 'single'})
+	cb := new_codebook(InverseConfig{ scene_family: 'single' })
 	mut renderer, cam_l, cam_r := make_renderer(stereo_base)
 	// fixed geometry (sphere), sweep the 54 appearance factors
 	base := [0.0, 72.0, 72.0, 0.45, 3.2]
@@ -14,8 +13,7 @@ fn test_rendered_appearance_mechanism_is_modular() {
 	for h in 0 .. n_hue {
 		for lc in 0 .. light_colors_len {
 			for ld in 0 .. light_dirs_len {
-				prm := [base[0], base[1], base[2], base[3], base[4], f64(h), f64(lc),
-					f64(ld)]
+				prm := [base[0], base[1], base[2], base[3], base[4], f64(h), f64(lc), f64(ld)]
 				scene := cb.to_scene(prm)
 				fl := renderer.render(scene, cam_l)
 				w := foreground_weights(fl)

@@ -3,11 +3,8 @@ module conger
 // scene_reconstructor.v — feature/frame-pair → full cga.Scene reconstruction
 // (V port of src/scene_reconstructor.py; the InverseApp-driven `from_frames` path
 // is added with the app module).
-
 import math
-
 import cga
-
 import mlx
 
 const cat_sizes_ = [n_kind, n_hue, light_colors_len, light_dirs_len]
@@ -72,7 +69,8 @@ fn sr_split_cat_argmax(cat_p mlx.Array) []mlx.Array {
 // sr_params decodes model output into full scene params.
 fn sr_params(t_pred mlx.Array, cat_p mlx.Array, stats mlx.Array) [][]f64 {
 	probs := sr_split_cat_argmax(cat_p)
-	s := t_pred.take_axis(sel1(2), 1).add(sr_s_proxy_arr(probs[0], stats)).maximum(mlx.f32_scalar(f32(s_floor)))
+	s :=
+		t_pred.take_axis(sel1(2), 1).add(sr_s_proxy_arr(probs[0], stats)).maximum(mlx.f32_scalar(f32(s_floor)))
 	z := t_pred.take_axis(sel1(3), 1).add(stats.take_axis(sel1(0), 1)).clip(mlx.f32_scalar(f32(z_min)),
 		mlx.f32_scalar(f32(z_max)))
 	n := t_pred.dim(0)
@@ -86,8 +84,8 @@ fn sr_params(t_pred mlx.Array, cat_p mlx.Array, stats mlx.Array) [][]f64 {
 	zv := z.data_f32()
 	mut rows := [][]f64{len: n}
 	for i in 0 .. n {
-		rows[i] = [f64(kind[i]), f64(u[i]), f64(v[i]), f64(sv[i]), f64(zv[i]),
-			f64(hue[i]), f64(lcol[i]), f64(ldir[i])]
+		rows[i] = [f64(kind[i]), f64(u[i]), f64(v[i]), f64(sv[i]), f64(zv[i]), f64(hue[i]),
+			f64(lcol[i]), f64(ldir[i])]
 	}
 	return rows
 }
@@ -116,8 +114,7 @@ fn sr_appearance_candidates(base []f64) [][]f64 {
 	for hue in 0 .. n_hue {
 		for lcol in 0 .. light_colors_len {
 			for ldir in 0 .. light_dirs_len {
-				out << [base[0], base[1], base[2], base[3], base[4], f64(hue),
-					f64(lcol), f64(ldir)]
+				out << [base[0], base[1], base[2], base[3], base[4], f64(hue), f64(lcol), f64(ldir)]
 			}
 		}
 	}
@@ -155,10 +152,8 @@ fn sr_refine_scene(cb Codebook, base []f64, kind_p mlx.Array, stats mlx.Array, f
 	mut weights := []f32{}
 	kp := kind_p.data_f32()
 	for kk in order {
-		kbase := [f64(kk), base[1], base[2], base[3], base[4], base[5], base[6],
-			base[7]]
-		_, _, block_scores := sr_refine_appearance(cb, kbase, fl, fr, mut renderer,
-			cam_l, cam_r)
+		kbase := [f64(kk), base[1], base[2], base[3], base[4], base[5], base[6], base[7]]
+		_, _, block_scores := sr_refine_appearance(cb, kbase, fl, fr, mut renderer, cam_l, cam_r)
 		for p in sr_appearance_candidates(kbase) {
 			params << p
 		}
@@ -212,9 +207,10 @@ fn sr_cat_sizes(n_textures int) []int {
 // sr_physical_targets maps residual targets back to physical [u,v,s,z].
 fn sr_physical_targets(t_pred mlx.Array, stats mlx.Array, kind mlx.Array) mlx.Array {
 	c0 := t_pred.take_axis(mlx.arange(0.0, 2.0, 1.0, .int32), 1)
-	c2 := t_pred.take_axis(sel1(2), 1).squeeze_axis(1).add(sr_s_proxy_arr(kind, stats)).expand_dims(1)
-	c3 := t_pred.take_axis(sel1(3), 1).squeeze_axis(1).add(stats.take_axis(sel1(0),
-		1).squeeze_axis(1)).expand_dims(1)
+	c2 :=
+		t_pred.take_axis(sel1(2), 1).squeeze_axis(1).add(sr_s_proxy_arr(kind, stats)).expand_dims(1)
+	c3 :=
+		t_pred.take_axis(sel1(3), 1).squeeze_axis(1).add(stats.take_axis(sel1(0), 1).squeeze_axis(1)).expand_dims(1)
 	return mlx.concatenate([c0, c2, c3], 1)
 }
 
@@ -234,9 +230,10 @@ fn sr_targets_from_params(params [][]f64) mlx.Array {
 fn sr_residual_targets(t_tr mlx.Array, c_tr mlx.Array, s_tr mlx.Array) mlx.Array {
 	kind := c_tr.take_axis(sel1(0), 1).squeeze_axis(1)
 	c0 := t_tr.take_axis(mlx.arange(0.0, 2.0, 1.0, .int32), 1)
-	c2 := t_tr.take_axis(sel1(2), 1).squeeze_axis(1).subtract(sr_s_proxy_arr(kind, s_tr)).expand_dims(1)
-	c3 := t_tr.take_axis(sel1(3), 1).squeeze_axis(1).subtract(s_tr.take_axis(sel1(0),
-		1).squeeze_axis(1)).expand_dims(1)
+	c2 :=
+		t_tr.take_axis(sel1(2), 1).squeeze_axis(1).subtract(sr_s_proxy_arr(kind, s_tr)).expand_dims(1)
+	c3 :=
+		t_tr.take_axis(sel1(3), 1).squeeze_axis(1).subtract(s_tr.take_axis(sel1(0), 1).squeeze_axis(1)).expand_dims(1)
 	return mlx.concatenate([c0, c2, c3], 1)
 }
 
@@ -248,18 +245,22 @@ fn sr_em_refine(app InverseApp, prm []f64, fl mlx.Array, fr mlx.Array) ([]f64, [
 	kind := int(prm[0])
 	fz := app.cfg.em_freeze_sz
 	cb := app.codebook as Codebook
-	mut refiner := new_scene_em_refiner(cb, kind, fl, fr, app.cfg.em_appearance_topk,
-		[false, false, fz, fz])
+	mut refiner := new_scene_em_refiner(cb, kind, fl, fr, app.cfg.em_appearance_topk, [
+		false,
+		false,
+		fz,
+		fz,
+	])
 	mut loop := EMLoop[SceneEMRefiner, FramePair, mlx.Array]{
-		model: refiner
+		model:     refiner
 		max_iters: app.cfg.em_max_iters
 	}
 	res := loop.run(FramePair{
 		fl: fl
 		fr: fr
 	}, prm[1..5])
-	return [f64(kind), res.params[0], res.params[1], res.params[2], res.params[3],
-		prm[5], prm[6], prm[7]], res.trajectory
+	return [f64(kind), res.params[0], res.params[1], res.params[2], res.params[3], prm[5], prm[6],
+		prm[7]], res.trajectory
 }
 
 // sr_frame_features returns (model feature (1,V), stereo stats, Riesz workspace).
@@ -299,60 +300,62 @@ fn sr_from_frames(app InverseApp, net MixtureSPN, fl mlx.Array, fr mlx.Array, rw
 	_, ent0, nov0 := sr_novelty_metrics(cat_p0, r, none)
 	if !refine {
 		return StructuredHypothesis{
-			scene: app.codebook.to_scene(prm)
-			params: prm
-			spn_posterior: cat_p0
-			geometry_family: app.codebook.geometry_family()
-			template_delta: lin.delta
-			candidate_params: [prm]
-			hypotheses: [HypothesisCandidate{
-				params: prm
-				probability: 1.0
-			}]
-			factor_sizes: [n_kind, n_hue, light_colors_len, light_dirs_len]
-			factor_indices: [0, 5, 6, 7]
+			scene:              app.codebook.to_scene(prm)
+			params:             prm
+			spn_posterior:      cat_p0
+			geometry_family:    app.codebook.geometry_family()
+			template_delta:     lin.delta
+			candidate_params:   [prm]
+			hypotheses:         [
+				HypothesisCandidate{
+					params:      prm
+					probability: 1.0
+				},
+			]
+			factor_sizes:       [n_kind, n_hue, light_colors_len, light_dirs_len]
+			factor_indices:     [0, 5, 6, 7]
 			responsibility_max: f64(r.max().item_f32())
-			posterior_entropy: ent0
-			complexity: lin.complexity
-			novelty_score: nov0
+			posterior_entropy:  ent0
+			complexity:         lin.complexity
+			novelty_score:      nov0
 		}
 	}
 	cb := app.codebook as Codebook
 	mut renderer, cam_l, cam_r := sr_rig()
 	kind_p := cat_p0.take_axis(mlx.arange(0.0, f64(n_kind), 1.0, .int32), 0)
-	prm2, candidates, scores, posterior, temperature := sr_refine_scene(cb, prm, kind_p,
-		stats, fl, fr, kind_topk, mut renderer, cam_l, cam_r)
+	prm2, candidates, scores, posterior, temperature := sr_refine_scene(cb, prm, kind_p, stats, fl,
+		fr, kind_topk, mut renderer, cam_l, cam_r)
 	final_prm, em_traj := sr_em_refine(app, prm2, fl, fr)
 	top := if candidates.len < 5 { candidates.len } else { 5 }
 	order := posterior.negative().argsort().take(mlx.arange(0.0, f64(top), 1.0, .int32)).data_i32()
 	mut hypotheses := []HypothesisCandidate{}
 	for i in order {
 		hypotheses << HypothesisCandidate{
-			params: candidates[i]
+			params:      candidates[i]
 			probability: f64(posterior.take(sel1(i)).item_f32())
-			residual: f64(scores.take(sel1(i)).item_f32())
+			residual:    f64(scores.take(sel1(i)).item_f32())
 		}
 	}
 	best_residual := f64(scores.min().item_f32())
 	_, ent, novelty := sr_novelty_metrics(cat_p0, r, best_residual)
 	return StructuredHypothesis{
-		scene: cb.to_scene(final_prm)
-		params: final_prm
-		spn_posterior: cat_p0
-		geometry_family: app.codebook.geometry_family()
-		template_delta: lin.delta
-		candidate_params: candidates
-		candidate_scores: scores
-		candidate_posterior: posterior
+		scene:                 cb.to_scene(final_prm)
+		params:                final_prm
+		spn_posterior:         cat_p0
+		geometry_family:       app.codebook.geometry_family()
+		template_delta:        lin.delta
+		candidate_params:      candidates
+		candidate_scores:      scores
+		candidate_posterior:   posterior
 		candidate_temperature: temperature
-		hypotheses: hypotheses
-		factor_sizes: [n_kind, n_hue, light_colors_len, light_dirs_len]
-		factor_indices: [0, 5, 6, 7]
-		responsibility_max: f64(r.max().item_f32())
-		posterior_entropy: ent
-		residual: best_residual
-		complexity: lin.complexity
-		novelty_score: novelty
-		em_trajectory: em_traj
+		hypotheses:            hypotheses
+		factor_sizes:          [n_kind, n_hue, light_colors_len, light_dirs_len]
+		factor_indices:        [0, 5, 6, 7]
+		responsibility_max:    f64(r.max().item_f32())
+		posterior_entropy:     ent
+		residual:              best_residual
+		complexity:            lin.complexity
+		novelty_score:         novelty
+		em_trajectory:         em_traj
 	}
 }

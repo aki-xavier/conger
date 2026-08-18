@@ -3,9 +3,7 @@ module conger
 // inverse_app.v — inverse-rendering app wiring (V port of the config/codebook/
 // data/cache surface of src/inverse_app.py; the full training loop is not part
 // of the ported test surface).
-
 import os
-
 import mlx
 
 // InverseApp holds the scene family + feature extractor + data builder wiring.
@@ -36,11 +34,11 @@ fn new_inverse_app(cfg InverseConfig) InverseApp {
 	cb := default_codebook(cfg)
 	ex := new_feature_extractor(cfg)
 	return InverseApp{
-		cfg: cfg
-		codebook: cb
-		data: DataBuilder{
-			cfg: cfg
-			codebook: cb
+		cfg:       cfg
+		codebook:  cb
+		data:      DataBuilder{
+			cfg:       cfg
+			codebook:  cb
 			extractor: ex
 		}
 		extractor: ex
@@ -51,11 +49,11 @@ fn new_inverse_app(cfg InverseConfig) InverseApp {
 fn new_inverse_app_cb(cfg InverseConfig, codebook SceneFamily) InverseApp {
 	ex := new_feature_extractor(cfg)
 	return InverseApp{
-		cfg: cfg
-		codebook: codebook
-		data: DataBuilder{
-			cfg: cfg
-			codebook: codebook
+		cfg:       cfg
+		codebook:  codebook
+		data:      DataBuilder{
+			cfg:       cfg
+			codebook:  codebook
 			extractor: ex
 		}
 		extractor: ex
@@ -105,7 +103,11 @@ fn (app InverseApp) run(artifacts string) {
 	} else if cfg.family() == 'composite' {
 		t_tr = lrc_residual_targets(t_tr, c_tr, s_tr, cr_residual_scale)
 	} else {
-		scale := if app.layered_reconstructor() == 'constrained' { lrc_residual_scale_constrained } else { lrc_residual_scale }
+		scale := if app.layered_reconstructor() == 'constrained' {
+			lrc_residual_scale_constrained
+		} else {
+			lrc_residual_scale
+		}
 		t_tr = lrc_residual_targets(t_tr, c_tr, s_tr, scale)
 	}
 
@@ -116,11 +118,10 @@ fn (app InverseApp) run(artifacts string) {
 	if os.exists(model_path) {
 		net = load_mixture_spn(model_path)
 		if net.f_mu.dim(0) < n_tr {
-			net.add(f_tr.take_axis(mlx.arange(f64(net.f_mu.dim(0)), f64(n_tr), 1.0,
-				.int32), 0), t_tr.take_axis(mlx.arange(f64(net.f_mu.dim(0)), f64(n_tr),
-				1.0, .int32), 0), stratum.take(mlx.arange(f64(net.f_mu.dim(0)), f64(n_tr),
-				1.0, .int32)), c_tr.take_axis(mlx.arange(f64(net.f_mu.dim(0)), f64(n_tr),
-				1.0, .int32), 0))
+			net.add(f_tr.take_axis(mlx.arange(f64(net.f_mu.dim(0)), f64(n_tr), 1.0, .int32), 0), t_tr.take_axis(mlx.arange(f64(net.f_mu.dim(0)),
+				f64(n_tr), 1.0, .int32), 0), stratum.take(mlx.arange(f64(net.f_mu.dim(0)),
+				f64(n_tr), 1.0, .int32)), c_tr.take_axis(mlx.arange(f64(net.f_mu.dim(0)),
+				f64(n_tr), 1.0, .int32), 0))
 			net.save(model_path)
 		}
 	} else {
@@ -136,10 +137,10 @@ fn (app InverseApp) run(artifacts string) {
 	mut ci_pred := [][]f64{}
 	mut ce_pred := [][]f64{}
 	if cfg.family() == 'single' {
-		ki0 := ci_p.take_axis(mlx.arange(0.0, f64(n_kind), 1.0, .int32), 1).argmax_axis(1,
-			false).astype(.int32)
-		ke0 := ce_p.take_axis(mlx.arange(0.0, f64(n_kind), 1.0, .int32), 1).argmax_axis(1,
-			false).astype(.int32)
+		ki0 :=
+			ci_p.take_axis(mlx.arange(0.0, f64(n_kind), 1.0, .int32), 1).argmax_axis(1, false).astype(.int32)
+		ke0 :=
+			ce_p.take_axis(mlx.arange(0.0, f64(n_kind), 1.0, .int32), 1).argmax_axis(1, false).astype(.int32)
 		ti_pred = sr_physical_targets(ti_raw, s_ti, ki0)
 		te_pred = sr_physical_targets(te_raw, s_te, ke0)
 		ci_pred = sr_params(ti_raw, ci_p, s_ti)
@@ -163,7 +164,11 @@ fn (app InverseApp) run(artifacts string) {
 			te_pred = lrc_targets_from_params(ce_pred)
 		}
 	} else {
-		scale := if app.layered_reconstructor() == 'constrained' { lrc_residual_scale_constrained } else { lrc_residual_scale }
+		scale := if app.layered_reconstructor() == 'constrained' {
+			lrc_residual_scale_constrained
+		} else {
+			lrc_residual_scale
+		}
 		ci_pred = lrc_params(ti_raw, ci_p, s_ti, scale)
 		ce_pred = lrc_params(te_raw, ce_p, s_te, scale)
 		ti_pred = lrc_targets_from_params(ci_pred)
@@ -190,12 +195,14 @@ fn (app InverseApp) refine_scenes(scene_pred [][]f64, cat_p mlx.Array, stats mlx
 		scene_gt := cb.to_scene(gt)
 		fl := renderer.render(scene_gt, cam_l)
 		fr := renderer.render(scene_gt, cam_r)
-		kind_p := mlx.array_f32(cp[i * cat_p.dim(1)..(i + 1) * cat_p.dim(1)], [cat_p.dim(1)]).take_axis(mlx.arange(0.0,
-			f64(n_kind), 1.0, .int32), 0)
-		st := mlx.array_f32(stats.data_f32()[i * stats.dim(1)..(i + 1) * stats.dim(1)],
-			[1, stats.dim(1)])
-		refined, _, _, _, _ := sr_refine_scene(cb, prm, kind_p, st, fl, fr, app.cfg.kind_topk,
-			mut renderer, cam_l, cam_r)
+		kind_p := mlx.array_f32(cp[i * cat_p.dim(1)..(i + 1) * cat_p.dim(1)], [
+			cat_p.dim(1)]).take_axis(mlx.arange(0.0, f64(n_kind), 1.0, .int32), 0)
+		st := mlx.array_f32(stats.data_f32()[i * stats.dim(1)..(i + 1) * stats.dim(1)], [
+			1,
+			stats.dim(1),
+		])
+		refined, _, _, _, _ := sr_refine_scene(cb, prm, kind_p, st, fl, fr, app.cfg.kind_topk, mut
+			renderer, cam_l, cam_r)
 		final_prm, _ := sr_em_refine(app, refined, fl, fr)
 		out << final_prm
 	}
@@ -216,8 +223,8 @@ fn (app InverseApp) refine_composite_scenes(scene_pred [][]f64, cat_p mlx.Array,
 		scene_gt := cb.to_scene(gt)
 		fl := renderer.render(scene_gt, cam_l)
 		fr := renderer.render(scene_gt, cam_r)
-		refined, _, _, _, _ := cr_refine_scene(cb, prm, cat_p.take_axis(sel1(i), 0).squeeze_axis(0),
-			fl, fr, 2, 1, 1)
+		refined, _, _, _, _ := cr_refine_scene(cb, prm,
+			cat_p.take_axis(sel1(i), 0).squeeze_axis(0), fl, fr, 2, 1, 1)
 		out << refined
 	}
 	return out
@@ -244,7 +251,11 @@ fn (app InverseApp) self_check(mi map[string]f64, me map[string]f64) {
 fn (app InverseApp) reconstruct_scene(net MixtureSPN, fl mlx.Array, fr mlx.Array) StructuredHypothesis {
 	fam := app.cfg.family()
 	if fam == 'layered' {
-		scale := if app.layered_reconstructor() == 'constrained' { lrc_residual_scale_constrained } else { lrc_residual_scale }
+		scale := if app.layered_reconstructor() == 'constrained' {
+			lrc_residual_scale_constrained
+		} else {
+			lrc_residual_scale
+		}
 		return lrc_from_frames(app, net, fl, fr, none, scale)
 	}
 	if fam == 'composite' {

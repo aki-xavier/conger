@@ -2,7 +2,6 @@ module conger
 
 // feature_maps.v — RieszWavelet.features() output record (V port of
 // src/feature_maps.py).
-
 import mlx
 
 struct FeatureMaps {

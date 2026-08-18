@@ -164,13 +164,13 @@ fn (l CausalDeltaLearner) learn(proposals []TemplateProposal) []CausalEdge {
 		ag := l.agreement(mids, ranges)
 		edges << CausalEdge{
 			parent_family: parent
-			operation: op
-			target: target
+			operation:     op
+			target:        target
 			env_midpoints: mids
-			env_ranges: ranges
-			pooled_range: [pooled_lo, pooled_hi]
-			agreement: ag
-			n_envs: mids.len
+			env_ranges:    ranges
+			pooled_range:  [pooled_lo, pooled_hi]
+			agreement:     ag
+			n_envs:        mids.len
 		}
 	}
 	// sort by (-agreement, operation, target)
@@ -178,9 +178,8 @@ fn (l CausalDeltaLearner) learn(proposals []TemplateProposal) []CausalEdge {
 		for j := i + 1; j < edges.len; j++ {
 			if edges[j].agreement > edges[i].agreement
 				|| (edges[j].agreement == edges[i].agreement
-					&& (edges[j].operation < edges[i].operation
-						|| (edges[j].operation == edges[i].operation
-							&& edges[j].target < edges[i].target))) {
+				&& (edges[j].operation < edges[i].operation
+				|| (edges[j].operation == edges[i].operation && edges[j].target < edges[i].target))) {
 				edges[i], edges[j] = edges[j], edges[i]
 			}
 		}

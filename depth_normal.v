@@ -28,10 +28,10 @@ fn new_depth_normal_model(z_obs []f64, s_obs []f64, lam f64, sigma f64) DepthNor
 	return DepthNormalModel{
 		z_obs: z_obs
 		s_obs: s_obs
-		lam: lam
+		lam:   lam
 		sigma: sigma
-		n: n
-		d: d
+		n:     n
+		d:     d
 	}
 }
 

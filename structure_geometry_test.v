@@ -1,9 +1,7 @@
 module conger
 
 // structure_geometry_test.v — V port of tests/test_structure_geometry.py.
-
 import cga
-
 import mlx
 
 // sg_render_family renders the first sample of a base structure family.
@@ -14,7 +12,7 @@ fn sg_render_family(family string, seed u64, mut renderer cga.Renderer, cam_l cg
 		for i in 0 .. 8 {
 			prm[i] = f64(p[i])
 		}
-		scene := new_codebook(InverseConfig{scene_family: 'single'}).to_scene(prm)
+		scene := new_codebook(InverseConfig{ scene_family: 'single' }).to_scene(prm)
 		return renderer.render(scene, cam_l), renderer.render(scene, cam_r)
 	}
 	if family == 'layered' {
@@ -23,7 +21,7 @@ fn sg_render_family(family string, seed u64, mut renderer cga.Renderer, cam_l cg
 		for i in 0 .. 14 {
 			prm[i] = f64(p[i])
 		}
-		scene := new_layered_codebook(InverseConfig{scene_family: 'layered'}).to_scene(prm)
+		scene := new_layered_codebook(InverseConfig{ scene_family: 'layered' }).to_scene(prm)
 		return renderer.render(scene, cam_l), renderer.render(scene, cam_r)
 	}
 	if family == 'composite' {
@@ -32,7 +30,7 @@ fn sg_render_family(family string, seed u64, mut renderer cga.Renderer, cam_l cg
 		for i in 0 .. 14 {
 			prm[i] = f64(p[i])
 		}
-		scene := new_composite_codebook(InverseConfig{scene_family: 'composite'}).to_scene(prm)
+		scene := new_composite_codebook(InverseConfig{ scene_family: 'composite' }).to_scene(prm)
 		return renderer.render(scene, cam_l), renderer.render(scene, cam_r)
 	}
 	p := lc_sample(1, seed, false).take_axis(sel1(0), 0).data_f32()
@@ -40,7 +38,7 @@ fn sg_render_family(family string, seed u64, mut renderer cga.Renderer, cam_l cg
 	for i in 0 .. 14 {
 		prm[i] = f64(p[i])
 	}
-	scene := new_lateral_codebook(InverseConfig{scene_family: 'composite'}).to_scene(prm)
+	scene := new_lateral_codebook(InverseConfig{ scene_family: 'composite' }).to_scene(prm)
 	return renderer.render(scene, cam_l), renderer.render(scene, cam_r)
 }
 

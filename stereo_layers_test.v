@@ -2,9 +2,7 @@ module conger
 
 // stereo_layers_test.v — V port of tests/test_stereo_layers.py
 // (occlusion-aware two-layer disparity → front/back geometry).
-
 import math
-
 import mlx
 
 // sl_layered_frames builds a two-texture-layer stereo pair: front layer d=12,
@@ -13,10 +11,10 @@ fn sl_layered_frames() (mlx.Array, mlx.Array) {
 	h := img_h
 	w := img_w
 	keys := split_keys(9, 2)
-	back := mlx.random_uniform(mlx.f32_scalar(0.0), mlx.f32_scalar(1.0), [40, 40, 3],
-		.float32, keys[0]).multiply(mlx.f32_scalar(255.0)).astype(.uint8)
-	front := mlx.random_uniform(mlx.f32_scalar(0.0), mlx.f32_scalar(1.0), [40, 40, 3],
-		.float32, keys[1]).multiply(mlx.f32_scalar(255.0)).astype(.uint8)
+	back := mlx.random_uniform(mlx.f32_scalar(0.0), mlx.f32_scalar(1.0), [40, 40, 3], .float32,
+		keys[0]).multiply(mlx.f32_scalar(255.0)).astype(.uint8)
+	front := mlx.random_uniform(mlx.f32_scalar(0.0), mlx.f32_scalar(1.0), [40, 40, 3], .float32,
+		keys[1]).multiply(mlx.f32_scalar(255.0)).astype(.uint8)
 	mut fl_rgb := mlx.full([h, w, 3], mlx.int_scalar(20), .uint8)
 	mut fr_rgb := mlx.full([h, w, 3], mlx.int_scalar(20), .uint8)
 	// left: back painted first, then front occluding the overlap

@@ -2,14 +2,13 @@ module conger
 
 // riesz_selftest_test.v — synthetic GT checks for the Riesz frontend
 // (V port of the mlx-based synthetic part of src/riesz_selftest.py).
-
 import math
-
 import mlx
 
 fn rz_make_grating(h int, w int, wavelength f64, angle_rad f64) mlx.Array {
 	yy, xx := meshgrid_ij(h, w)
-	xr := xx.multiply(mlx.f32_scalar(f32(math.cos(angle_rad)))).add(yy.multiply(mlx.f32_scalar(f32(math.sin(angle_rad)))))
+	xr :=
+		xx.multiply(mlx.f32_scalar(f32(math.cos(angle_rad)))).add(yy.multiply(mlx.f32_scalar(f32(math.sin(angle_rad)))))
 	s := xr.multiply(mlx.f32_scalar(f32(2.0 * math.pi / wavelength))).sin()
 	return s.add(mlx.f32_scalar(1.0)).multiply(mlx.f32_scalar(0.5))
 }

@@ -1,7 +1,6 @@
 module conger
 
 // soft_icp_test.v — SoftICPModel (EM-ICP) black-box tests.
-
 import math
 
 fn test_soft_icp_recovers_rigid_transform() {
@@ -18,9 +17,9 @@ fn test_soft_icp_recovers_rigid_transform() {
 	obs := model.sample(gt, 0)
 
 	mut loop := EMLoop[SoftICPModel, [][]f64, [][]f64]{
-		model: model
+		model:     model
 		max_iters: 40
-		tol: 1e-10
+		tol:       1e-10
 	}
 	result := loop.run(obs, [0.0, 0.0, 0.0])
 	for i in 0 .. 3 {
@@ -44,9 +43,9 @@ fn test_soft_icp_improves_from_perturbed_init() {
 
 	init := [0.1, 0.1, -0.1]
 	mut loop := EMLoop[SoftICPModel, [][]f64, [][]f64]{
-		model: model
+		model:     model
 		max_iters: 30
-		tol: 1e-10
+		tol:       1e-10
 	}
 	result := loop.run(obs, init)
 	got_norm := norm3(sub3(result.params, gt))

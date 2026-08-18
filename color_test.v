@@ -1,9 +1,7 @@
 module conger
 
 // color_test.v — optical-prior black-box tests (white balance / log chromaticity).
-
 import math
-
 import mlx
 
 fn base_array() mlx.Array {

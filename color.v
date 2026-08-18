@@ -7,7 +7,6 @@ module conger
 // complex-valued `hsl_to_complex`/`split_dual_path` and the PIL-based
 // `image_to_mlx` are not ported (no complex-array construction in mlx-v, and no
 // PIL); they are unused by the test suite.
-
 import mlx
 
 struct Color {}
@@ -26,16 +25,22 @@ fn (c Color) lab_to_rgb(lab_image mlx.Array) mlx.Array {
 	f_xyz_cubed := f_xyz.multiply(f_xyz).multiply(f_xyz)
 
 	epsilon := 0.008856
-	xyz_normalized := mlx.where(f_xyz_cubed.greater(mlx.f32_scalar(f32(epsilon))),
-		f_xyz_cubed, f_xyz.subtract(mlx.f32_scalar(16.0 / 116.0)).divide(mlx.f32_scalar(7.787)))
+	xyz_normalized := mlx.where(f_xyz_cubed.greater(mlx.f32_scalar(f32(epsilon))), f_xyz_cubed,
+		f_xyz.subtract(mlx.f32_scalar(16.0 / 116.0)).divide(mlx.f32_scalar(7.787)))
 
 	white_point := mlx.array_f32([f32(0.95047), 1.00000, 1.08883], [3])
 	xyz := xyz_normalized.multiply(white_point)
 
 	xyz_to_rgb := mlx.array_f32([
-		f32(3.2404542), -1.5371385, -0.4985314,
-		-0.9692660, 1.8760108, 0.0415560,
-		0.0556434, -0.2040259, 1.0572252,
+		f32(3.2404542),
+		-1.5371385,
+		-0.4985314,
+		-0.9692660,
+		1.8760108,
+		0.0415560,
+		0.0556434,
+		-0.2040259,
+		1.0572252,
 	], [3, 3])
 	linear_rgb := xyz.matmul(xyz_to_rgb.transpose())
 
@@ -56,9 +61,15 @@ fn (c Color) rgb_to_lab(rgb_image mlx.Array) mlx.Array {
 		rgb.divide(mlx.f32_scalar(12.92)))
 
 	xyz_matrix := mlx.array_f32([
-		f32(0.4124564), 0.3575761, 0.1804375,
-		0.2126729, 0.7151522, 0.0721750,
-		0.0193339, 0.1191920, 0.9503041,
+		f32(0.4124564),
+		0.3575761,
+		0.1804375,
+		0.2126729,
+		0.7151522,
+		0.0721750,
+		0.0193339,
+		0.1191920,
+		0.9503041,
 	], [3, 3])
 	xyz := linear_rgb.matmul(xyz_matrix.transpose())
 
@@ -68,15 +79,15 @@ fn (c Color) rgb_to_lab(rgb_image mlx.Array) mlx.Array {
 	epsilon := 0.008856
 	safe_xyz := xyz_normalized.maximum(mlx.f32_scalar(1e-6))
 	mask_lab := xyz_normalized.greater(mlx.f32_scalar(f32(epsilon)))
-	f_xyz := mlx.where(mask_lab,
-		safe_xyz.power(mlx.f32_scalar(1.0 / 3.0)),
+	f_xyz := mlx.where(mask_lab, safe_xyz.power(mlx.f32_scalar(1.0 / 3.0)),
 		xyz_normalized.multiply(mlx.f32_scalar(7.787)).add(mlx.f32_scalar(16.0 / 116.0)))
 
 	f_x := f_xyz.take_axis(sel1(0), -1)
 	f_y := f_xyz.take_axis(sel1(1), -1)
 	f_z := f_xyz.take_axis(sel1(2), -1)
 
-	l := f_y.multiply(mlx.f32_scalar(116.0)).subtract(mlx.f32_scalar(16.0)).maximum(mlx.f32_scalar(0.0))
+	l :=
+		f_y.multiply(mlx.f32_scalar(116.0)).subtract(mlx.f32_scalar(16.0)).maximum(mlx.f32_scalar(0.0))
 	a := f_x.subtract(f_y).multiply(mlx.f32_scalar(500.0))
 	b := f_y.subtract(f_z).multiply(mlx.f32_scalar(200.0))
 

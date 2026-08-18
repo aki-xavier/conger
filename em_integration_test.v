@@ -10,8 +10,8 @@ fn test_em_refine_defaults_off() {
 	assert cfg.em_appearance_topk == 3
 
 	cfg_on := InverseConfig{
-		em_refine: true
-		em_max_iters: 4
+		em_refine:          true
+		em_max_iters:       4
 		em_appearance_topk: 2
 	}
 	assert cfg_on.em_refine == true
@@ -22,7 +22,7 @@ fn test_em_refine_defaults_off() {
 fn test_hypothesis_carries_em_trajectory() {
 	// StructuredHypothesis should record the per-round ECM log-likelihood trajectory.
 	h := StructuredHypothesis{
-		structure_id: 'single'
+		structure_id:  'single'
 		em_trajectory: [1.0, 2.0]
 	}
 	assert h.em_trajectory.len == 2

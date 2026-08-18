@@ -1,18 +1,16 @@
 module conger
 
 // scm_proxy_test.v — appearance-mechanism proxy black-box tests.
-
 import math
-
 import mlx
 
 fn synthetic_rgb(n_hue int, n_lcol int, n_ldir int, noise f32, seed u64) (mlx.Array, mlx.Array) {
 	rng := mlx.random_key(seed)
-	a := mlx.random_uniform(mlx.f32_scalar(0.0), mlx.f32_scalar(1.0), [n_hue, 3],
-		.float32, rng).add(mlx.f32_scalar(0.2))
+	a :=
+		mlx.random_uniform(mlx.f32_scalar(0.0), mlx.f32_scalar(1.0), [n_hue, 3], .float32, rng).add(mlx.f32_scalar(0.2))
 	k1, k2 := mlx.random_split(rng)
-	g := mlx.random_uniform(mlx.f32_scalar(0.0), mlx.f32_scalar(1.0), [n_lcol, n_ldir,
-		3], .float32, k1).add(mlx.f32_scalar(0.2))
+	g := mlx.random_uniform(mlx.f32_scalar(0.0), mlx.f32_scalar(1.0), [n_lcol, n_ldir, 3],
+		.float32, k1).add(mlx.f32_scalar(0.2))
 	mut rgb := a.expand_dims(1).expand_dims(1).multiply(g.expand_dims(0))
 	if noise > 0.0 {
 		rgb = rgb.add(mlx.random_normal(rgb.shape(), .float32, 0.0, noise, k2))
@@ -52,8 +50,8 @@ fn test_do_lighting_counterfactual() {
 	got := m.do_lighting(2, 0, 0, 1, 2)
 	expect := m.predict(2, 1, 2)
 	assert got.subtract(expect).abs().max().item_f32() < 1e-5
-	target := rgb.take_axis(sel1(2), 0).squeeze_axis(0).take_axis(sel1(1), 0).squeeze_axis(0).take_axis(sel1(2),
-		0).squeeze_axis(0)
+	target :=
+		rgb.take_axis(sel1(2), 0).squeeze_axis(0).take_axis(sel1(1), 0).squeeze_axis(0).take_axis(sel1(2), 0).squeeze_axis(0)
 	assert got.subtract(target).abs().max().item_f32() < 1e-5
 }
 

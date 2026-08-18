@@ -2,7 +2,6 @@ module conger
 
 // generic_expert_registry.v — domain-independent expert registry (V port of
 // src/generic_expert_registry.py).
-
 import mlx
 
 // GenericExpert maps an observation to a StructuredHypothesis.
@@ -11,8 +10,8 @@ interface GenericExpert {
 }
 
 struct GenericExpertRegistry {
-	experts          map[string]GenericExpert
-	gate             GenericStructureGate
+	experts map[string]GenericExpert
+	gate    GenericStructureGate
 mut:
 	birth_controller   &StructureBirthController = unsafe { nil }
 	last_birth_request ?StructureBirthRequest
@@ -28,8 +27,7 @@ fn (mut r GenericExpertRegistry) decide(observation mlx.Array) GenericStructureD
 	decision := r.gate.decide(estimates)
 	r.last_birth_request = none
 	if !isnil(r.birth_controller) {
-		r.last_birth_request = r.birth_controller.observe(decision, observation,
-			observation)
+		r.last_birth_request = r.birth_controller.observe(decision, observation, observation)
 	}
 	return decision
 }
