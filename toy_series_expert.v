@@ -5,13 +5,14 @@ module conger
 import math
 import mlx
 
-struct ToySeriesExpert {
+pub struct ToySeriesExpert {
+pub:
 	family ToySeriesFamily
 	net    MixtureSPN
 }
 
 // train_toy_expert trains an instance-level MixtureSPN expert for one mechanism.
-fn train_toy_expert(mechanism string, n int, seed u64) ToySeriesExpert {
+pub fn train_toy_expert(mechanism string, n int, seed u64) ToySeriesExpert {
 	family := new_toy_series_family(mechanism)
 	p := family.sample(n, seed)
 	y := family.simulate(p)
@@ -32,7 +33,7 @@ fn train_toy_expert(mechanism string, n int, seed u64) ToySeriesExpert {
 
 // estimate returns a StructuredHypothesis for one observation sequence. The
 // non-visual domain has no scene payload, hence `voidptr` as the type parameter.
-fn (e ToySeriesExpert) estimate(observation mlx.Array) StructuredHypothesis[voidptr] {
+pub fn (e ToySeriesExpert) estimate(observation mlx.Array) StructuredHypothesis[voidptr] {
 	f := e.family.encode(observation).expand_dims(0)
 	tm, _, r := e.net.predict(f)
 	params := tm.take_axis(sel1(0), 0).squeeze_axis(0).data_f32()

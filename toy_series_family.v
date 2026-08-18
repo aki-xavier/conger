@@ -6,15 +6,15 @@ import math
 import mlx
 
 // toy_x returns the shared fixed grid X ∈ [-1, 1] (32 points).
-fn toy_x() mlx.Array {
+pub fn toy_x() mlx.Array {
 	return mlx.linspace(-1.0, 1.0, 32, .float32)
 }
 
-struct ToySeriesFamily {
+pub struct ToySeriesFamily {
 	mechanism string
 }
 
-fn new_toy_series_family(mechanism string) ToySeriesFamily {
+pub fn new_toy_series_family(mechanism string) ToySeriesFamily {
 	if mechanism != 'linear' && mechanism != 'sine' {
 		panic('unknown toy mechanism ${mechanism}')
 	}
@@ -28,7 +28,7 @@ fn (f ToySeriesFamily) n_params() int {
 }
 
 // sample returns (n, n_params) uniform parameters.
-fn (f ToySeriesFamily) sample(n int, seed u64) mlx.Array {
+pub fn (f ToySeriesFamily) sample(n int, seed u64) mlx.Array {
 	ks := split_keys(seed, 3)
 	k1 := ks[0]
 	k2 := ks[1]
@@ -52,7 +52,7 @@ fn (f ToySeriesFamily) sample(n int, seed u64) mlx.Array {
 }
 
 // simulate maps (n,P) params → (n,T) observation sequences.
-fn (f ToySeriesFamily) simulate(params mlx.Array) mlx.Array {
+pub fn (f ToySeriesFamily) simulate(params mlx.Array) mlx.Array {
 	x := toy_x().expand_dims(0)
 	p0 := params.take_axis(sel1(0), 1)
 	if f.mechanism == 'linear' {
@@ -65,7 +65,7 @@ fn (f ToySeriesFamily) simulate(params mlx.Array) mlx.Array {
 }
 
 // residual returns RMSE(observed, simulate(params)).
-fn (f ToySeriesFamily) residual(observation mlx.Array, params []f64) f64 {
+pub fn (f ToySeriesFamily) residual(observation mlx.Array, params []f64) f64 {
 	p := arr32(params, [1, params.len])
 	sim := f.simulate(p)
 	pred := sim.take_axis(sel1(0), 0).squeeze_axis(0)
@@ -74,7 +74,7 @@ fn (f ToySeriesFamily) residual(observation mlx.Array, params []f64) f64 {
 
 // encode maps a 1D sequence to a 16-d summary feature vector, computed with MLX
 // float32 ops to match the Python reference bit-for-bit.
-fn (f ToySeriesFamily) encode(y mlx.Array) mlx.Array {
+pub fn (f ToySeriesFamily) encode(y mlx.Array) mlx.Array {
 	yf := y.astype(.float32)
 	n := y.dim(0)
 	last := yf.take_axis(sel1(n - 1), 0).squeeze_axis(0)
