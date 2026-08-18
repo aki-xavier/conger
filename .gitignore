@@ -12,5 +12,6 @@ artifacts/*.safetensors
 
 # Misc
 *.pdf
+*.pptx
 *.bkp
 .pi-subagents/

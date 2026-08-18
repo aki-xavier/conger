@@ -152,6 +152,11 @@ pub fn forget_components(m MixtureSPN, k_max int, policy string, seed u64) Mixtu
 	for j in 0 .. m.n_stratum {
 		sel := nonzero_indices(stratum.equal(mlx.int_scalar(j)))
 		nj := sel.dim(0)
+		if nj == 0 {
+			// an empty stratum contributes no components (the proportional
+			// split is over the *observed* strata only)
+			continue
+		}
 		mut kj := max_i(1, py_round(f64(km) * f64(nj) / f64(k)))
 		kj = min_i(kj, nj)
 		mut pick := mlx.Array{}

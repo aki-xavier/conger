@@ -12,6 +12,7 @@ module conger
 // (M-step stabilisation) and convergence monitoring; the concrete generative
 // model is injected as a generic struct type M with observation type O and
 // responsibility type R.
+import math
 
 // EMResult captures one EM run.
 pub struct EMResult[T] {
@@ -48,7 +49,7 @@ pub fn (mut e EMLoop[M, O, R]) run(observation O, init_params []f64) EMResult[R]
 		params = e.model.maximize(resp, observation, params, e.damping)
 		ll := e.model.log_likelihood(params, observation)
 		trajectory << ll
-		if trajectory.len > 1 && ll - prev_ll < e.tol {
+		if trajectory.len > 1 && math.abs(ll - prev_ll) < e.tol {
 			break
 		}
 		prev_ll = ll

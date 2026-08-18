@@ -6,7 +6,7 @@ module conger
 import math
 
 // StructureCaseResult records one ground-truth sample's gating outcome.
-struct StructureCaseResult {
+pub struct StructureCaseResult {
 	true_family         string
 	predicted           string
 	posterior           map[string]f64
@@ -16,7 +16,7 @@ struct StructureCaseResult {
 }
 
 // StructureBenchmarkSummary is the aggregated benchmark output.
-struct StructureBenchmarkSummary {
+pub struct StructureBenchmarkSummary {
 	n              int
 	accuracy       f64
 	confusion      map[string]map[string]int
@@ -25,7 +25,7 @@ struct StructureBenchmarkSummary {
 }
 
 // sb_ece returns the winner-confidence expected calibration error.
-fn sb_ece(results []StructureCaseResult) f64 {
+pub fn sb_ece(results []StructureCaseResult) f64 {
 	if results.len == 0 {
 		return 0.0
 	}
@@ -57,7 +57,7 @@ fn sb_ece(results []StructureCaseResult) f64 {
 }
 
 // sb_summarize aggregates per-sample results → accuracy/confusion/mean posterior/ECE.
-fn sb_summarize(results []StructureCaseResult) StructureBenchmarkSummary {
+pub fn sb_summarize(results []StructureCaseResult) StructureBenchmarkSummary {
 	mut confusion := map[string]map[string]int{}
 	mut correct := 0
 	mut posterior_sum := map[string]f64{}

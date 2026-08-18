@@ -123,6 +123,9 @@ pub fn roll(a []f64, shift int) []f64 {
 // solve_2x2 solves A x = b for a 2x2 matrix given row-major.
 pub fn solve_2x2(a [][]f64, b []f64) []f64 {
 	det := a[0][0] * a[1][1] - a[0][1] * a[1][0]
+	if math.abs(det) < 1e-15 {
+		panic('solve_2x2: singular matrix (det ≈ 0)')
+	}
 	return [
 		(b[0] * a[1][1] - b[1] * a[0][1]) / det,
 		(a[0][0] * b[1] - a[1][0] * b[0]) / det,
@@ -150,7 +153,7 @@ pub fn solve_n(a [][]f64, b []f64) []f64 {
 			}
 		}
 		if best < 1e-12 {
-			continue
+			panic('solve_n: singular matrix (zero pivot at column ${col})')
 		}
 		if piv != col {
 			aug[col], aug[piv] = aug[piv], aug[col]

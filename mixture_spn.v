@@ -113,20 +113,20 @@ pub fn fit_mixture_spn(f mlx.Array, t mlx.Array, stratum mlx.Array, rel_floor f6
 		basis = basis.take_axis(mlx.arange(f64(d - bd), f64(d), 1.0, .int32), 1)
 		zz = zz.take_axis(mlx.arange(f64(d - bd), f64(d), 1.0, .int32), 1)
 	}
-	n := zz.dim(0)
 	n_stratum := cat_sizes[0]
 	gvar := tied_vars(zz, stratum, rel_floor, n_stratum)
-	mut ws := []mlx.Array{}
 	mut mus := []mlx.Array{}
 	mut vars_ := []mlx.Array{}
 	mut tmus := []mlx.Array{}
 	mut clps := []mlx.Array{}
+	mut total_components := 0
 	for j in 0 .. n_stratum {
 		sel := nonzero_indices(stratum.equal(mlx.int_scalar(j)))
 		nj := sel.dim(0)
 		if nj == 0 {
 			continue
 		}
+		total_components += nj
 		zj := zz.take_axis(sel, 0)
 		tj := t.take_axis(sel, 0)
 		scj := scene_classes.take_axis(sel, 0)
@@ -134,11 +134,11 @@ pub fn fit_mixture_spn(f mlx.Array, t mlx.Array, stratum mlx.Array, rel_floor f6
 		mus << zj
 		vars_ << gj.tile([nj, 1])
 		tmus << tj
-		ws << mlx.full_value([nj], f32(-math.log(f64(n))), .float32)
 		clps << cat_logp(scj, cat_sizes)
 	}
 	mut m := MixtureSPN{
-		log_w:     mlx.concatenate(ws, 0)
+		log_w:     mlx.full_value([total_components], f32(-math.log(f64(total_components))),
+			.float32)
 		f_mu:      mlx.concatenate(mus, 0)
 		f_var:     mlx.concatenate(vars_, 0)
 		t_mu:      mlx.concatenate(tmus, 0)

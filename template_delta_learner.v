@@ -49,8 +49,17 @@ pub fn tdl_repr(v MetaValue) string {
 			}
 			return 'l:${parts.join(',')}'
 		}
-		else {
-			return 'o'
+		map[string]f64 {
+			mut keys := []string{}
+			for k, _ in v {
+				keys << k
+			}
+			keys.sort()
+			mut parts := []string{}
+			for k in keys {
+				parts << '${k}:${v[k]}'
+			}
+			return 'm:${parts.join(',')}'
 		}
 	}
 }

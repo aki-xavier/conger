@@ -176,21 +176,24 @@ pub fn (l CausalDeltaLearner) learn(proposals []TemplateProposal) []CausalEdge {
 		}
 	}
 	// sort by (-agreement, operation, target)
-	for i in 0 .. edges.len {
-		for j := i + 1; j < edges.len; j++ {
-			if edges[j].agreement > edges[i].agreement
-				|| (edges[j].agreement == edges[i].agreement
-				&& (edges[j].operation < edges[i].operation
-				|| (edges[j].operation == edges[i].operation && edges[j].target < edges[i].target))) {
-				edges[i], edges[j] = edges[j], edges[i]
-			}
+	edges.sort_with_compare(fn (a &CausalEdge, b &CausalEdge) int {
+		if a.agreement != b.agreement {
+			return if a.agreement > b.agreement { -1 } else { 1 }
 		}
-	}
+		if a.operation != b.operation {
+			return if a.operation < b.operation { -1 } else { 1 }
+		}
+		return if a.target < b.target { -1 } else { 1 }
+	})
 	return edges
 }
 
 pub fn meta_as_f64(v MetaValue) f64 {
-	return v as f64
+	return match v {
+		f64 { v }
+		int { f64(v) }
+		else { 0.0 }
+	}
 }
 
 pub fn meta_value_str(v MetaValue) string {

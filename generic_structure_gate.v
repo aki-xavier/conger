@@ -96,6 +96,9 @@ pub fn (g GenericStructureGate) scores_map(estimates map[string]StructuredHypoth
 
 // decide returns the flat (single-level) gate decision.
 pub fn (g GenericStructureGate) decide(estimates map[string]StructuredHypothesis) GenericStructureDecision {
+	if estimates.len == 0 {
+		panic('GenericStructureGate.decide: cannot gate an empty set of experts')
+	}
 	residuals, scores := g.scores_map(estimates)
 	best_raw := min_of(residuals)
 	best_score := min_of(scores)
@@ -117,6 +120,9 @@ pub fn (g GenericStructureGate) decide(estimates map[string]StructuredHypothesis
 
 // decide_hierarchical returns the two-level (family → member) gate decision.
 pub fn (g GenericStructureGate) decide_hierarchical(estimates map[string]StructuredHypothesis) GenericStructureDecision {
+	if estimates.len == 0 {
+		panic('GenericStructureGate.decide_hierarchical: cannot gate an empty set of experts')
+	}
 	residuals, scores := g.scores_map(estimates)
 	best_raw := min_of(residuals)
 	mut groups := map[string][]string{}

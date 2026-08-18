@@ -14,7 +14,7 @@ pub:
 	experts map[string]GenericExpert
 	gate    GenericStructureGate
 pub mut:
-	birth_controller   &StructureBirthController = unsafe { nil }
+	birth_controller   ?&StructureBirthController
 	last_birth_request ?StructureBirthRequest
 }
 
@@ -27,8 +27,8 @@ pub fn (mut r GenericExpertRegistry) decide(observation mlx.Array) GenericStruct
 	}
 	decision := r.gate.decide(estimates)
 	r.last_birth_request = none
-	if !isnil(r.birth_controller) {
-		r.last_birth_request = r.birth_controller.observe(decision, observation, observation)
+	if mut bc := r.birth_controller {
+		r.last_birth_request = bc.observe(decision, observation, observation)
 	}
 	return decision
 }

@@ -50,6 +50,11 @@ pub fn rm_meta_to_any(v MetaValue) json2.Any {
 }
 
 // rm_meta_from_any converts a json2.Any tree node back to a MetaValue.
+//
+// Note: json2 decodes every JSON number as f64, so an `int` MetaValue written
+// through `rm_meta_to_any` comes back as f64 after a JSON round-trip. The
+// integer branches below still preserve the type for in-process (non-JSON)
+// Any trees; the total `meta_*` readers in types.v handle the f64 form.
 pub fn rm_meta_from_any(a json2.Any) MetaValue {
 	if a is string {
 		return MetaValue(a as string)
@@ -68,6 +73,12 @@ pub fn rm_meta_from_any(a json2.Any) MetaValue {
 		}
 		return MetaValue(m)
 	}
+	// signed / unsigned integer variants → int (in-process preservation)
+	if a is i64 || a is int || a is i32 || a is i16 || a is i8 || a is u64 || a is u32 || a is u16
+		|| a is u8 {
+		return MetaValue(int(a.i64()))
+	}
+	// f32/f64 (and, as a safe default, bool/null/time) → f64
 	return MetaValue(a.f64())
 }
 

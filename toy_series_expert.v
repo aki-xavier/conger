@@ -41,7 +41,15 @@ fn (e ToySeriesExpert) estimate(observation mlx.Array) StructuredHypothesis {
 	}
 	residual := e.family.residual(observation, pf)
 	max_r := f64(r.max().item_f32()) + 1e-12
-	novelty := -math.log(max_r) / math.log(f64(r.dim(1))) + math.log(1.0 + residual)
+	// responsibility-concentration novelty, normalised by log(K); a single
+	// component (K == 1) is fully concentrated by construction, so that term
+	// is 0 and only the residual contributes.
+	k := r.dim(1)
+	mut resp_novelty := 0.0
+	if k > 1 {
+		resp_novelty = -math.log(max_r) / math.log(f64(k))
+	}
+	novelty := resp_novelty + math.log(1.0 + residual)
 	return StructuredHypothesis{
 		structure_id:       e.family.mechanism
 		params:             pf
