@@ -20,8 +20,64 @@ import math
 import os
 import mlx
 import conger
+import vsl.plot
 
 const class_names = ['setosa', 'versicolor', 'virginica']
+
+// plt_scatter 追加一组等大的 marker 散点。
+fn plt_scatter(mut p plot.Plot, xs []f64, ys []f64, name string, size f64) {
+	p.scatter(
+		x:      xs
+		y:      ys
+		mode:   'markers'
+		name:   name
+		marker: plot.Marker{
+			size: []f64{len: xs.len, init: size}
+		}
+	)
+}
+
+// write_plot_html 把 vsl.plot 的 to_json 结果写成自包含 HTML(plotly.js 走
+// CDN), 与 plot.show() 的页面结构一致, 但不启动服务器也不打开浏览器。
+fn write_plot_html(path string, p plot.Plot) {
+	traces_json0, layout_json := p.to_json()
+	// vsl 的 ContourTrace 未暴露 showscale: 逐 contour trace 注入 showscale:false,
+	// 否则多条等高线会各带一个 colorbar, 互相重叠并压住图例
+	traces_json := traces_json0.replace('"type":"contour","trace":{',
+		'"type":"contour","trace":{"showscale":false,')
+	head := r'<!DOCTYPE html>
+<html>
+  <head><meta charset="utf-8"><title>VSL Plot</title></head>
+  <body>
+    <div id="gd"></div>
+    <script type="module">
+import "https://cdn.plot.ly/plotly-2.26.2.min.js";
+function removeEmptyFieldsDeeply(obj) {
+    if (Array.isArray(obj)) { return obj.map(removeEmptyFieldsDeeply); }
+    if (typeof obj === "object" && obj !== null) {
+        const newObj = Object.fromEntries(
+        Object.entries(obj)
+            .map(([key, value]) => [key, removeEmptyFieldsDeeply(value)])
+            .filter(([_, value]) => value !== undefined && value !== null && value !== "")
+        );
+        return Object.keys(newObj).length > 0 ? newObj : undefined;
+    }
+    return obj;
+}
+const layout = '
+	mid := ';
+const traces_with_type_json = '
+	tail := ';
+const data = [...traces_with_type_json]
+    .map(({ type, trace: { CommonTrace, _type, ...trace } }) => ({ type, ...CommonTrace, ...trace }));
+const payload = { data: removeEmptyFieldsDeeply(data), layout: removeEmptyFieldsDeeply(layout) };
+Plotly.newPlot("gd", payload);
+    </script>
+  </body>
+</html>
+'
+	os.write_file(path, head + layout_json + mid + traces_json + tail) or { panic(err) }
+}
 
 // 150 样本 × 4 特征(每行一个样本: 花萼长, 花萼宽, 花瓣长, 花瓣宽), 每 50 行为一个类。
 const iris_data = [
@@ -333,6 +389,166 @@ fn main() {
 	println('')
 	println('模型结构 DAG 已写出: examples/iris_model_dag.mmd' +
 		'(探测样本=#${probe}, 展开责任度 top-3 分量)')
+
+	// == 可视化(vsl.plot → HTML, 写盘不弹浏览器) ==
+	// V1: 测试样本在最有判别力的两个原始特征(花瓣长/宽)上的散点,
+	// 按真类着色, 错分样本大点高亮。
+	mut sp := plot.Plot.new()
+	// V1-likelihood: 逐类似然等高线 p(x|class)。白化是线性可逆变换(本例
+	// D=4 全保留), 故每个分量在原始特征空间是全协方差高斯:
+	// μx = f_mean + f_mu·Bᵀ, Σx = B·diag(f_var)·Bᵀ; 高斯的边缘分布 =
+	// 子向量/子矩阵, 对花瓣平面(特征 2,3)取 2×2 块即可精确求值。
+	fm := (m.f_mean or { panic('missing f_mean') }).data_f32()
+	bmat := (m.basis or { panic('missing basis') }).data_f32() // (4, D) 行主序
+	dd := m.f_mu.dim(1)
+	// 分量所属类别(cat_logp 行 argmax)
+	mut comp_class := []int{len: k}
+	for j in 0 .. k {
+		mut bc := 0
+		for c in 1 .. 3 {
+			if clp[j * 3 + c] > clp[j * 3 + bc] {
+				bc = c
+			}
+		}
+		comp_class[j] = bc
+	}
+	// 花瓣平面网格
+	nx, ny := 60, 40
+	gx0, gx1 := 0.5, 7.5
+	gy0, gy1 := -0.2, 2.9
+	mut xsg := []f64{len: nx}
+	mut ysg := []f64{len: ny}
+	for i in 0 .. nx {
+		xsg[i] = gx0 + (gx1 - gx0) * f64(i) / f64(nx - 1)
+	}
+	for i in 0 .. ny {
+		ysg[i] = gy0 + (gy1 - gy0) * f64(i) / f64(ny - 1)
+	}
+	for c in 0 .. 3 {
+		mut zc := [][]f64{len: ny, init: []f64{len: nx}}
+		mut kc := 0
+		for j in 0 .. k {
+			if comp_class[j] != c {
+				continue
+			}
+			kc++
+			// μx 的边缘(特征 2,3)
+			mut mu2 := [2]f64{}
+			for a in 0 .. 2 {
+				mut s := f64(fm[2 + a])
+				for q in 0 .. dd {
+					s += f64(fmu[j * dd + q]) * f64(bmat[(2 + a) * dd + q])
+				}
+				mu2[a] = s
+			}
+			// Σx 的边缘 2×2
+			mut sig := [4]f64{}
+			for a in 0 .. 2 {
+				for b in 0 .. 2 {
+					mut s := 0.0
+					for q in 0 .. dd {
+						s += f64(bmat[(2 + a) * dd + q]) * f64(fvar[j * dd + q]) * f64(bmat[
+							(2 + b) * dd + q])
+					}
+					sig[a * 2 + b] = s
+				}
+			}
+			det := sig[0] * sig[3] - sig[1] * sig[2]
+			i00, i01, i11 := sig[3] / det, -sig[1] / det, sig[0] / det
+			norm := 1.0 / (2.0 * math.pi * math.sqrt(det))
+			for iy in 0 .. ny {
+				for ix in 0 .. nx {
+					dx := xsg[ix] - mu2[0]
+					dy := ysg[iy] - mu2[1]
+					e := dx * dx * i00 + 2.0 * dx * dy * i01 + dy * dy * i11
+					zc[iy][ix] += norm * math.exp(-0.5 * e)
+				}
+			}
+		}
+		inv := 1.0 / f64(kc)
+		for iy in 0 .. ny {
+			for ix in 0 .. nx {
+				zc[iy][ix] *= inv
+			}
+		}
+		sp.contour(
+			x:          xsg
+			y:          ysg
+			z:          zc
+			name:       'p(x|' + class_names[c] + ')'
+			colorscale: ['Blues', 'Oranges', 'Greens'][c]
+			ncontours:  6
+			contours:   plot.Contours{
+				coloring:   'lines'
+				showlabels: true
+			}
+		)
+	}
+	for c in 0 .. 3 {
+		mut xs := []f64{}
+		mut ys := []f64{}
+		for i, y in test_y {
+			if y == c {
+				xs << test_f[i * 4 + 2]
+				ys << test_f[i * 4 + 3]
+			}
+		}
+		plt_scatter(mut sp, xs, ys, class_names[c], 8.0)
+	}
+	mut mxs := []f64{}
+	mut mys := []f64{}
+	for i, y in test_y {
+		if preds[i] != y {
+			mxs << test_f[i * 4 + 2]
+			mys << test_f[i * 4 + 3]
+		}
+	}
+	if mxs.len > 0 {
+		plt_scatter(mut sp, mxs, mys, '错分样本', 16.0)
+	}
+	sp.layout(
+		title:  'Iris 测试集: 花瓣长 × 花瓣宽(按真类着色)'
+		width:  720
+		height: 560
+		xaxis:  plot.Axis{
+			title: plot.AxisTitle{
+				text: '花瓣长 (cm)'
+			}
+		}
+		yaxis:  plot.Axis{
+			title: plot.AxisTitle{
+				text: '花瓣宽 (cm)'
+			}
+		}
+	)
+	write_plot_html('artifacts/iris_scatter.html', sp)
+
+	// V2: 后验 P(class|x) 热力图(3 类 × 30 测试样本)。
+	mut hp := plot.Plot.new()
+	mut z := [][]f64{len: 3, init: []f64{len: test_y.len}}
+	for c in 0 .. 3 {
+		for i in 0 .. test_y.len {
+			z[c][i] = cp[i * 3 + c]
+		}
+	}
+	mut xidx := []int{len: test_y.len, init: index}
+	hp.heatmap(
+		z: z
+		x: xidx
+		y: class_names
+	)
+	hp.layout(
+		title:  'predict 后验 P(class|x)(逐测试样本)'
+		width:  900
+		height: 420
+		xaxis:  plot.Axis{
+			title: plot.AxisTitle{
+				text: '测试样本编号'
+			}
+		}
+	)
+	write_plot_html('artifacts/iris_posterior_heatmap.html', hp)
+	println('可视化已写出: artifacts/iris_scatter.html · artifacts/iris_posterior_heatmap.html')
 
 	// 注: 本例对应 docs/architecture.md 主管线的两步 —— A. 训练
 	// fit_mixture_spn(确定性装配实例级对角高斯混合, 无 EM 迭代)与 B. 推理
