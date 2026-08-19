@@ -385,9 +385,9 @@ fn main() {
 		lines << '    ' + chain.join(' ~~~ ')
 	}
 	lines << '    S --> REST["… 其余 ${k - 3} 个分量(结构相同)"]'
-	os.write_file('examples/iris_model_dag.mmd', lines.join('\n') + '\n') or { panic(err) }
+	os.write_file('docs/iris_model_dag.mmd', lines.join('\n') + '\n') or { panic(err) }
 	println('')
-	println('模型结构 DAG 已写出: examples/iris_model_dag.mmd' +
+	println('模型结构 DAG 已写出: docs/iris_model_dag.mmd' +
 		'(探测样本=#${probe}, 展开责任度 top-3 分量)')
 
 	// == 可视化(vsl.plot → HTML, 写盘不弹浏览器) ==
@@ -521,7 +521,7 @@ fn main() {
 			}
 		}
 	)
-	write_plot_html('artifacts/iris_scatter.html', sp)
+	write_plot_html('docs/iris_scatter.html', sp)
 
 	// V2: 后验 P(class|x) 热力图(3 类 × 30 测试样本)。
 	mut hp := plot.Plot.new()
@@ -547,8 +547,8 @@ fn main() {
 			}
 		}
 	)
-	write_plot_html('artifacts/iris_posterior_heatmap.html', hp)
-	println('可视化已写出: artifacts/iris_scatter.html · artifacts/iris_posterior_heatmap.html')
+	write_plot_html('docs/iris_posterior_heatmap.html', hp)
+	println('可视化已写出: docs/iris_scatter.html · docs/iris_posterior_heatmap.html')
 
 	// 注: 本例对应 docs/architecture.md 主管线的两步 —— A. 训练
 	// fit_mixture_spn(确定性装配实例级对角高斯混合, 无 EM 迭代)与 B. 推理

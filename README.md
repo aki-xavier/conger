@@ -86,17 +86,36 @@ make fmt         # v fmt -w .
 
 示例：`examples/main_pipeline.v` — 主管线（训练 → 推理 → 结构门控/出生 → 模板学习 → 持久化往返 → 模型内存：按需加载/动态遗忘/基截断 → 似然核网络：自定义 LikelihoodKernel + 前馈依赖 + 反馈迭代）的最小端到端演示，运行 `v -gc boehm -no-memory-limit run examples/main_pipeline.v`。
 
-示例：`examples/iris_classification.v` — Fisher Iris 三分类（离散场景因子 ≡ 条件后验分类：`fit_mixture_spn` 训练 + `predict` 取 P(class|x) argmax，分层划分 120/30，测试准确率 96.7%），运行后还会把模型内部结构（Σ 混合根 → Π 分量 → 高斯/类别叶子）写成 mermaid DAG `examples/iris_model_dag.mmd`，并用 `vsl.plot` 生成散点图（含逐类条件似然 p(x|class) 等高线）与后验热力图（`artifacts/iris_scatter.html` · `artifacts/iris_posterior_heatmap.html`），运行 `v -gc boehm -no-memory-limit run examples/iris_classification.v`。
+示例：`examples/iris_classification.v` — Fisher Iris 三分类演示，详见下文「示例：Iris 鸢尾花分类」。
+
+## 示例：Iris 鸢尾花分类
+
+`examples/iris_classification.v` 用经典的 Fisher Iris 数据集（150 样本 × 4 特征，setosa / versicolor / virginica 各 50）演示 MixtureSPN 的「离散场景因子 ≡ 条件后验分类」路径：
+
+```bash
+v -gc boehm -no-memory-limit run examples/iris_classification.v
+```
+
+- **建模**：4 维特征经 PCA 白化（无需手工标准化），每个训练样本装配为一个对角高斯分量（K=120，实例级、无 EM），3 个类别作为类别契约（`cat_sizes=[3]`，stratum=类别 → 逐类 tied 方差）
+- **划分**：确定性分层划分，每类每 5 个取 1 个测试（120 训练 / 30 测试）
+- **推理**：`predict` 返回的 P(class|x) 取 argmax 即预测类别
+- **结果**：测试准确率 **96.7%（29/30）**——setosa 100% · versicolor 90% · virginica 100%；唯一错分样本 [5.9, 3.2, 4.8, 1.8] 位于 versicolor/virginica 重叠区（其最近邻全是 virginica），后验 0.474/0.526 接近平局，属贝叶斯错误区的不可约错误
+
+运行后在 `docs/` 下生成三件素材：
+
+| 文件 | 内容 |
+|---|---|
+| `docs/iris_model_dag.mmd` | 模型内部结构 mermaid DAG：Σ 混合根 → Π 分量 → 白化特征高斯叶 / 类别叶，取错分样本责任度 top-3 分量展开（标注真实参数） |
+| `docs/iris_scatter.html` | 散点图（花瓣长 × 花瓣宽，按真类着色，错分高亮）+ 逐类条件似然 p(x\|class) 等高线——白化在满秩时可逆，每个分量在原始特征空间是全协方差高斯，2-D 边缘分布取其子向量/子矩阵精确求值 |
+| `docs/iris_posterior_heatmap.html` | 后验 P(class\|x) 热力图（3 类 × 30 测试样本），错分样本的后验模糊一目了然 |
+
+散点图效果（`docs/iris_scatter.png`）：
+
+![Iris 测试集散点图与逐类条件似然等高线](docs/iris_scatter.png)
+
+HTML 图表为 plotly.js 交互式（需联网加载 CDN），浏览器打开即可。
 
 ## 依赖
 
 - [`mlx-v`](../mlx-v) — MLX C API 的 V 绑定（复数 FFT、safetensors、随机数等）。
 - [`vsl`](https://github.com/vlang/vsl) — 仅示例 `examples/iris_classification.v` 的可视化使用（`vsl.plot`，生成 plotly.js HTML），内核本身不依赖。`v install vsl` 即可。
-
-经默认 V 模块目录 `~/.vmodules` 解析。首次在机器上配置一次符号链接即可：
-
-```bash
-ln -sfn /path/to/mlx-v  ~/.vmodules/mlx
-```
-
-之后 `v test .` / `make test` 均无需 `VMODULES` 环境变量。
