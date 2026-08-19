@@ -128,6 +128,7 @@ JSON 持久化（`rm_save`/`rm_load`），供跨进程恢复。
 | | `likelihood_kernels.v` | `GaussianKernel` · `GaussianMixtureKernel` · `CondGaussianKernel` · `MixtureSPNKernel` |
 | | `mrf_kernels.v` | `GMRFKernel` · `PottsKernel` · `grid4_nodes` · `grid4_name` |
 | | `mrf_learning.v` | `GMRFLearner` · `GMRFMeans` · `new_gmrf_learner` |
+| | `graph_structure.v` | `GMRFTopo` · `GMRFEdge` · `GMRFTopoFit` · `GMRFTopoSearch` · `GMRFTopoResult` · `gmrf_topo4/8/horizontal` · `gmrf_fit_topo` |
 | 模板学习 | `template_proposal.v` | `TemplateProposal` · `TemplateProposer` |
 | | `template_grammar.v` | `TemplateGrammar` · `TemplateRule` · `primitives`/`composites`/`rules` |
 | | `template_lineage.v` | `TemplateLineage` · `ChildTemplateSpec` · `single/layered/composite/lateral_lineage` |

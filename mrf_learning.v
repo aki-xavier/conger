@@ -28,8 +28,8 @@ module conger
 //     guaranteed monotone; the convergence check uses the deterministic
 //     observation pseudo-likelihood PL(y; θ) = Σ_i log N(y_i; c_i(y_∂), σ²+τ²).
 //
-// β is clamped so the posterior precision Λ + I/τ² stays positive definite
-// (|β| < (1 + σ²/τ²)/4·0.95, using ρ(grid-4 adjacency) ≤ 4).
+// β is clamped to keep the fitted model a *proper* GMRF (prior precision
+// diagonally dominant: Σ_j |β_ij| < 1, hence |β| < 0.95/4 per edge).
 import math
 
 // GMRFLearner is the EMLoop model for GMRF kernel parameters. The observation
@@ -84,11 +84,14 @@ fn grid4_nb_idx(i int, rows int, cols int) []int {
 	return nb
 }
 
-// gmrf_beta_clamp bounds |β| so the posterior precision stays positive
-// definite: Λ + I/τ² ≻ 0 is guaranteed when |β|·ρ(A) < 1 + σ²/τ², and the
-// 4-neighbour lattice adjacency has ρ(A) <= 4.
+// gmrf_beta_clamp bounds |β| so the fitted model stays a *proper* GMRF:
+// diagonal dominance of the prior precision requires Σ_j |β_ij| < 1, hence
+// |β| < 1/4 per edge on a max-degree-4 lattice (0.95 safety factor). The
+// looser posterior-properness bound (1 + σ²/τ²)/4 is also applied, but the
+// prior-PD bound is what stops the EM spiral (bigger σ² → looser clamp →
+// bigger β → bigger σ² → divergence).
 fn gmrf_beta_clamp(beta f64, var2 f64, tau2 f64) f64 {
-	bmax := 0.95 * (1.0 + var2 / tau2) / 4.0
+	bmax := math.min(0.95 * (1.0 + var2 / tau2), 0.95) / 4.0
 	return math.min(bmax, math.max(-bmax, beta))
 }
 

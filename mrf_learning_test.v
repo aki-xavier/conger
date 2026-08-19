@@ -32,16 +32,16 @@ fn gibbs_field(rows int, cols int, mu f64, beta f64, sig2 f64, sweeps int, seed 
 
 fn test_gmrf_m_step_closed_form() {
 	// two sites, m = [3, 1] → μ = 2, v = [-1, +1]
-	// OLS β = -2/2 = -1, clamped to bmax = 0.95·(1+1/1)/4 = 0.475
+	// OLS β = -2/2 = -1, clamped to the prior-PD bound 0.95/4 = 0.2375
 	l := new_gmrf_learner(1, 2, 0.0)
 	newp := l.maximize(GMRFMeans{
 		means: [3.0, 1.0]
 	}, [3.0, 1.0], [0.0, 0.0, 0.0], 0.0)
 	assert approx(newp[0], 2.0, 1e-12)
-	assert approx(newp[1], -0.475, 1e-12)
-	// residuals with β=-0.475: d = [±0.525] → R = 0.525²; with the mean-field
-	// variance correction (τ²=1): s = (R + √(R²+4R))/2
-	r1 := 0.525 * 0.525
+	assert approx(newp[1], -0.2375, 1e-12)
+	// residuals with β=-0.2375: d = [±(1-0.2375)] → R = 0.7625²; with the
+	// mean-field variance correction (τ²=1): s = (R + √(R²+4R))/2
+	r1 := 0.7625 * 0.7625
 	want_s := (r1 + math.sqrt(r1 * r1 + 4.0 * r1)) / 2.0
 	assert approx(math.exp(newp[2]), want_s, 1e-12)
 	// damping blends toward the old params

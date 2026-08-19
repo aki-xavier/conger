@@ -10,6 +10,9 @@ module main
 //      核经邻域投票恢复整片标签。
 //   C. 参数学习:EMLoop 驱动 GMRF 核网络(E 步 = 阻尼松弛取后验均值,M 步 =
 //      伪似然最小二乘),从带噪观测自动学得 μ/β/σ² 并用学得参数重新去噪。
+//   D. 结构学习:GMRFTopoSearch 以偏移类为结构移动单元(整类出生/剪枝),
+//      严格 PL 门控(全量 EM 重拟合),从仅水平边的拓扑自动学得完整邻域
+//      结构,并用学得拓扑+参数去噪。
 //
 // 运行: v -gc boehm -no-memory-limit run examples/mrf_lattice.v
 import math
@@ -22,6 +25,7 @@ fn main() {
 	gmrf_demo()
 	potts_demo()
 	learning_demo()
+	structure_demo()
 }
 
 // 真值场:左半 -1,右半 +1
@@ -196,4 +200,66 @@ fn learning_demo() {
 		}
 	}
 	println('学得参数去噪 RMSE: ${math.sqrt(mse / f64(rows * cols)):.4f}(A 部分手工调参为 0.5082)')
+}
+
+fn structure_demo() {
+	println('== D. 拓扑结构学习(类级出生/剪枝 + 严格 PL 门控) ==')
+	tau2 := 0.64
+	mut rng := conger.new_rng(42)
+	mut y := []f64{cap: rows * cols}
+	for r in 0 .. rows {
+		for c in 0 .. cols {
+			y << truth(r, c) + rng.normal(0.0, math.sqrt(tau2))
+		}
+	}
+	lv := math.log(tau2)
+	init := conger.gmrf_topo_horizontal(rows, cols)
+	fit0 := conger.gmrf_fit_topo(y, init, lv, 15)
+	println('初始拓扑(仅水平边): ${init.edge_count()} 条边, PL=${fit0.pl(y, init, lv):.2f}')
+	s := conger.GMRFTopoSearch{
+		obs_log_var: lv
+		min_gain:    0.05
+		max_rounds:  12
+		em_iters:    15
+	}
+	res := s.run(y, init)
+	for e in res.edits {
+		println('  ${e}')
+	}
+	println('学得拓扑: ${res.topo.edge_count()} 条边, PL=${res.pl:.2f}, β=${res.fit.beta:.3f}, σ²=${math.exp(res.fit.log_var):.3f}')
+
+	// 用学得的拓扑与参数去噪
+	mut nodes := map[string]conger.KernelNode{}
+	mut obs0 := map[string][]f64{}
+	for i in 0 .. rows * cols {
+		mut fb := []string{cap: res.topo.nbs[i].len}
+		for j in res.topo.nbs[i] {
+			fb << 's${j}'
+		}
+		nodes['s${i}'] = conger.KernelNode{
+			kernel:   conger.new_gmrf_kernel(res.fit.mu, res.fit.log_var, lv,
+				[res.fit.beta].repeat(res.topo.nbs[i].len))
+			feedback: fb
+		}
+		obs0['s${i}'] = [y[i]]
+	}
+	mut obs := []map[string][]f64{cap: 400}
+	for _ in 0 .. 400 {
+		obs << obs0
+	}
+	trace := conger.run_recurrent_opts(conger.KernelGraph{
+		nodes: nodes
+	}, obs, conger.RecurrentOptions{
+		damping: 0.4
+		tol:     1e-10
+	}) or { panic(err) }
+	last := trace.steps.len - 1
+	mut mse := 0.0
+	for r in 0 .. rows {
+		for c in 0 .. cols {
+			est := trace.output(last, 's${r * cols + c}')[0]
+			mse += (est - truth(r, c)) * (est - truth(r, c))
+		}
+	}
+	println('学得拓扑+参数去噪 RMSE: ${math.sqrt(mse / f64(rows * cols)):.4f}(A 手工调参 0.5082,C 学得参数 0.5224)')
 }
