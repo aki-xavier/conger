@@ -86,6 +86,8 @@ make fmt         # v fmt -w .
 
 示例：`examples/main_pipeline.v` — 主管线（训练 → 推理 → 结构门控/出生 → 模板学习 → 持久化往返 → 模型内存：按需加载/动态遗忘/基截断 → 似然核网络：自定义 LikelihoodKernel + 前馈依赖 + 反馈迭代）的最小端到端演示，运行 `v -gc boehm -no-memory-limit run examples/main_pipeline.v`。
 
+示例：`examples/iris_classification.v` — Fisher Iris 三分类（离散场景因子 ≡ 条件后验分类：`fit_mixture_spn` 训练 + `predict` 取 P(class|x) argmax，分层划分 120/30，测试准确率 96.7%），运行后还会把模型内部结构（Σ 混合根 → Π 分量 → 高斯/类别叶子）写成 mermaid DAG `examples/iris_model_dag.mmd`，运行 `v -gc boehm -no-memory-limit run examples/iris_classification.v`。
+
 ## 依赖
 
 - [`mlx-v`](../mlx-v) — MLX C API 的 V 绑定（复数 FFT、safetensors、随机数等）。
