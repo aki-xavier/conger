@@ -61,6 +61,7 @@ flowchart LR
 
 ```bash
 make test        # v -gc boehm -no-memory-limit test .
+make smoke       # 编译并跑通全部 3 个示例(防止示例腐坏)
 make fmt         # v fmt -w .
 ```
 
