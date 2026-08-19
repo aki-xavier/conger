@@ -18,7 +18,7 @@ flowchart TD
         C["generic_structure_gate.v · generic_expert_registry.v<br/>结构后验门控 · 专家注册表"]
         D["structure_birth.v<br/>StructureBirthController"]
         E["generic_em.v<br/>EMLoop[M,O,R]"]
-        K["kernel_graph.v · likelihood_kernels.v<br/>似然核网络骨架 + 内置高斯核"]
+        K["kernel_graph.v · likelihood_kernels.v · mrf_kernels.v<br/>似然核网络骨架 + 内置高斯核 + MRF 核"]
     end
     subgraph L3["③ 模板学习"]
         G["template_proposal.v · template_grammar.v · template_lineage.v<br/>提案 · 有界文法 · 血缘"]
@@ -66,13 +66,13 @@ make fmt         # v fmt -w .
 
 （等价直接命令：`v -gc boehm -no-memory-limit test .`，依赖经 `~/.vmodules` 解析，无需 `VMODULES` 环境变量。）
 
-11 个 V 测试文件全部通过（MixtureSPN 黑盒 / 模型内存 / 通用结构门控与出生控制 / 模板文法·提案 / 注册表清单往返 / 通用 EM / 模板约束学习·血缘 / 似然核网络骨架 / 内置似然核）。
+12 个 V 测试文件全部通过（MixtureSPN 黑盒 / 模型内存 / 通用结构门控与出生控制 / 模板文法·提案 / 注册表清单往返 / 通用 EM / 模板约束学习·血缘 / 似然核网络骨架 / 内置似然核 / MRF 似然核）。
 
 ## 模块（一文件一类）
 
 核心 SPN：`mixture_spn.v`（MixtureSPN：白化 + 实例级组装 + 条件期望 + 增量 `add` / 类别 `expand_categories` / safetensors 序列化）。
 
-通用结构学习：`structured_hypothesis.v`（泛型统一结构化假设 / 后验对象，`scene` 字段为泛型载荷 `T`，验证域用 `voidptr`）/ `generic_em.v`（域无关 EMLoop）/ `generic_structure_gate.v`（结构后验门控 + 两级 `decide_hierarchical`）/ `generic_expert_registry.v`（专家注册表 + 出生控制器挂接）/ `structure_birth.v`（未知结构出生队列与请求）/ `kernel_graph.v`（似然核网络骨架：`KernelNode` 声明前馈 `parents` 与反馈 `feedback` 连接，`topo_order` 确定性拓扑排序（仅前馈边，须为 DAG），`run_recurrent`/`run_recurrent_opts` 按拓扑序逐步推进、反馈边注入上一步输出（`RecurrentOptions` 支持阻尼与收敛早停），`run_residual` 静态观测下的残差驱动异步调度，`feedback_cycle_nodes` 静态检查反馈环，可自定义似然核之间的拓扑结构与反馈回路）/ `likelihood_kernels.v`（内置似然核：对角高斯 / 高斯混合 / 条件高斯（均值 = 前馈+反馈输入的线性读入，拓扑直接塑造条件似然）/ `MixtureSPNKernel`（MixtureSPN 白化特征混合对数似然适配器））。
+通用结构学习：`structured_hypothesis.v`（泛型统一结构化假设 / 后验对象，`scene` 字段为泛型载荷 `T`，验证域用 `voidptr`）/ `generic_em.v`（域无关 EMLoop）/ `generic_structure_gate.v`（结构后验门控 + 两级 `decide_hierarchical`）/ `generic_expert_registry.v`（专家注册表 + 出生控制器挂接）/ `structure_birth.v`（未知结构出生队列与请求）/ `kernel_graph.v`（似然核网络骨架：`KernelNode` 声明前馈 `parents` 与反馈 `feedback` 连接，`topo_order` 确定性拓扑排序（仅前馈边，须为 DAG），`run_recurrent`/`run_recurrent_opts` 按拓扑序逐步推进、反馈边注入上一步输出（`RecurrentOptions` 支持阻尼与收敛早停），`run_residual` 静态观测下的残差驱动异步调度，`feedback_cycle_nodes` 静态检查反馈环，可自定义似然核之间的拓扑结构与反馈回路）/ `likelihood_kernels.v`（内置似然核：对角高斯 / 高斯混合 / 条件高斯（均值 = 前馈+反馈输入的线性读入，拓扑直接塑造条件似然）/ `MixtureSPNKernel`（MixtureSPN 白化特征混合对数似然适配器））/ `mrf_kernels.v`（MRF 似然核：`GMRFKernel` 高斯 MRF 站点（观测与空间全条件融合输出后验均值 + 预测伪似然，阻尼不动点收敛到联合后验均值）· `PottsKernel` 离散 Potts/Ising 站点（逐类对数后验 + 邻域 softmax 投票）· `grid4_nodes` 二维格点 4-邻域反馈布线）。
 
 模板学习：`template_proposal.v` / `template_lineage.v`（parent/delta 继承契约 + `ChildTemplateSpec`）/ `template_grammar.v`（有界组合文法）/ `template_delta_learner.v`（提案约束学习）。
 
@@ -82,11 +82,13 @@ make fmt         # v fmt -w .
 
 验证域：`toy_series_family.v` + `toy_series_expert.v`（线性 / 振荡时间序列专家，已导出为 pub，验证 MixtureSPN、结构门控与出生控制不依赖图像等外部概念）。
 
-测试：根目录 `*_test.v`（11 个文件）。`docs/architecture.md` — 内核架构与主管线（分层架构 + 数据/控制流总图）。
+测试：根目录 `*_test.v`（12 个文件）。`docs/architecture.md` — 内核架构与主管线（分层架构 + 数据/控制流总图）。
 
 示例：`examples/main_pipeline.v` — 主管线（训练 → 推理 → 结构门控/出生 → 模板学习 → 持久化往返 → 模型内存：按需加载/动态遗忘/基截断 → 似然核网络：自定义 LikelihoodKernel + 前馈依赖 + 反馈迭代）的最小端到端演示，运行 `v -gc boehm -no-memory-limit run examples/main_pipeline.v`。
 
 示例：`examples/iris_classification.v` — Fisher Iris 三分类演示，详见下文「示例：Iris 鸢尾花分类」。
+
+示例：`examples/mrf_lattice.v` — MRF 似然核的领域中性演示：8×8 格点上 GMRF 连续场去噪（阻尼不动点收敛到联合后验均值，对照 `run_residual` 残差驱动调度的更新次数）+ Potts 二类场平滑（局部带噪证据经邻域投票恢复整片标签），运行 `v -gc boehm -no-memory-limit run examples/mrf_lattice.v`。
 
 ## 示例：Iris 鸢尾花分类
 
