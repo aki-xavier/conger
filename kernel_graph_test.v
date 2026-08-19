@@ -522,3 +522,77 @@ fn test_run_residual_unknown_obs_target_is_error() {
 	}
 	assert false, 'expected unknown-observation-target error'
 }
+
+// --- feedback_spectral_radius --------------------------------------------------
+
+fn two_node_loop(ka f64, kb f64) KernelGraph {
+	return KernelGraph{
+		nodes: {
+			'a': KernelNode{
+				kernel:   AffineBackKernel{
+					c: 1.0
+					k: ka
+				}
+				feedback: ['b']
+			}
+			'b': KernelNode{
+				kernel:   AffineBackKernel{
+					c: 1.0
+					k: kb
+				}
+				feedback: ['a']
+			}
+		}
+	}
+}
+
+fn test_spectral_radius_linear_loop() {
+	// J = [[0, ka], [kb, 0]] → eigenvalues ±√(ka·kb)
+	r := feedback_spectral_radius(two_node_loop(0.9, 0.9), map[string][]f64{}, 0.0) or {
+		panic(err)
+	}
+	assert math.abs(r - 0.9) < 1e-3
+	// ka·kb < 0: complex pair ±i·1.2, |λ| = 1.2 → divergent
+	r2 := feedback_spectral_radius(two_node_loop(1.2, -1.2), map[string][]f64{}, 0.0) or {
+		panic(err)
+	}
+	assert math.abs(r2 - 1.2) < 1e-3
+	// damping 0.5: |0.5 ± 0.6i| = √0.61 ≈ 0.781 → contraction
+	r3 := feedback_spectral_radius(two_node_loop(1.2, -1.2), map[string][]f64{}, 0.5) or {
+		panic(err)
+	}
+	assert math.abs(r3 - math.sqrt(0.61)) < 1e-3
+}
+
+fn test_spectral_radius_self_loop_matches_damping_rule() {
+	// k = -1.2 self-loop: undamped |λ| = 1.2; damping 0.5 → |(1-d)k + d| = 0.1
+	r_div := feedback_spectral_radius(self_loop_graph(-1.2), map[string][]f64{}, 0.0) or {
+		panic(err)
+	}
+	assert r_div > 1.0
+	r_ok := feedback_spectral_radius(self_loop_graph(-1.2), map[string][]f64{}, 0.5) or {
+		panic(err)
+	}
+	assert math.abs(r_ok - 0.1) < 1e-3
+}
+
+fn test_spectral_radius_gmrf_lattice_stable() {
+	// the stable GMRF two-node config from mrf_kernels_test (β=0.4, σ²=τ²=1)
+	g := KernelGraph{
+		nodes: {
+			'a': KernelNode{
+				kernel:   new_gmrf_kernel(0.0, 0.0, 0.0, [0.4])
+				feedback: ['b']
+			}
+			'b': KernelNode{
+				kernel:   new_gmrf_kernel(0.0, 0.0, 0.0, [0.4])
+				feedback: ['a']
+			}
+		}
+	}
+	r := feedback_spectral_radius(g, {
+		'a': [1.5]
+		'b': [-0.5]
+	}, 0.3) or { panic(err) }
+	assert r < 1.0
+}

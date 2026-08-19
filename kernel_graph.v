@@ -191,6 +191,130 @@ pub fn run_recurrent(g KernelGraph, obs []map[string][]f64) !RecurrentTrace {
 	return run_recurrent_opts(g, obs, RecurrentOptions{})
 }
 
+// sweep_once evaluates one synchronous step: feed inputs come from the
+// in-sweep (topo-ordered) values, feedback inputs from `prev`, damping blends
+// against `prev` exactly like run_recurrent_opts at t >= 1.
+fn sweep_once(g KernelGraph, order []string, prev map[string][]f64, obs map[string][]f64, damping f64) map[string][]f64 {
+	mut cur := map[string][]f64{}
+	for name in order {
+		node := g.nodes[name]
+		mut feed := []f64{}
+		for p in node.parents {
+			feed << cur[p]
+		}
+		mut back := []f64{}
+		for f in node.feedback {
+			back << prev[f]
+		}
+		mut out := node.kernel.step(KernelContext{
+			t:    1
+			obs:  obs[name] or { []f64{} }
+			feed: feed
+			back: back
+		})
+		if damping > 0 && node.feedback.len > 0 {
+			pv := prev[name]
+			for i in 0 .. out.len {
+				out[i] = (1.0 - damping) * out[i] + damping * pv[i]
+			}
+		}
+		cur[name] = out
+	}
+	return cur
+}
+
+// feedback_spectral_radius estimates the spectral radius of the Jacobian of
+// the one-step synchronous iteration Φ (the map run_recurrent applies each
+// step) near the state reached from a cold start, by finite differences +
+// power iteration. `damping` folds into Φ exactly as in run_recurrent_opts,
+// so callers can compare radii across damping values. Radius < 1 means the
+// recurrent iteration is a local contraction (converges); radius >= 1 warns
+// of oscillation/divergence *before* running. The Jacobian covers the full
+// output state of every node (auxiliary outputs such as log-likelihoods
+// included), so for kernels emitting diagnostics alongside estimates the
+// radius is a conservative bound. Cost: O(total output dim) sweeps for the
+// Jacobian plus the power iterations.
+pub fn feedback_spectral_radius(g KernelGraph, obs map[string][]f64, damping f64) !f64 {
+	order := topo_order(g.nodes)!
+	for name in obs.keys() {
+		if name !in g.nodes {
+			return error('feedback_spectral_radius: observation routed to unknown node "${name}"')
+		}
+	}
+	// cold-start state: feedback reads zeros, then two sweeps toward the
+	// attractor to get a representative operating point
+	mut prev := map[string][]f64{}
+	for name in order {
+		prev[name] = []f64{len: g.nodes[name].kernel.out_dim()}
+	}
+	mut s := sweep_once(g, order, prev, obs, damping)
+	s = sweep_once(g, order, s, obs, damping)
+	// index layout for the flattened state vector
+	mut idx := map[string]int{}
+	mut dim := 0
+	for name in order {
+		idx[name] = dim
+		dim += s[name].len
+	}
+	base := sweep_once(g, order, s, obs, damping)
+	eps := 1e-6
+	mut jac := [][]f64{len: dim}
+	for i in 0 .. dim {
+		jac[i] = []f64{len: dim}
+	}
+	for name in order {
+		for k in 0 .. s[name].len {
+			mut sp := s.clone()
+			sp[name] = s[name].clone()
+			sp[name][k] += eps
+			pb := sweep_once(g, order, sp, obs, damping)
+			col := idx[name] + k
+			for name2 in order {
+				for m in 0 .. base[name2].len {
+					jac[idx[name2] + m][col] = (pb[name2][m] - base[name2][m]) / eps
+				}
+			}
+		}
+	}
+	// power iteration (norm ratio converges to the spectral radius even for
+	// complex dominant pairs)
+	mut rng := new_rng(1)
+	mut v := []f64{len: dim}
+	for i in 0 .. dim {
+		v[i] = rng.normal(0.0, 1.0)
+	}
+	mut radius := 0.0
+	for _ in 0 .. 500 {
+		mut w := []f64{len: dim}
+		for i in 0 .. dim {
+			mut acc := 0.0
+			for j in 0 .. dim {
+				acc += jac[i][j] * v[j]
+			}
+			w[i] = acc
+		}
+		mut nrm := 0.0
+		for x in w {
+			nrm += x * x
+		}
+		nrm = math.sqrt(nrm)
+		if nrm < 1e-300 {
+			return 0.0
+		}
+		mut vn := []f64{len: dim}
+		for i in 0 .. dim {
+			vn[i] = w[i] / nrm
+		}
+		change := math.abs(nrm - radius)
+		v = vn.clone()
+		radius = nrm
+		if change < 1e-10 {
+			break
+		}
+	}
+	return radius
+}
+
 // run_recurrent_opts is `run_recurrent` with damping / early-stop options.
 pub fn run_recurrent_opts(g KernelGraph, obs []map[string][]f64, opts RecurrentOptions) !RecurrentTrace {
 	order := topo_order(g.nodes)!

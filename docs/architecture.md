@@ -124,7 +124,7 @@ JSON 持久化（`rm_save`/`rm_load`），供跨进程恢复。
 | | `generic_expert_registry.v` | `GenericExpert[T]` · `GenericExpertRegistry[T]` |
 | | `structure_birth.v` | `StructureCase` · `StructureBirthRequest` · `StructureBirthController` |
 | | `generic_em.v` | `EMLoop[M,O,R]` · `EMResult[T]` |
-| | `kernel_graph.v` | `LikelihoodKernel` · `KernelNode` · `KernelGraph` · `KernelContext` · `SourceKernel` · `topo_order` · `run_recurrent` · `run_recurrent_opts` · `run_residual` · `RecurrentOptions` · `RecurrentTrace` · `feedback_cycle_nodes` |
+| | `kernel_graph.v` | `LikelihoodKernel` · `KernelNode` · `KernelGraph` · `KernelContext` · `SourceKernel` · `topo_order` · `run_recurrent` · `run_recurrent_opts` · `run_residual` · `RecurrentOptions` · `RecurrentTrace` · `feedback_cycle_nodes` · `feedback_spectral_radius` |
 | | `likelihood_kernels.v` | `GaussianKernel` · `GaussianMixtureKernel` · `CondGaussianKernel` · `MixtureSPNKernel` |
 | | `mrf_kernels.v` | `GMRFKernel` · `PottsKernel` · `grid4_nodes` · `grid4_name` |
 | | `mrf_learning.v` | `GMRFLearner` · `GMRFMeans` · `new_gmrf_learner` |
