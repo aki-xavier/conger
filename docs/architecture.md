@@ -127,6 +127,7 @@ JSON 持久化（`rm_save`/`rm_load`），供跨进程恢复。
 | | `kernel_graph.v` | `LikelihoodKernel` · `KernelNode` · `KernelGraph` · `KernelContext` · `SourceKernel` · `topo_order` · `run_recurrent` · `run_recurrent_opts` · `run_residual` · `RecurrentOptions` · `RecurrentTrace` · `feedback_cycle_nodes` |
 | | `likelihood_kernels.v` | `GaussianKernel` · `GaussianMixtureKernel` · `CondGaussianKernel` · `MixtureSPNKernel` |
 | | `mrf_kernels.v` | `GMRFKernel` · `PottsKernel` · `grid4_nodes` · `grid4_name` |
+| | `mrf_learning.v` | `GMRFLearner` · `GMRFMeans` · `new_gmrf_learner` |
 | 模板学习 | `template_proposal.v` | `TemplateProposal` · `TemplateProposer` |
 | | `template_grammar.v` | `TemplateGrammar` · `TemplateRule` · `primitives`/`composites`/`rules` |
 | | `template_lineage.v` | `TemplateLineage` · `ChildTemplateSpec` · `single/layered/composite/lateral_lineage` |
