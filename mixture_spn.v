@@ -46,13 +46,13 @@ pub fn (m MixtureSPN) logq_feat(z mlx.Array) mlx.Array {
 	kn := m.f_mu.dim(0)
 	mut out := []mlx.Array{}
 	for i := 0; i < zn; i += nc {
-		xb := slice_rows(z, i, min_i(i + nc, zn))
+		xb := mlx.slice_rows(z, i, min_i(i + nc, zn))
 		mut parts := []mlx.Array{}
 		for j := 0; j < kn; j += kc {
 			je := min_i(j + kc, kn)
-			fmu := slice_rows(m.f_mu, j, je)
-			fvar := slice_rows(m.f_var, j, je)
-			norm := slice_rows(m.norm, j, je)
+			fmu := mlx.slice_rows(m.f_mu, j, je)
+			fvar := mlx.slice_rows(m.f_var, j, je)
+			norm := mlx.slice_rows(m.norm, j, je)
 			d := xb.expand_dims(1).subtract(fmu.expand_dims(0))
 			q := norm.expand_dims(0).subtract(d.multiply(d).divide(fvar.expand_dims(0)).sum_axis(2,
 				false).multiply(mlx.f32_scalar(0.5)))
@@ -68,15 +68,15 @@ pub fn (m MixtureSPN) logq_feat(z mlx.Array) mlx.Array {
 pub fn tied_vars(z mlx.Array, stratum mlx.Array, rel_floor f64, n_stratum int) mlx.Array {
 	mut out := []mlx.Array{}
 	for j in 0 .. n_stratum {
-		sel := nonzero_indices(stratum.equal(mlx.int_scalar(j)))
+		sel := mlx.nonzero_indices(stratum.equal(mlx.int_scalar(j)))
 		if sel.dim(0) == 0 {
 			out << mlx.ones([1, z.dim(1)], .float32)
 			continue
 		}
 		zj := z.take_axis(sel, 0)
-		vr := axis_var(zj, 0)
+		vr := zj.var_axis(0, true, 0)
 		fl :=
-			axis_std(zj, 0).multiply(mlx.f32_scalar(f32(rel_floor))).square().add(mlx.f32_scalar(1e-8))
+			zj.std_axis(0, true, 0).multiply(mlx.f32_scalar(f32(rel_floor))).square().add(mlx.f32_scalar(1e-8))
 		out << vr.maximum(fl)
 	}
 	return mlx.concatenate(out, 0)
@@ -86,7 +86,7 @@ pub fn tied_vars(z mlx.Array, stratum mlx.Array, rel_floor f64, n_stratum int) m
 pub fn cat_logp(classes mlx.Array, sizes []int) mlx.Array {
 	mut cols := []mlx.Array{}
 	for j, sz in sizes {
-		cl := classes.take_axis(sel1(j), 1) // (N,1)
+		cl := classes.take_axis(mlx.sel1(j), 1) // (N,1)
 		ar := mlx.arange(0.0, f64(sz), 1.0, .int32).expand_dims(0) // (1,sz)
 		eye := cl.equal(ar).astype(.float32) // (N,sz)
 		cols << eye.log()
@@ -122,7 +122,7 @@ pub fn fit_mixture_spn(f mlx.Array, t mlx.Array, stratum mlx.Array, rel_floor f6
 	mut clps := []mlx.Array{}
 	mut total_components := 0
 	for j in 0 .. n_stratum {
-		sel := nonzero_indices(stratum.equal(mlx.int_scalar(j)))
+		sel := mlx.nonzero_indices(stratum.equal(mlx.int_scalar(j)))
 		nj := sel.dim(0)
 		if nj == 0 {
 			continue
@@ -131,7 +131,7 @@ pub fn fit_mixture_spn(f mlx.Array, t mlx.Array, stratum mlx.Array, rel_floor f6
 		zj := zz.take_axis(sel, 0)
 		tj := t.take_axis(sel, 0)
 		scj := scene_classes.take_axis(sel, 0)
-		gj := gvar.take_axis(sel1(j), 0)
+		gj := gvar.take_axis(mlx.sel1(j), 0)
 		mus << zj
 		vars_ << gj.tile([nj, 1])
 		tmus << tj
@@ -194,7 +194,7 @@ pub fn (mut m MixtureSPN) add(f mlx.Array, t mlx.Array, stratum mlx.Array, scene
 	m.cat_logp = mlx.concatenate([m.cat_logp, cat_logp(scene_classes, csizes)], 0)
 	n := m.f_mu.dim(0)
 	n_new := scene_classes.dim(0)
-	old_rows := slice_rows(m.cat_logp, 0, n - n_new)
+	old_rows := mlx.slice_rows(m.cat_logp, 0, n - n_new)
 	old_stratum := old_rows.take_axis(mlx.arange(0.0, f64(m.n_stratum), 1.0, .int32), 1).argmax_axis(1,
 		false)
 	s_all := mlx.concatenate([old_stratum, stratum.astype(.int32)], 0)
@@ -212,7 +212,7 @@ pub fn whiten(f mlx.Array) (mlx.Array, mlx.Array, mlx.Array) {
 	mut lam, mut u := eigh_cpu(g)
 	// threshold computed in f64 then narrowed (max(lam)*1e-6)
 	maxlam := f32(f64(lam.max().item_f32()) * 1e-6)
-	keep := nonzero_indices(lam.greater(mlx.f32_scalar(maxlam)))
+	keep := mlx.nonzero_indices(lam.greater(mlx.f32_scalar(maxlam)))
 	lam = lam.take(keep)
 	u = u.take_axis(keep, 1)
 	sq := lam.sqrt().expand_dims(0)
@@ -224,7 +224,7 @@ pub fn whiten(f mlx.Array) (mlx.Array, mlx.Array, mlx.Array) {
 // predict returns (E[t|x], P(scene factors|x), responsibilities).
 pub fn (m MixtureSPN) predict(f mlx.Array) (mlx.Array, mlx.Array, mlx.Array) {
 	logq := m.logq_feat(m.z(f))
-	r := logq.subtract(axis_logsumexp(logq, 1)).exp()
+	r := logq.subtract(mlx.axis_logsumexp(logq, 1)).exp()
 	t_mean := r.matmul(m.t_mu)
 	cat_p := r.matmul(m.cat_logp.exp())
 	return t_mean, cat_p, r
@@ -251,10 +251,10 @@ pub fn load_mixture_spn(path string) !MixtureSPN {
 	f_mu := tens.get('f_mu')
 	f_var := tens.get('f_var')
 	t_mu := tens.get('t_mu')
-	cat_logp := tens.get('cat_logp')
+	clp := tens.get('cat_logp')
 	f_mean := tens.get('f_mean')
 	basis := tens.get('basis')
-	for a in [log_w, f_mu, f_var, t_mu, cat_logp, f_mean, basis] {
+	for a in [log_w, f_mu, f_var, t_mu, clp, f_mean, basis] {
 		a.eval()
 	}
 	mlx.use_gpu()
@@ -264,7 +264,7 @@ pub fn load_mixture_spn(path string) !MixtureSPN {
 		f_mu:      f_mu
 		f_var:     f_var
 		t_mu:      t_mu
-		cat_logp:  cat_logp
+		cat_logp:  clp
 		rel_floor: mm.rel_floor
 		f_mean:    f_mean
 		basis:     basis

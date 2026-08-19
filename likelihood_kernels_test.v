@@ -125,7 +125,7 @@ fn test_cond_gaussian_in_recurrent_graph() {
 
 fn tiny_spn(feat_dim int) MixtureSPN {
 	// 6 samples, 4-dim features, single stratum (matches fit_simple defaults).
-	f := arr32([
+	f := mlx.arr32([
 		0.0,
 		0.1,
 		0.2,
@@ -151,7 +151,7 @@ fn tiny_spn(feat_dim int) MixtureSPN {
 		1.9,
 		2.0,
 	], [6, feat_dim])
-	t := arr32([0.0, 1.0, 2.0, 0.1, 1.1, 2.1], [6, 1])
+	t := mlx.arr32([0.0, 1.0, 2.0, 0.1, 1.1, 2.1], [6, 1])
 	stratum := mlx.zeros([6], .int32)
 	return fit_simple(f, t, stratum, 0)
 }
@@ -165,8 +165,8 @@ fn test_mixture_spn_kernel_matches_direct() {
 		obs: obs
 	})
 	// direct reference: logsumexp over per-component log joints
-	logq := net.logq_feat(net.z(arr32(obs, [1, 4])))
-	want := f64(axis_logsumexp(logq, 1).item_f32())
+	logq := net.logq_feat(net.z(mlx.arr32(obs, [1, 4])))
+	want := f64(mlx.axis_logsumexp(logq, 1).item_f32())
 	assert approx(got[0], want, 1e-5)
 }
 

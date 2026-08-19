@@ -91,7 +91,7 @@ pub fn (h StructuredHypothesis[T]) factor_marginals() []mlx.Array {
 	}
 	mut out := []mlx.Array{len: vals.len}
 	for i, v in vals {
-		out[i] = arr32(v, [v.len])
+		out[i] = mlx.arr32(v, [v.len])
 	}
 	return out
 }

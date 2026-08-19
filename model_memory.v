@@ -104,12 +104,12 @@ pub fn coreset(z mlx.Array, k int, rng mlx.Array) mlx.Array {
 	}
 	start := mlx.random_randint(mlx.int_scalar(0), mlx.int_scalar(n), [1], .int32, rng).data_i32()[0]
 	mut sel := [start]
-	zstart := z.take_axis(sel1(start), 0) // (1,D)
+	zstart := z.take_axis(mlx.sel1(start), 0) // (1,D)
 	mut d2 := z.subtract(zstart).square().sum_axis(1, false)
 	for sel.len < k {
 		nxt := d2.argmax().item_i32()
 		sel << nxt
-		znxt := z.take_axis(sel1(nxt), 0) // (1,D)
+		znxt := z.take_axis(mlx.sel1(nxt), 0) // (1,D)
 		d2 = d2.minimum(z.subtract(znxt).square().sum_axis(1, false))
 	}
 	mut vals := []i32{len: sel.len}
@@ -136,7 +136,7 @@ pub fn forget_components(m MixtureSPN, k_max int, policy string, seed u64) Mixtu
 	mut njs := []int{}
 	mut quotas := []f64{}
 	for j in 0 .. m.n_stratum {
-		sel := nonzero_indices(stratum.equal(mlx.int_scalar(j)))
+		sel := mlx.nonzero_indices(stratum.equal(mlx.int_scalar(j)))
 		nj := sel.dim(0)
 		if nj == 0 {
 			// an empty stratum contributes no components (the proportional

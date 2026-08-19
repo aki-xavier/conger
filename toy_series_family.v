@@ -28,7 +28,7 @@ fn (f ToySeriesFamily) n_params() int {
 
 // sample returns (n, n_params) uniform parameters.
 pub fn (f ToySeriesFamily) sample(n int, seed u64) mlx.Array {
-	ks := split_keys(seed, 3)
+	ks := mlx.split_keys(seed, 3)
 	k1 := ks[0]
 	k2 := ks[1]
 	k3 := ks[2]
@@ -53,21 +53,21 @@ pub fn (f ToySeriesFamily) sample(n int, seed u64) mlx.Array {
 // simulate maps (n,P) params → (n,T) observation sequences.
 pub fn (f ToySeriesFamily) simulate(params mlx.Array) mlx.Array {
 	x := toy_x().expand_dims(0)
-	p0 := params.take_axis(sel1(0), 1)
+	p0 := params.take_axis(mlx.sel1(0), 1)
 	if f.mechanism == 'linear' {
-		p1 := params.take_axis(sel1(1), 1)
+		p1 := params.take_axis(mlx.sel1(1), 1)
 		return p0.multiply(x).add(p1)
 	}
-	p1 := params.take_axis(sel1(1), 1)
-	p2 := params.take_axis(sel1(2), 1)
+	p1 := params.take_axis(mlx.sel1(1), 1)
+	p2 := params.take_axis(mlx.sel1(2), 1)
 	return p0.multiply(p1.multiply(x).add(p2).sin())
 }
 
 // residual returns RMSE(observed, simulate(params)).
 pub fn (f ToySeriesFamily) residual(observation mlx.Array, params []f64) f64 {
-	p := arr32(params, [1, params.len])
+	p := mlx.arr32(params, [1, params.len])
 	sim := f.simulate(p)
-	pred := sim.take_axis(sel1(0), 0).squeeze_axis(0)
+	pred := sim.take_axis(mlx.sel1(0), 0).squeeze_axis(0)
 	return f64(observation.subtract(pred).square().mean().sqrt().item_f32())
 }
 
@@ -76,8 +76,8 @@ pub fn (f ToySeriesFamily) residual(observation mlx.Array, params []f64) f64 {
 pub fn (f ToySeriesFamily) encode(y mlx.Array) mlx.Array {
 	yf := y.astype(.float32)
 	n := y.dim(0)
-	last := yf.take_axis(sel1(n - 1), 0).squeeze_axis(0)
-	first := yf.take_axis(sel1(0), 0).squeeze_axis(0)
+	last := yf.take_axis(mlx.sel1(n - 1), 0).squeeze_axis(0)
+	first := yf.take_axis(mlx.sel1(0), 0).squeeze_axis(0)
 	d := yf.take_axis(mlx.arange(1.0, f64(n), 1.0, .int32), 0).subtract(yf.take_axis(mlx.arange(0.0,
 		f64(n - 1), 1.0, .int32), 0))
 	dd := yf.take_axis(mlx.arange(2.0, f64(n), 1.0, .int32), 0).subtract(yf.take_axis(mlx.arange(1.0,

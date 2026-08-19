@@ -17,6 +17,7 @@ module conger
 // `assert` — V strips asserts in `-prod` builds); `step` panics if the
 // routed observation / parent widths violate the declared shapes.
 import math
+import mlx
 
 // diag_gaussian_ll returns log N(obs; mu, exp(log_var) · I).
 fn diag_gaussian_ll(obs []f64, mu []f64, log_var []f64) f64 {
@@ -207,8 +208,8 @@ pub fn (k MixtureSPNKernel) step(ctx KernelContext) []f64 {
 	if ctx.obs.len != k.feat_dim {
 		panic('MixtureSPNKernel.step: obs width ${ctx.obs.len} != feat_dim ${k.feat_dim}')
 	}
-	f := arr32(ctx.obs, [1, k.feat_dim])
+	f := mlx.arr32(ctx.obs, [1, k.feat_dim])
 	logq := k.net.logq_feat(k.net.z(f))
-	ll := axis_logsumexp(logq, 1)
+	ll := mlx.axis_logsumexp(logq, 1)
 	return [f64(ll.item_f32())]
 }

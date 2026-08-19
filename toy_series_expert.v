@@ -17,7 +17,7 @@ pub fn train_toy_expert(mechanism string, n int, seed u64) ToySeriesExpert {
 	y := family.simulate(p)
 	mut feats := []mlx.Array{}
 	for i in 0 .. n {
-		row := y.take_axis(sel1(i), 0).squeeze_axis(0)
+		row := y.take_axis(mlx.sel1(i), 0).squeeze_axis(0)
 		feats << family.encode(row)
 	}
 	f := mlx.stack(feats, 0)
@@ -35,7 +35,7 @@ pub fn train_toy_expert(mechanism string, n int, seed u64) ToySeriesExpert {
 pub fn (e ToySeriesExpert) estimate(observation mlx.Array) StructuredHypothesis[voidptr] {
 	f := e.family.encode(observation).expand_dims(0)
 	tm, _, r := e.net.predict(f)
-	params := tm.take_axis(sel1(0), 0).squeeze_axis(0).data_f32()
+	params := tm.take_axis(mlx.sel1(0), 0).squeeze_axis(0).data_f32()
 	mut pf := []f64{len: params.len}
 	for i, v in params {
 		pf[i] = f64(v)
