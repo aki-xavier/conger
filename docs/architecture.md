@@ -124,7 +124,7 @@ JSON 持久化（`rm_save`/`rm_load`），供跨进程恢复。
 | | `generic_expert_registry.v` | `GenericExpert[T]` · `GenericExpertRegistry[T]` |
 | | `structure_birth.v` | `StructureCase` · `StructureBirthRequest` · `StructureBirthController` |
 | | `generic_em.v` | `EMLoop[M,O,R]` · `EMResult[T]` |
-| | `kernel_graph.v` | `LikelihoodKernel` · `KernelNode` · `KernelGraph` · `KernelContext` · `SourceKernel` · `topo_order` · `run_recurrent` · `RecurrentTrace` |
+| | `kernel_graph.v` | `LikelihoodKernel` · `KernelNode` · `KernelGraph` · `KernelContext` · `SourceKernel` · `topo_order` · `run_recurrent` · `run_recurrent_opts` · `run_residual` · `RecurrentOptions` · `RecurrentTrace` · `feedback_cycle_nodes` |
 | | `likelihood_kernels.v` | `GaussianKernel` · `GaussianMixtureKernel` · `CondGaussianKernel` · `MixtureSPNKernel` |
 | 模板学习 | `template_proposal.v` | `TemplateProposal` · `TemplateProposer` |
 | | `template_grammar.v` | `TemplateGrammar` · `TemplateRule` · `primitives`/`composites`/`rules` |

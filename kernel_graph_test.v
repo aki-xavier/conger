@@ -1,5 +1,7 @@
 module conger
 
+import math
+
 // kernel_graph_test.v — exercises the likelihood-kernel network skeleton:
 // deterministic topo_order (DAG only, feedback ignored), cycle/unknown-ref
 // diagnostics, recurrent evaluation with a feedback loop, self-feedback,
@@ -344,4 +346,179 @@ fn test_run_recurrent_source_dim_mismatch_is_error() {
 		return
 	}
 	assert false, 'expected source dim error'
+}
+
+// --- RecurrentOptions: damping / tol / residual scheduling -------------------
+
+// AffineBackKernel emits c + k·back[0] (single feedback parent): the minimal
+// oscillation/divergence probe. |k| < 1 contracts; k = -1.2 diverges without
+// damping but converges with damping 0.5 (effective gain (1-d)·k + d = -0.1).
+struct AffineBackKernel {
+	c f64
+	k f64
+}
+
+fn (k AffineBackKernel) out_dim() int {
+	return 1
+}
+
+fn (k AffineBackKernel) step(ctx KernelContext) []f64 {
+	return [k.c + k.k * ctx.back[0]]
+}
+
+fn self_loop_graph(k f64) KernelGraph {
+	return KernelGraph{
+		nodes: {
+			'a': KernelNode{
+				kernel:   AffineBackKernel{
+					c: 1.0
+					k: k
+				}
+				feedback: ['a']
+			}
+		}
+	}
+}
+
+fn const_obs(n int) []map[string][]f64 {
+	return []map[string][]f64{len: n, init: map[string][]f64{}}
+}
+
+fn test_damping_turns_divergence_into_convergence() {
+	// k = -1.2: undamped iteration a_{t+1} = 1 - 1.2·a_t diverges
+	g := self_loop_graph(-1.2)
+	tr_div := run_recurrent_opts(g, const_obs(30), RecurrentOptions{}) or { panic(err) }
+	last_div := tr_div.output(29, 'a')[0]
+	assert last_div > 100 || last_div < -100
+	assert !tr_div.converged
+	// damping 0.5: effective gain (1-0.5)·(-1.2) + 0.5 = -0.1 → contracts
+	tr_damp := run_recurrent_opts(g, const_obs(30), RecurrentOptions{
+		damping: 0.5
+		tol:     1e-9
+	}) or { panic(err) }
+	assert tr_damp.converged
+	assert tr_damp.steps.len < 30
+	// fixed point of the damped map: a = 0.5·(1 - 1.2a) + 0.5a → a = 0.5/1.1
+	last := tr_damp.steps.len - 1
+	assert math.abs(tr_damp.output(last, 'a')[0] - 0.5 / 1.1) < 1e-6
+}
+
+fn test_tol_early_stop_marks_converged() {
+	// a_{t+1} = 1 + 0.5·a_t → a* = 2 (contracts without damping)
+	g := self_loop_graph(0.5)
+	tr := run_recurrent_opts(g, const_obs(200), RecurrentOptions{
+		tol: 1e-9
+	}) or { panic(err) }
+	assert tr.converged
+	assert tr.steps.len < 200
+	last := tr.steps.len - 1
+	assert math.abs(tr.output(last, 'a')[0] - 2.0) < 1e-6
+	// same graph without tol: full length, not marked converged
+	tr_full := run_recurrent_opts(g, const_obs(50), RecurrentOptions{}) or { panic(err) }
+	assert !tr_full.converged
+	assert tr_full.steps.len == 50
+}
+
+fn test_feedback_cycle_nodes() {
+	g := KernelGraph{
+		nodes: {
+			'a': KernelNode{
+				kernel:   AffineBackKernel{
+					c: 1.0
+					k: 0.5
+				}
+				feedback: ['a'] // self-loop
+			}
+			'b': KernelNode{
+				kernel:   AffineBackKernel{
+					c: 1.0
+					k: 0.5
+				}
+				feedback: ['c'] // b ↔ c cycle
+			}
+			'c': KernelNode{
+				kernel:   AffineBackKernel{
+					c: 1.0
+					k: 0.5
+				}
+				feedback: ['b']
+			}
+			'd': KernelNode{
+				kernel:   AffineBackKernel{
+					c: 1.0
+					k: 0.5
+				}
+				feedback: ['a'] // reads the loop but is not part of it
+			}
+			'e': source_node(1)
+		}
+	}
+	assert feedback_cycle_nodes(g) == ['a', 'b', 'c']
+}
+
+fn test_run_residual_converges_on_static_observation() {
+	// 'a' self-loop a* = 2; 'g' feed-forward child of source s (2.0 → 4.0)
+	g := KernelGraph{
+		nodes: {
+			'a': KernelNode{
+				kernel:   AffineBackKernel{
+					c: 1.0
+					k: 0.5
+				}
+				feedback: ['a']
+			}
+			's': source_node(1)
+			'g': KernelNode{
+				kernel:  GainKernel{
+					dim:  1
+					gain: 2.0
+				}
+				parents: ['s']
+			}
+		}
+	}
+	obs := {
+		's': [2.0]
+	}
+	tr := run_residual(g, obs, RecurrentOptions{
+		tol: 1e-9
+	}, 200) or { panic(err) }
+	assert tr.converged
+	last := tr.steps.len - 1
+	assert math.abs(tr.output(last, 'a')[0] - 2.0) < 1e-6
+	assert tr.output(last, 'g')[0] == 4.0 // source passthrough unaffected by scheduling
+}
+
+fn test_run_residual_reports_non_convergence() {
+	g := self_loop_graph(-1.2)
+	obs := map[string][]f64{}
+	tr_bad := run_residual(g, obs, RecurrentOptions{
+		tol: 1e-9
+	}, 50) or { panic(err) }
+	assert !tr_bad.converged
+	// same graph with damping converges under residual scheduling too
+	tr_ok := run_residual(g, obs, RecurrentOptions{
+		tol:     1e-9
+		damping: 0.5
+	}, 200) or { panic(err) }
+	assert tr_ok.converged
+	last := tr_ok.steps.len - 1
+	assert math.abs(tr_ok.output(last, 'a')[0] - 0.5 / 1.1) < 1e-6
+}
+
+fn test_run_residual_unknown_obs_target_is_error() {
+	g := KernelGraph{
+		nodes: {
+			's': source_node(1)
+		}
+	}
+	_ := run_residual(g, {
+		'ghost': [1.0]
+	}, RecurrentOptions{
+		tol: 1e-9
+	}, 10) or {
+		assert err.msg().contains('unknown node')
+		return
+	}
+	assert false, 'expected unknown-observation-target error'
 }

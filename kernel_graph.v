@@ -1,7 +1,6 @@
 module conger
 
 // kernel_graph.v — generic likelihood-kernel network skeleton.
-//
 // A kernel network is a directed graph of user-supplied likelihood kernels
 // with two edge kinds:
 //
@@ -23,6 +22,7 @@ module conger
 // of MLX and of any domain: wiring a `MixtureSPN`, a `ToySeries` expert or a
 // custom Gaussian factor into a graph only requires wrapping its prediction
 // in the `LikelihoodKernel` protocol.
+import math
 
 // KernelContext is everything a kernel sees at one evaluation: the external
 // observation routed to this node, the concatenated current-step outputs of
@@ -146,11 +146,14 @@ pub fn topo_order(nodes map[string]KernelNode) ![]string {
 }
 
 // RecurrentTrace captures one recurrent run: the topo order used and, per
-// step, every node's output vector.
+// step, every node's output vector. `converged` is true when the run stopped
+// early because the per-step change fell below the tolerance (see
+// RecurrentOptions.tol); it is false for fixed-length runs.
 pub struct RecurrentTrace {
 pub:
-	order []string
-	steps []map[string][]f64
+	order     []string
+	steps     []map[string][]f64
+	converged bool
 }
 
 // output returns node `name`'s output vector at step `step` (empty if absent).
@@ -161,6 +164,23 @@ pub fn (r RecurrentTrace) output(step int, name string) []f64 {
 	return r.steps[step][name] or { []f64{} }
 }
 
+// RecurrentOptions tunes a recurrent run (loopy-BP-style machinery).
+//
+//   - `damping` (0 = off): nodes with feedback edges blend their computed
+//     output with their own previous-step output,
+//     out = (1-damping)·computed + damping·previous, which suppresses the
+//     oscillation that feedback loops can cause. Only feedback-carrying
+//     nodes are damped — feed-forward chains and observation sources are
+//     exact. Ignored at t = 0 (no previous output).
+//   - `tol` (0 = off): early stop. After each step, if the largest absolute
+//     change of any node's output versus the previous step is below `tol`,
+//     the run stops and the trace is marked `converged`.
+pub struct RecurrentOptions {
+pub:
+	damping f64
+	tol     f64
+}
+
 // run_recurrent evaluates the graph for `obs.len` steps. `obs[t]` routes
 // external observations to nodes by name (typically `SourceKernel` nodes).
 // Each step walks the feed-forward topo order once; feedback inputs come from
@@ -168,6 +188,11 @@ pub fn (r RecurrentTrace) output(step int, name string) []f64 {
 // observation targets, graph mis-wiring (see `topo_order`), or a kernel
 // violating its declared `out_dim`.
 pub fn run_recurrent(g KernelGraph, obs []map[string][]f64) !RecurrentTrace {
+	return run_recurrent_opts(g, obs, RecurrentOptions{})
+}
+
+// run_recurrent_opts is `run_recurrent` with damping / early-stop options.
+pub fn run_recurrent_opts(g KernelGraph, obs []map[string][]f64, opts RecurrentOptions) !RecurrentTrace {
 	order := topo_order(g.nodes)!
 	for t, step_obs in obs {
 		for name in step_obs.keys() {
@@ -178,6 +203,7 @@ pub fn run_recurrent(g KernelGraph, obs []map[string][]f64) !RecurrentTrace {
 	}
 	mut prev := map[string][]f64{}
 	mut steps := []map[string][]f64{cap: obs.len}
+	mut converged := false
 	for t in 0 .. obs.len {
 		mut cur := map[string][]f64{}
 		for name in order {
@@ -194,7 +220,7 @@ pub fn run_recurrent(g KernelGraph, obs []map[string][]f64) !RecurrentTrace {
 					back << prev[f]
 				}
 			}
-			out := node.kernel.step(KernelContext{
+			mut out := node.kernel.step(KernelContext{
 				t:    t
 				obs:  obs[t][name] or { []f64{} }
 				feed: feed
@@ -204,13 +230,215 @@ pub fn run_recurrent(g KernelGraph, obs []map[string][]f64) !RecurrentTrace {
 			if out.len != want {
 				return error('run_recurrent: kernel "${name}" produced ${out.len} values, declared out_dim ${want} (step ${t})')
 			}
+			if opts.damping > 0 && t > 0 && node.feedback.len > 0 {
+				pv := prev[name]
+				for i in 0 .. out.len {
+					out[i] = (1.0 - opts.damping) * out[i] + opts.damping * pv[i]
+				}
+			}
 			cur[name] = out
 		}
 		steps << cur.clone()
-		prev = cur.move()
+		if opts.tol > 0 && t >= 1 {
+			mut max_change := 0.0
+			for name in order {
+				for i, v in cur[name] {
+					d := math.abs(v - prev[name][i])
+					if d > max_change {
+						max_change = d
+					}
+				}
+			}
+			prev = cur.move()
+			if max_change < opts.tol {
+				converged = true
+				break
+			}
+		} else {
+			prev = cur.move()
+		}
 	}
 	return RecurrentTrace{
-		order: order
-		steps: steps
+		order:     order
+		steps:     steps
+		converged: converged
 	}
+}
+
+// feedback_cycle_nodes returns the names of nodes that participate in a
+// feedback cycle (including self-loops): the nodes whose outputs can, after
+// one or more steps of time-lagged feedback, influence themselves. These are
+// the nodes where oscillation / non-convergence can occur and where damping
+// (RecurrentOptions.damping) applies. Nodes in purely feed-forward positions
+// and nodes whose feedback chains dead-end are not listed.
+pub fn feedback_cycle_nodes(g KernelGraph) []string {
+	// Iterative reachability over feedback edges: seed with the endpoints of
+	// every feedback edge, then propagate backwards along feedback edges.
+	// A node is on a cycle iff it can reach itself.
+	mut on_cycle := map[string]bool{}
+	for name, node in g.nodes {
+		// BFS from `name` along feedback edges; does it return to `name`?
+		mut seen := map[string]bool{}
+		mut queue := node.feedback.clone()
+		for queue.len > 0 {
+			cur := queue[0]
+			queue.delete(0)
+			if cur == name {
+				on_cycle[name] = true
+				break
+			}
+			if cur in seen {
+				continue
+			}
+			seen[cur] = true
+			if cn := g.nodes[cur] {
+				queue << cn.feedback
+			}
+		}
+	}
+	mut out := []string{cap: on_cycle.len}
+	for name, _ in on_cycle {
+		out << name
+	}
+	out.sort()
+	return out
+}
+
+// run_residual evaluates the graph on a *static* observation with
+// residual-driven asynchronous scheduling (in the spirit of residual belief
+// propagation): instead of sweeping every node once per step, each update
+// recomputes only the node whose output changed most in the previous round,
+// so the nodes driving the iteration move first. Stops when the largest
+// residual falls below `opts.tol` (trace marked converged) or after
+// `max_updates` single-node updates.
+//
+// Semantics per single-node update: feed = parents' current values, back =
+// feedback parents' current values (in asynchronous mode the one-step delay
+// is approximated by the latest available value), then optionally damped
+// against the node's own current value (RecurrentOptions.damping).
+// SourceKernel nodes are never updated — their output is the routed
+// observation. Each trace step records the full state after one node update.
+pub fn run_residual(g KernelGraph, obs map[string][]f64, opts RecurrentOptions, max_updates int) !RecurrentTrace {
+	order := topo_order(g.nodes)!
+	for name in obs.keys() {
+		if name !in g.nodes {
+			return error('run_residual: observation routed to unknown node "${name}"')
+		}
+	}
+	// initial full sweep in topo order (feedback reads zeros, then latest)
+	mut cur := map[string][]f64{}
+	for name in order {
+		node := g.nodes[name]
+		mut feed := []f64{}
+		for p in node.parents {
+			feed << cur[p] or { []f64{len: g.nodes[p].kernel.out_dim()} }
+		}
+		mut back := []f64{}
+		for f in node.feedback {
+			back << cur[f] or { []f64{len: g.nodes[f].kernel.out_dim()} }
+		}
+		out := node.kernel.step(KernelContext{
+			t:    0
+			obs:  obs[name] or { []f64{} }
+			feed: feed
+			back: back
+		})
+		if out.len != node.kernel.out_dim() {
+			return error('run_residual: kernel "${name}" produced ${out.len} values, declared out_dim ${node.kernel.out_dim()}')
+		}
+		cur[name] = out
+	}
+	mut steps := []map[string][]f64{cap: max_updates + 1}
+	steps << cur.clone()
+	mut converged := false
+	mut res := residual_map(g, order, cur, obs, opts)
+	for _ in 0 .. max_updates {
+		// pick the updatable node with the largest residual
+		mut best := ''
+		mut best_res := 0.0
+		for name in order {
+			if g.nodes[name].kernel is SourceKernel {
+				continue
+			}
+			if res[name] > best_res || (res[name] == best_res && best == '') {
+				best_res = res[name]
+				best = name
+			}
+		}
+		if best == '' || best_res < opts.tol {
+			converged = true
+			break
+		}
+		node := g.nodes[best]
+		mut feed := []f64{}
+		for p in node.parents {
+			feed << cur[p]
+		}
+		mut back := []f64{}
+		for f in node.feedback {
+			back << cur[f]
+		}
+		mut out := node.kernel.step(KernelContext{
+			t:    steps.len
+			obs:  obs[best] or { []f64{} }
+			feed: feed
+			back: back
+		})
+		if out.len != node.kernel.out_dim() {
+			return error('run_residual: kernel "${best}" produced ${out.len} values, declared out_dim ${node.kernel.out_dim()}')
+		}
+		if opts.damping > 0 {
+			for i in 0 .. out.len {
+				out[i] = (1.0 - opts.damping) * out[i] + opts.damping * cur[best][i]
+			}
+		}
+		cur[best] = out
+		steps << cur.clone()
+		res = residual_map(g, order, cur, obs, opts)
+	}
+	return RecurrentTrace{
+		order:     order
+		steps:     steps
+		converged: converged
+	}
+}
+
+// residual_map recomputes every updatable node's would-be output change
+// (max absolute elementwise difference) against the current state.
+fn residual_map(g KernelGraph, order []string, cur map[string][]f64, obs map[string][]f64, opts RecurrentOptions) map[string]f64 {
+	mut res := map[string]f64{}
+	for name in order {
+		node := g.nodes[name]
+		if node.kernel is SourceKernel {
+			continue
+		}
+		mut feed := []f64{}
+		for p in node.parents {
+			feed << cur[p]
+		}
+		mut back := []f64{}
+		for f in node.feedback {
+			back << cur[f]
+		}
+		mut out := node.kernel.step(KernelContext{
+			t:    1
+			obs:  obs[name] or { []f64{} }
+			feed: feed
+			back: back
+		})
+		if opts.damping > 0 {
+			for i in 0 .. out.len {
+				out[i] = (1.0 - opts.damping) * out[i] + opts.damping * cur[name][i]
+			}
+		}
+		mut r := 0.0
+		for i, v in out {
+			d := math.abs(v - cur[name][i])
+			if d > r {
+				r = d
+			}
+		}
+		res[name] = r
+	}
+	return res
 }
