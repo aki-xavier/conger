@@ -396,12 +396,13 @@ pub fn run_recurrent_opts(g KernelGraph, obs []map[string][]f64, opts RecurrentO
 // (RecurrentOptions.damping) applies. Nodes in purely feed-forward positions
 // and nodes whose feedback chains dead-end are not listed.
 pub fn feedback_cycle_nodes(g KernelGraph) []string {
-	// Iterative reachability over feedback edges: seed with the endpoints of
-	// every feedback edge, then propagate backwards along feedback edges.
-	// A node is on a cycle iff it can reach itself.
+	// A feedback edge y→x (x reads y's previous-step output) closes a cycle
+	// iff y is reachable from x along feed-forward edges (x →ff* y): then x's
+	// output influences y within a sweep and y's lagged output influences x.
+	// Cycle members are the nodes on any such x →ff* y path, plus pure
+	// feedback chains that return to their start (b↔c mutual reads, self-loops).
 	mut on_cycle := map[string]bool{}
 	for name, node in g.nodes {
-		// BFS from `name` along feedback edges; does it return to `name`?
 		mut seen := map[string]bool{}
 		mut queue := node.feedback.clone()
 		for queue.len > 0 {
@@ -417,6 +418,52 @@ pub fn feedback_cycle_nodes(g KernelGraph) []string {
 			seen[cur] = true
 			if cn := g.nodes[cur] {
 				queue << cn.feedback
+			}
+		}
+	}
+	mut children := map[string][]string{}
+	for name, node in g.nodes {
+		for p in node.parents {
+			children[p] << name
+		}
+	}
+	// reach_from returns all nodes reachable from `start` (inclusive) by
+	// following `adj`.
+	reach_from := fn (adj map[string][]string, start string) map[string]bool {
+		mut seen := map[string]bool{}
+		mut queue := [start]
+		for queue.len > 0 {
+			cur := queue[0]
+			queue.delete(0)
+			if cur in seen {
+				continue
+			}
+			seen[cur] = true
+			queue << adj[cur]
+		}
+		return seen
+	}
+	for name, node in g.nodes {
+		for y in node.feedback {
+			if y == name {
+				on_cycle[name] = true
+				continue
+			}
+			desc := reach_from(children, name)
+			if y !in desc {
+				continue
+			}
+			// Nodes on ff paths name →* y: descendants of name that also
+			// reach y (BFS over parents from y).
+			mut parents_of := map[string][]string{}
+			for n2, nd2 in g.nodes {
+				parents_of[n2] = nd2.parents.clone()
+			}
+			anc := reach_from(parents_of, y)
+			for n2, _ in desc {
+				if n2 in anc {
+					on_cycle[n2] = true
+				}
 			}
 		}
 	}
