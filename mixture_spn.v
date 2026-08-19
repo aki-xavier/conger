@@ -209,7 +209,7 @@ pub fn whiten(f mlx.Array) (mlx.Array, mlx.Array, mlx.Array) {
 	f_mean := f.mean_axis(0, false)
 	xc := f.subtract(f_mean.expand_dims(0))
 	g := xc.matmul(xc.transpose())
-	mut lam, mut u := eigh_cpu(g)
+	mut lam, mut u := g.eigh_cpu('L')
 	// threshold computed in f64 then narrowed (max(lam)*1e-6)
 	maxlam := f32(f64(lam.max().item_f32()) * 1e-6)
 	keep := mlx.nonzero_indices(lam.greater(mlx.f32_scalar(maxlam)))

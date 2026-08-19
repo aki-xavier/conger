@@ -28,7 +28,7 @@ flowchart TD
         I["model_memory.v · registry_manifest.v<br/>split/按需加载/遗忘/截断 · RegistryManifest(JSON)"]
     end
     subgraph L5["⑤ 工具"]
-        J["types.v · vecmath.v · mlxutil.v"]
+        J["types.v · vecmath.v"]
     end
     subgraph L6["⑥ 验证域与示例"]
         T["toy_series_family.v · toy_series_expert.v<br/>线性/振荡时间序列专家"]
@@ -78,7 +78,7 @@ make fmt         # v fmt -w .
 
 模型内存与持久化：`model_memory.v`（split 序列化 / 按需加载 / 动态遗忘 / 基截断 / `model_size_mb`）/ `registry_manifest.v`（动态子模板与 pending spec 的 JSON 持久化）。
 
-工具：`types.v`（类型化 `TemplateDelta` / `TemplateMetadata` / `TemplateConstraints` 约束记录）/ `vecmath.v`（纯 f64 向量原语 + 确定性 RNG）/ `mlxutil.v`（MLX 辅助：白化特征分解、复数 FFT、掩码索引等）。
+工具：`types.v`（类型化 `TemplateDelta` / `TemplateMetadata` / `TemplateConstraints` 约束记录）/ `vecmath.v`（纯 f64 向量原语 + 确定性 RNG）；MLX 辅助（白化特征分解、复数 FFT、掩码索引等）由 [`mlx-v`](../mlx-v) 绑定层提供。
 
 验证域：`toy_series_family.v` + `toy_series_expert.v`（线性 / 振荡时间序列专家，已导出为 pub，验证 MixtureSPN、结构门控与出生控制不依赖图像等外部概念）。
 

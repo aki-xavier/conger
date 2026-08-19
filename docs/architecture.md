@@ -33,7 +33,7 @@ flowchart TD
         I["model_memory.v · registry_manifest.v<br/>split/load/assemble/truncate/forget · RegistryManifest(JSON)"]
     end
     subgraph L5["⑤ 工具"]
-        J["types.v (TemplateDelta/Metadata/Constraints) · vecmath.v (f64 原语+RNG) · mlxutil.v (MLX 辅助)"]
+        J["types.v (TemplateDelta/Metadata/Constraints) · vecmath.v (f64 原语+RNG)"]
     end
     subgraph L6["⑥ 验证域"]
         K["toy_series_family.v · toy_series_expert.v<br/>线性/振荡专家"]
@@ -134,5 +134,4 @@ JSON 持久化（`rm_save`/`rm_load`），供跨进程恢复。
 | | `registry_manifest.v` | `RegistryManifest` · `RegisteredChildTemplate` · `rm_save`/`rm_load` |
 | 工具 | `types.v` | `TemplateDelta` · `TemplateMetadata` · `TemplateConstraints` |
 | | `vecmath.v` | `Rng` · `linspace` · `solve_2x2` · `solve_n` · `lstsq_2` · `kabsch_2d` · `logsumexp` |
-| | `mlxutil.v` | `nonzero_indices` · `axis_var`/`axis_std` · `axis_logsumexp` · `eigh_cpu` · `split_keys` · `fft2`/`ifft2` |
 | 验证域 | `toy_series_family.v` · `toy_series_expert.v` | `ToySeriesFamily`(linear/sine) · `ToySeriesExpert` · `train_toy_expert` |
