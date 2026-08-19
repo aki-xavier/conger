@@ -133,7 +133,8 @@ JSON 持久化（`rm_save`/`rm_load`），供跨进程恢复。
 | | `template_grammar.v` | `TemplateGrammar` · `TemplateRule` · `primitives`/`composites`/`rules` |
 | | `template_lineage.v` | `TemplateLineage` · `ChildTemplateSpec` · `single/layered/composite/lateral_lineage` |
 | | `template_delta_learner.v` | `TemplateDeltaLearner` · `tdl_learn` · `tdl_spec` · `tdl_hash` |
-| 内存/持久化 | `model_memory.v` | `split_save` · `load_transform` · `load_components` · `assemble_model` · `truncate_basis` · `forget_components` · `coreset` · `model_size_mb` |
+| 内存/持久化 | `kernel_memory.v` | `LazyKernel` · `LazyState` · `KernelMemoryManager` · `new_lazy_kernel` · `new_kernel_memory_manager` |
+| | `model_memory.v` | `split_save` · `load_transform` · `load_components` · `assemble_model` · `truncate_basis` · `forget_components` · `coreset` · `model_size_mb` |
 | | `registry_manifest.v` | `RegistryManifest` · `RegisteredChildTemplate` · `rm_save`/`rm_load` |
 | 工具 | `types.v` | `TemplateDelta` · `TemplateMetadata` · `TemplateConstraints` |
 | | `vecmath.v` | `Rng` · `linspace` · `solve_2x2` · `solve_n` · `lstsq_2` · `kabsch_2d` · `logsumexp` |

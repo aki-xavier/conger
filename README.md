@@ -77,7 +77,7 @@ make fmt         # v fmt -w .
 
 模板学习：`template_proposal.v` / `template_lineage.v`（parent/delta 继承契约 + `ChildTemplateSpec`）/ `template_grammar.v`（有界组合文法）/ `template_delta_learner.v`（提案约束学习）。
 
-模型内存与持久化：`model_memory.v`（split 序列化 / 按需加载 / 动态遗忘 / 基截断 / `model_size_mb`）/ `registry_manifest.v`（动态子模板与 pending spec 的 JSON 持久化）。
+模型内存与持久化：`kernel_memory.v`（核网络执行层的内存管理：`LazyKernel` 首次 step 时按需加载内层核（loader 闭包可接 `load_components` 等持久化层）· `KernelMemoryManager` 按 ctx.t 新近度 LRU 遗忘超容量核，命中 `run_residual` 热点集中特性）/ `model_memory.v`（split 序列化 / 按需加载 / 动态遗忘 / 基截断 / `model_size_mb`）/ `registry_manifest.v`（动态子模板与 pending spec 的 JSON 持久化）。
 
 工具：`types.v`（类型化 `TemplateDelta` / `TemplateMetadata` / `TemplateConstraints` 约束记录）/ `vecmath.v`（纯 f64 向量原语 + 确定性 RNG）；MLX 辅助（白化特征分解、复数 FFT、掩码索引等）由 [`mlx-v`](../mlx-v) 绑定层提供。
 
