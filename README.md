@@ -67,7 +67,7 @@ make fmt         # v fmt -w .
 
 （等价直接命令：`v -gc boehm -no-memory-limit test .`，依赖经 `~/.vmodules` 解析，无需 `VMODULES` 环境变量。）
 
-14 个 V 测试文件全部通过（MixtureSPN 黑盒 / 模型内存 / 通用结构门控与出生控制 / 模板文法·提案 / 注册表清单往返 / 通用 EM / 模板约束学习·血缘 / 似然核网络骨架 / 内置似然核 / MRF 似然核 / GMRF 参数学习 / GMRF 拓扑结构学习）。
+17 个 V 测试文件全部通过（MixtureSPN 黑盒 / 模型内存 / 通用结构门控与出生控制 / 模板文法·提案 / 注册表清单往返 / 通用 EM / 模板约束学习·血缘 / 似然核网络骨架（含谱半径收敛判据）/ 内置似然核 / MRF 似然核 / GMRF 参数学习 / GMRF 拓扑结构学习 / UCI wine 分类回归 / 核网络内存管理 / DEQ 梯度学习）。
 
 ## 模块（一文件一类）
 
@@ -83,7 +83,7 @@ make fmt         # v fmt -w .
 
 验证域：`toy_series_family.v` + `toy_series_expert.v`（线性 / 振荡时间序列专家，已导出为 pub，验证 MixtureSPN、结构门控与出生控制不依赖图像等外部概念）。
 
-测试：根目录 `*_test.v`（14 个文件）。`docs/architecture.md` — 内核架构与主管线（分层架构 + 数据/控制流总图）。
+测试：根目录 `*_test.v`（17 个文件）。`docs/architecture.md` — 内核架构与主管线（分层架构 + 数据/控制流总图）。
 
 示例：`examples/main_pipeline.v` — 主管线（训练 → 推理 → 结构门控/出生 → 模板学习 → 持久化往返 → 模型内存：按需加载/动态遗忘/基截断 → 似然核网络：自定义 LikelihoodKernel + 前馈依赖 + 反馈迭代）的最小端到端演示，运行 `v -gc boehm -no-memory-limit run examples/main_pipeline.v`。
 
