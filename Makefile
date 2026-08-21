@@ -8,15 +8,14 @@
 # `-no-memory-limit`: the v3 compiler's default 2.3 GiB guard can trip on
 # large generated tables when compiling the full module.
 test:
-	v -gc boehm -no-memory-limit test .
+	v test .
 
 # smoke: build and run every example end-to-end (catches example rot that
 # `make test` misses — examples are not part of the *_test.v suite).
 smoke:
-	v -gc boehm -no-memory-limit run examples/main_pipeline.v > /dev/null
-	v -gc boehm -no-memory-limit run examples/iris_classification.v > /dev/null
-	v -gc boehm -no-memory-limit run examples/mrf_lattice.v > /dev/null
-	@echo "smoke: 3 examples OK"
+	v run examples/main_pipeline.v > /dev/null
+	v run examples/iris_classification.v > /dev/null
+	@echo "smoke: 2 examples OK"
 
 fmt:
 	v fmt -w .

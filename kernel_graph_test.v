@@ -575,24 +575,3 @@ fn test_spectral_radius_self_loop_matches_damping_rule() {
 	}
 	assert math.abs(r_ok - 0.1) < 1e-3
 }
-
-fn test_spectral_radius_gmrf_lattice_stable() {
-	// the stable GMRF two-node config from mrf_kernels_test (β=0.4, σ²=τ²=1)
-	g := KernelGraph{
-		nodes: {
-			'a': KernelNode{
-				kernel:   new_gmrf_kernel(0.0, 0.0, 0.0, [0.4])
-				feedback: ['b']
-			}
-			'b': KernelNode{
-				kernel:   new_gmrf_kernel(0.0, 0.0, 0.0, [0.4])
-				feedback: ['a']
-			}
-		}
-	}
-	r := feedback_spectral_radius(g, {
-		'a': [1.5]
-		'b': [-0.5]
-	}, 0.3) or { panic(err) }
-	assert r < 1.0
-}

@@ -20,63 +20,67 @@ import math
 import os
 import mlx
 import conger
-import vsl.plot
+import json2
 
 const class_names = ['setosa', 'versicolor', 'virginica']
 
-// plt_scatter 追加一组等大的 marker 散点。
-fn plt_scatter(mut p plot.Plot, xs []f64, ys []f64, name string, size f64) {
-	p.scatter(
-		x:      xs
-		y:      ys
-		mode:   'markers'
-		name:   name
-		marker: plot.Marker{
-			size: []f64{len: xs.len, init: size}
-		}
-	)
+// --- 自包含 plotly.js 可视化(替代 vsl.plot, 无第三方依赖) -------------------
+
+// scatter_trace 生成一组等大 marker 散点的 plotly trace JSON。
+fn scatter_trace(xs []f64, ys []f64, name string, size f64) string {
+	sizes := []f64{len: xs.len, init: size}
+	return '{"type":"scatter","mode":"markers","name":' + json2.encode(name) + ',"x":' +
+		json2.encode(xs) + ',"y":' + json2.encode(ys) + ',"marker":{"size":' + json2.encode(sizes) +
+		'}}'
 }
 
-// write_plot_html 把 vsl.plot 的 to_json 结果写成自包含 HTML(plotly.js 走
-// CDN), 与 plot.show() 的页面结构一致, 但不启动服务器也不打开浏览器。
-fn write_plot_html(path string, p plot.Plot) {
-	traces_json0, layout_json := p.to_json()
-	// vsl 的 ContourTrace 未暴露 showscale: 逐 contour trace 注入 showscale:false,
-	// 否则多条等高线会各带一个 colorbar, 互相重叠并压住图例
-	traces_json := traces_json0.replace('"type":"contour","trace":{',
-		'"type":"contour","trace":{"showscale":false,')
+// contour_trace 生成逐类似然等高线 trace JSON(showscale:false 直接写入,
+// 避免多条等高线各带一个 colorbar 互相重叠并压住图例)。
+fn contour_trace(xs []f64, ys []f64, z [][]f64, name string, colorscale string) string {
+	return '{"type":"contour","showscale":false,"name":' + json2.encode(name) + ',"colorscale":' +
+		json2.encode(colorscale) +
+		',"ncontours":6,"contours":{"coloring":"lines","showlabels":true},"x":' + json2.encode(xs) +
+		',"y":' + json2.encode(ys) + ',"z":' + json2.encode(z) + '}'
+}
+
+// heatmap_trace 生成后验热力图 trace JSON。
+fn heatmap_trace(z [][]f64, x []int, y []string) string {
+	return '{"type":"heatmap","z":' + json2.encode(z) + ',"x":' + json2.encode(x) + ',"y":' +
+		json2.encode(y) + '}'
+}
+
+// plot_layout 生成布局 JSON;xtitle/ytitle 为空则省略对应轴。
+fn plot_layout(title string, width int, height int, xtitle string, ytitle string) string {
+	mut s := '{"title":' + json2.encode(title) + ',"width":${width},"height":${height}'
+	if xtitle != '' {
+		s += ',"xaxis":{"title":' + json2.encode(xtitle) + '}'
+	}
+	if ytitle != '' {
+		s += ',"yaxis":{"title":' + json2.encode(ytitle) + '}'
+	}
+	return s + '}'
+}
+
+// write_plot_html 把 trace/layout JSON 写成自包含 HTML(plotly.js 走 CDN,
+// 不启动服务器也不打开浏览器)。
+fn write_plot_html(path string, traces []string, layout string) {
 	head := r'<!DOCTYPE html>
 <html>
-  <head><meta charset="utf-8"><title>VSL Plot</title></head>
+  <head><meta charset="utf-8"><title>conger plot</title></head>
   <body>
     <div id="gd"></div>
     <script type="module">
 import "https://cdn.plot.ly/plotly-2.26.2.min.js";
-function removeEmptyFieldsDeeply(obj) {
-    if (Array.isArray(obj)) { return obj.map(removeEmptyFieldsDeeply); }
-    if (typeof obj === "object" && obj !== null) {
-        const newObj = Object.fromEntries(
-        Object.entries(obj)
-            .map(([key, value]) => [key, removeEmptyFieldsDeeply(value)])
-            .filter(([_, value]) => value !== undefined && value !== null && value !== "")
-        );
-        return Object.keys(newObj).length > 0 ? newObj : undefined;
-    }
-    return obj;
-}
 const layout = '
 	mid := ';
-const traces_with_type_json = '
+const data = '
 	tail := ';
-const data = [...traces_with_type_json]
-    .map(({ type, trace: { CommonTrace, _type, ...trace } }) => ({ type, ...CommonTrace, ...trace }));
-const payload = { data: removeEmptyFieldsDeeply(data), layout: removeEmptyFieldsDeeply(layout) };
-Plotly.newPlot("gd", payload);
+Plotly.newPlot("gd", { data, layout });
     </script>
   </body>
 </html>
 '
-	os.write_file(path, head + layout_json + mid + traces_json + tail) or { panic(err) }
+	os.write_file(path, head + layout + mid + '[' + traces.join(',') + ']' + tail) or { panic(err) }
 }
 
 // 150 样本 × 4 特征(每行一个样本: 花萼长, 花萼宽, 花瓣长, 花瓣宽), 每 50 行为一个类。
@@ -390,10 +394,10 @@ fn main() {
 	println('模型结构 DAG 已写出: docs/iris_model_dag.mmd' +
 		'(探测样本=#${probe}, 展开责任度 top-3 分量)')
 
-	// == 可视化(vsl.plot → HTML, 写盘不弹浏览器) ==
+	// == 可视化(自包含 plotly.js JSON → HTML, 写盘不弹浏览器) ==
 	// V1: 测试样本在最有判别力的两个原始特征(花瓣长/宽)上的散点,
 	// 按真类着色, 错分样本大点高亮。
-	mut sp := plot.Plot.new()
+	mut sp_traces := []string{}
 	// V1-likelihood: 逐类似然等高线 p(x|class)。白化是线性可逆变换(本例
 	// D=4 全保留), 故每个分量在原始特征空间是全协方差高斯:
 	// μx = f_mean + f_mu·Bᵀ, Σx = B·diag(f_var)·Bᵀ; 高斯的边缘分布 =
@@ -471,18 +475,11 @@ fn main() {
 				zc[iy][ix] *= inv
 			}
 		}
-		sp.contour(
-			x:          xsg
-			y:          ysg
-			z:          zc
-			name:       'p(x|' + class_names[c] + ')'
-			colorscale: ['Blues', 'Oranges', 'Greens'][c]
-			ncontours:  6
-			contours:   plot.Contours{
-				coloring:   'lines'
-				showlabels: true
-			}
-		)
+		sp_traces << contour_trace(xsg, ysg, zc, 'p(x|' + class_names[c] + ')', [
+			'Blues',
+			'Oranges',
+			'Greens',
+		][c])
 	}
 	for c in 0 .. 3 {
 		mut xs := []f64{}
@@ -493,7 +490,7 @@ fn main() {
 				ys << test_f[i * 4 + 3]
 			}
 		}
-		plt_scatter(mut sp, xs, ys, class_names[c], 8.0)
+		sp_traces << scatter_trace(xs, ys, class_names[c], 8.0)
 	}
 	mut mxs := []f64{}
 	mut mys := []f64{}
@@ -504,27 +501,12 @@ fn main() {
 		}
 	}
 	if mxs.len > 0 {
-		plt_scatter(mut sp, mxs, mys, '错分样本', 16.0)
+		sp_traces << scatter_trace(mxs, mys, '错分样本', 16.0)
 	}
-	sp.layout(
-		title:  'Iris 测试集: 花瓣长 × 花瓣宽(按真类着色)'
-		width:  720
-		height: 560
-		xaxis:  plot.Axis{
-			title: plot.AxisTitle{
-				text: '花瓣长 (cm)'
-			}
-		}
-		yaxis:  plot.Axis{
-			title: plot.AxisTitle{
-				text: '花瓣宽 (cm)'
-			}
-		}
-	)
-	write_plot_html('docs/iris_scatter.html', sp)
+	write_plot_html('docs/iris_scatter.html', sp_traces, plot_layout('Iris 测试集: 花瓣长 × 花瓣宽(按真类着色)',
+		720, 560, '花瓣长 (cm)', '花瓣宽 (cm)'))
 
 	// V2: 后验 P(class|x) 热力图(3 类 × 30 测试样本)。
-	mut hp := plot.Plot.new()
 	mut z := [][]f64{len: 3, init: []f64{len: test_y.len}}
 	for c in 0 .. 3 {
 		for i in 0 .. test_y.len {
@@ -532,22 +514,11 @@ fn main() {
 		}
 	}
 	mut xidx := []int{len: test_y.len, init: index}
-	hp.heatmap(
-		z: z
-		x: xidx
-		y: class_names
-	)
-	hp.layout(
-		title:  'predict 后验 P(class|x)(逐测试样本)'
-		width:  900
-		height: 420
-		xaxis:  plot.Axis{
-			title: plot.AxisTitle{
-				text: '测试样本编号'
-			}
-		}
-	)
-	write_plot_html('docs/iris_posterior_heatmap.html', hp)
+	write_plot_html('docs/iris_posterior_heatmap.html', [
+		heatmap_trace(z, xidx, class_names),
+	],
+		plot_layout('predict 后验 P(class|x)(逐测试样本)', 900, 420, '测试样本编号',
+		''))
 	println('可视化已写出: docs/iris_scatter.html · docs/iris_posterior_heatmap.html')
 
 	// 注: 本例对应 docs/architecture.md 主管线的两步 —— A. 训练
