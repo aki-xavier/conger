@@ -1,0 +1,26 @@
+flowchart LR
+    subgraph IN["输入 · KernelContext(每一步求值注入一次)"]
+        OBS["obs: []f64<br/>外部观测 — run_recurrent 的 obs[t] 按节点名路由<br/>(无路由则空)"]
+        FEED["feed: []f64<br/>前馈父节点【当前步】输出按 parents 声明序拼接"]
+        BACK["back: []f64<br/>反馈父节点【上一步】输出按 feedback 声明序拼接<br/>(t = 0 时按父 out_dim 填零)"]
+        TT["t: int<br/>步索引(t = 0 用于核内状态初始化)"]
+    end
+    subgraph K["LikelihoodKernel 内部(接口仅两个方法)"]
+        P["参数·构造期校验<br/>Gaussian: μ, log_var<br/>CondGaussian: W, bias, log_var<br/>MixtureSPN: 白化基 + 分量表"]
+        S["step(ctx) 计算<br/>闭式打分 / 线性读入 /<br/>白化投影 + logsumexp"]
+        O["out_dim()<br/>声明输出宽度(契约校验)"]
+        P --> S
+    end
+    subgraph OUT["输出 · []f64(定宽 = out_dim)"]
+        O0["slot 0: 标量分数<br/>对数似然 / 条件目标"]
+        O1["slot 1+: 后验消息<br/>E[x|·] / 责任度 / 逐类 logit<br/>(驱动下游核的 EM 迭代)"]
+    end
+    OBS --> S
+    FEED --> S
+    BACK --> S
+    TT --> S
+    S --> O0
+    S --> O1
+    O0 & O1 --> NEXT["下游节点的 feed(当步)<br/>与下一步的 back(时滞一步)"]
+    IN ~~~ K
+    K ~~~ OUT

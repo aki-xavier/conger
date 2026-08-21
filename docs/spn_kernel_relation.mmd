@@ -1,0 +1,28 @@
+flowchart TB
+    X["观测 x<br/>(obs[t] 按节点名路由)"] --> NET
+
+    subgraph NET["层① 似然核网络 KernelGraph<br/>—— 组合与迭代推理(可成环)"]
+        direction TB
+        A["核 A(前馈父: 核 B)"] --> C["核 C(条件化 A)"]
+        A -. 反馈(上一步) .-> A
+        RUN["run_recurrent<br/>topo_order + 时滞一步"] -. 驱动 .-> A
+        B["核 B"] --> A
+    end
+
+    subgraph L2["层② 单个 LikelihoodKernel<br/>—— 协议契约"]
+        S["step(ctx) → []f64<br/>[标量分数, 后验消息]"]
+    end
+
+    subgraph L3["层③ SPN 和节点(单个核内部)<br/>—— 混合 / 边际化"]
+        SUM["logsumexp Σ_k<br/>MixtureSPN 混合根(单次精确前向)"]
+    end
+
+    subgraph L4["层④ 乘积节点 · 叶<br/>—— 作用域分划"]
+        PR["白化对角高斯叶"]
+        CAT["离散场景因子叶<br/>(条件后验分类)"]
+    end
+
+    NET --> L2
+    L2 --> L3
+    L3 --> PR
+    L3 --> CAT
